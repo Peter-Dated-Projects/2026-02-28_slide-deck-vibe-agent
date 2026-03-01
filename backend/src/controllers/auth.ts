@@ -2,7 +2,7 @@ import type { Request, Response } from 'express';
 import { OAuth2Client } from 'google-auth-library';
 import jwt from 'jsonwebtoken';
 import { config } from '../config';
-import * as db from '../db';
+import { dbService as db } from '../core/container';
 import crypto from 'crypto';
 
 const client = new OAuth2Client(config.auth.googleClientId);

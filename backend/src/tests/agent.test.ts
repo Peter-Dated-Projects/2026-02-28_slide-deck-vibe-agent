@@ -1,24 +1,18 @@
-import { tools, processToolCall } from '../services/agent';
+import { processToolCall } from '../services/agent';
+import { llmService } from '../core/container';
 
-jest.mock('../db', () => ({
-    query: jest.fn().mockResolvedValue({ rows: [] }),
-}));
-
-jest.mock('../services/storage', () => ({
-    storageService: {
-        uploadFile: jest.fn().mockResolvedValue({}),
+jest.mock('../core/container', () => ({
+    llmService: {
+        processToolCall: jest.fn().mockResolvedValue({
+            type: 'tool_result',
+            tool_use_id: 'call_123'
+        }),
+        chatWithAgent: jest.fn()
     }
 }));
 
 describe('Agent Services', () => {
-
-    it('should export correct tool declarations', () => {
-        expect(tools.length).toBe(2);
-        expect(tools[0].name).toBe('generate_slide_component');
-        expect(tools[1].name).toBe('finalize_presentation_theme');
-    });
-
-    it('should process generate_slide_component correctly', async () => {
+    it('should proxy process_tool_call correctly', async () => {
         const mockCall = {
             id: 'call_123',
             name: 'generate_slide_component',
@@ -33,5 +27,6 @@ describe('Agent Services', () => {
         
         expect(result.type).toBe('tool_result');
         expect(result.tool_use_id).toBe('call_123');
+        expect(llmService.processToolCall).toHaveBeenCalledWith(mockCall, 'conv_123');
     });
 });

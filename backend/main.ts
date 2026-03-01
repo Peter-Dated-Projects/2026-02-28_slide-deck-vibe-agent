@@ -3,7 +3,7 @@ import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import * as authController from './src/controllers/auth';
 import { requireAuth, AuthRequest } from './src/middleware/auth';
-import * as db from './src/db';
+import { dbService as db } from './src/core/container';
 import { chatWithAgent, processToolCall } from './src/services/agent';
 import { config } from './src/config';
 
