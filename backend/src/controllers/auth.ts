@@ -40,18 +40,42 @@ export const googleAuth = async (req: Request, res: Response): Promise<void> => 
     const profile_picture = payload.picture || null;
 
     // Find or create user
-    const userResult = await db.query('SELECT id, email, name, profile_picture, settings FROM users WHERE google_id = $1 OR email = $2', [googleId, email]);
+    const userResult = await db.query('SELECT id, email, name, first_name, last_name, phone, field, is_profile_complete, profile_picture, settings, created_at, age FROM users WHERE google_id = $1 OR email = $2', [googleId, email]);
     let user;
 
     if (userResult.rows?.length > 0) {
         user = userResult.rows[0];
-        // update google id if they signed up with email first (if we had email signup)
-        if (!user.google_id) {
-             await db.query('UPDATE users SET google_id = $1, name = $2, profile_picture = $3 WHERE id = $4', [googleId, name, profile_picture, user.id]);
+        
+        // Check for stale abandoned setup session
+        if (!user.is_profile_complete) {
+            const createdAt = new Date(user.created_at).getTime();
+            const now = Date.now();
+            const timeDiffMinutes = (now - createdAt) / (1000 * 60);
+
+            if (timeDiffMinutes > 2) {
+                // Delete stale record and recreate
+                await db.query('DELETE FROM users WHERE id = $1', [user.id]);
+                
+                const insertResult = await db.query(
+                    'INSERT INTO users (email, google_id, name, profile_picture) VALUES ($1, $2, $3, $4) RETURNING id, email, name, first_name, last_name, phone, field, is_profile_complete, profile_picture, settings, created_at, age',
+                    [email, googleId, name, profile_picture]
+                );
+                user = insertResult.rows[0];
+            } else {
+                 // update google id if they signed up with email first (if we had email signup)
+                 if (!user.google_id) {
+                     await db.query('UPDATE users SET google_id = $1, name = $2, profile_picture = $3 WHERE id = $4', [googleId, name, profile_picture, user.id]);
+                 }
+            }
+        } else {
+            // update google id if they signed up with email first (if we had email signup)
+            if (!user.google_id) {
+                 await db.query('UPDATE users SET google_id = $1, name = $2, profile_picture = $3 WHERE id = $4', [googleId, name, profile_picture, user.id]);
+            }
         }
     } else {
         const insertResult = await db.query(
-            'INSERT INTO users (email, google_id, name, profile_picture) VALUES ($1, $2, $3, $4) RETURNING id, email, name, profile_picture, settings, created_at, age',
+            'INSERT INTO users (email, google_id, name, profile_picture) VALUES ($1, $2, $3, $4) RETURNING id, email, name, first_name, last_name, phone, field, is_profile_complete, profile_picture, settings, created_at, age',
             [email, googleId, name, profile_picture]
         );
         user = insertResult.rows[0];
@@ -84,6 +108,11 @@ export const googleAuth = async (req: Request, res: Response): Promise<void> => 
             id: user.id,
             email: user.email,
             name: user.name,
+            first_name: user.first_name,
+            last_name: user.last_name,
+            phone: user.phone,
+            field: user.field,
+            is_profile_complete: user.is_profile_complete,
             profile_picture: user.profile_picture,
             settings: user.settings,
             age: user.age,
