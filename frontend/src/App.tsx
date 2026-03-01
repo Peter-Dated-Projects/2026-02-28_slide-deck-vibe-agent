@@ -4,6 +4,11 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import LoginPage from './pages/LoginPage';
 import ChatPage from './pages/ChatPage';
 import SetupProfilePage from './pages/SetupProfilePage';
+import { DashboardLayout } from './components/layout/DashboardLayout';
+import ProjectsPage from './pages/dashboard/ProjectsPage';
+import TemplatesPage from './pages/dashboard/TemplatesPage';
+import SettingsPage from './pages/dashboard/SettingsPage';
+import ProfilePage from './pages/dashboard/ProfilePage';
 
 const ProtectedRoute = ({ children, requireProfile = true }: { children: React.ReactNode, requireProfile?: boolean }) => {
   const { isAuthenticated, isLoading, user } = useAuth();
@@ -37,7 +42,7 @@ const ProfileSetupRoute = ({ children }: { children: React.ReactNode }) => {
   }
   
   if (user && user.is_profile_complete) {
-    return <Navigate to="/chat" replace />;
+    return <Navigate to="/dashboard/projects" replace />;
   }
   
   return <>{children}</>;
@@ -58,6 +63,20 @@ function App() {
             } 
           />
           <Route 
+            path="/dashboard" 
+            element={
+              <ProtectedRoute>
+                <DashboardLayout />
+              </ProtectedRoute>
+            }
+          >
+            <Route index element={<Navigate to="/dashboard/projects" replace />} />
+            <Route path="projects" element={<ProjectsPage />} />
+            <Route path="templates" element={<TemplatesPage />} />
+            <Route path="settings" element={<SettingsPage />} />
+            <Route path="profile" element={<ProfilePage />} />
+          </Route>
+          <Route 
             path="/chat/:conversationId?" 
             element={
               <ProtectedRoute>
@@ -65,7 +84,7 @@ function App() {
               </ProtectedRoute>
             } 
           />
-          <Route path="/" element={<Navigate to="/chat" replace />} />
+          <Route path="/" element={<Navigate to="/dashboard/projects" replace />} />
         </Routes>
       </BrowserRouter>
     </AuthProvider>
