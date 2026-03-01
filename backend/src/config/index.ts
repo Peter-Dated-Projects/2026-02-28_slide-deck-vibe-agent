@@ -13,14 +13,23 @@ if (nodeEnv !== 'production') {
     dotenv.config({ path: envPath });
 }
 
+const requireEnv = (key: string): string => {
+    const value = process.env[key];
+    if (!value) {
+        console.error(`Missing required environment variable: ${key}`);
+        process.exit(1);
+    }
+    return value;
+};
+
 export const config = {
   port: process.env.PORT || 3001,
   db: {
-    host: process.env.DB_HOST || 'localhost',
-    port: parseInt(process.env.DB_PORT || '5432', 10),
-    user: process.env.DB_USER || 'vibe',
-    password: process.env.DB_PASSWORD || 'vibe_password',
-    database: process.env.DB_NAME || 'vibe_db',
+    host: requireEnv('DB_HOST'),
+    port: parseInt(requireEnv('DB_PORT'), 10),
+    user: requireEnv('DB_USER'),
+    password: requireEnv('DB_PASSWORD'),
+    database: requireEnv('DB_NAME'),
   },
   s3: {
     endpoint: process.env.S3_ENDPOINT || 'http://localhost:9000',

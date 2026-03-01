@@ -5,16 +5,16 @@ services:
     image: postgres:16-alpine
     container_name: vibe_db
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-vibe}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-vibe_password}
-      POSTGRES_DB: ${POSTGRES_DB:-vibe_db}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
     ports:
       - "5432:5432"
     volumes:
       - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-vibe} -d ${POSTGRES_DB:-vibe_db}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 5
