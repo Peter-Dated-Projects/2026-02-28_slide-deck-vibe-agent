@@ -34,19 +34,19 @@ All color tokens use **raw HSL values** (no `hsl()` wrapper) — the wrapper is 
 | `--card-foreground`      | `0 0% 20%`        | Dark gray       | Text on cards                      |
 | `--popover`              | `0 0% 100%`       | White           | Popover/dropdown surfaces          |
 | `--popover-foreground`   | `0 0% 20%`        | Dark gray       | Text in popovers                   |
-| `--primary`              | `122 56% 66%`     | **Green**       | Primary actions, header bg, focus rings |
+| `--primary`              | `311 100% 28%`    | **Purple**      | Primary actions, header bg, focus rings |
 | `--primary-foreground`   | `0 0% 100%`       | White           | Text on primary surfaces           |
 | `--secondary`            | `0 0% 96%`        | Light gray      | Secondary elements                 |
 | `--secondary-foreground` | `0 0% 20%`        | Dark gray       | Text on secondary                  |
 | `--muted`                | `0 0% 96%`        | Light gray      | Muted backgrounds, hover states    |
 | `--muted-foreground`     | `0 0% 45%`        | Medium gray     | Subdued text, labels, metadata     |
-| `--accent`               | `122 56% 50%`     | Darker green    | Accent highlights                  |
+| `--accent`               | `311 100% 20%`    | Darker purple   | Accent highlights                  |
 | `--accent-foreground`    | `0 0% 100%`       | White           | Text on accent                     |
 | `--destructive`          | `0 84.2% 60.2%`   | **Red**         | Destructive actions, errors        |
 | `--destructive-foreground`| `0 0% 98%`       | Near-white      | Text on destructive                |
 | `--border`               | `0 0% 90%`        | Light gray      | Borders (applied globally via `*`) |
 | `--input`                | `0 0% 90%`        | Light gray      | Input borders                      |
-| `--ring`                 | `122 56% 66%`     | Green           | Focus ring color                   |
+| `--ring`                 | `311 100% 28%`    | Purple          | Focus ring color                   |
 
 ### 2.2 Spacing & Shape Tokens
 
@@ -125,209 +125,83 @@ These colors appear directly in component classes, outside the token system:
 
 ## 6. Component Catalog & Class Patterns
 
-### 6.1 Layout Shell (`Layout.tsx`)
+### 6.1 Layout Shell (`App.tsx`)
 
 ```
-Root:          min-h-screen bg-background
-Header:        sticky top-0 z-40 bg-primary/95 backdrop-blur
-               supports-[backdrop-filter]:bg-primary/80
-Header Inner:  mx-auto flex flex-col gap-3 px-4 py-3
-               md:flex-row md:items-center md:justify-between md:py-4
-Title:         text-2xl font-bold text-black md:text-3xl
-Subtitle:      text-sm text-slate-800 md:text-base
-Nav Link:      inline-flex items-center gap-1.5 rounded-md border px-3 py-2
-               text-sm font-medium transition-colors
-  Active:      border-black/20 bg-black/10 text-black
-  Inactive:    border-primary-foreground/30 bg-transparent
-               text-secondary-foreground hover:bg-primary-foreground/20
-Main Content:  mx-auto max-w-7xl px-4 py-6
+Root:          h-screen w-screen flex bg-background text-foreground overflow-hidden font-sans
+Loading state: h-screen w-screen flex items-center justify-center bg-background text-foreground
 ```
 
-### 6.2 Product Card (`ProductCard.tsx`)
+### 6.2 Authentication (`LoginPage.tsx`)
 
 ```
-Card Link:     group flex h-[340px] flex-col overflow-hidden rounded-lg border
-               bg-card text-card-foreground shadow-card transition-all duration-200
-               hover:shadow-card-hover
-Image Zone:    relative flex h-40 items-center justify-center overflow-hidden bg-muted
-  Placeholder: h-12 w-12 text-muted-foreground/40  (Package icon)
-Status Badge:  absolute right-2 top-2 rounded-full px-2 py-0.5 text-xs font-semibold
-  active:      bg-emerald-100 text-emerald-800
-  draft:       bg-amber-100 text-amber-800
-  archived:    bg-gray-200 text-gray-600
-Variant Badge: absolute bottom-2 left-1/2 -translate-x-1/2 rounded-full
-               bg-background/80 px-3 py-1 text-xs font-medium backdrop-blur
-Content Area:  flex flex-1 flex-col p-4
-Category:      mb-1 flex items-center gap-1 text-xs text-muted-foreground
-Name (h3):    line-clamp-2 text-base font-bold leading-tight text-foreground
-Price:         mt-1 text-sm text-muted-foreground
-Inventory:     inline-flex items-center rounded-full border px-2.5 py-0.5
-               text-xs font-semibold
-  Out-of-stock: border-destructive/30 bg-destructive/10 text-destructive
-  Low-stock:    border-amber-300/50 bg-amber-50 text-amber-700
-  In-stock:     border text-muted-foreground
-View Button:   inline-flex items-center gap-1 rounded-md border px-2.5 py-1
-               text-xs font-medium text-muted-foreground transition-colors
-               group-hover:border-foreground/30 group-hover:text-foreground
+Page Wrapper:  min-h-screen bg-background flex flex-col justify-center py-12 sm:px-6 lg:px-8 relative overflow-hidden
+Backgrounds:   absolute top-0 left-1/2 -translate-x-1/2 w-[1000px] h-[500px] bg-primary/20 rounded-full blur-[120px] pointer-events-none (top)
+               absolute bottom-0 right-0 w-[600px] h-[400px] bg-primary/10 rounded-full blur-[100px] pointer-events-none (bottom)
+Logo Icon:     bg-primary/10 p-4 rounded-2xl border border-primary/20
+Logo text:     text-center text-4xl font-extrabold text-foreground tracking-tight
+Subtext:       text-center text-muted-foreground max-w-sm mx-auto
+Login Card:    bg-card/50 backdrop-blur-xl py-12 px-4 shadow-card rounded-2xl sm:px-10 border border-border mx-4 sm:mx-0
+Card title:    text-xl font-semibold text-card-foreground
+Card subtext:  text-sm text-muted-foreground
 ```
 
-### 6.3 Product Grid (`ProductsPage.tsx`)
+### 6.3 Chat Interface (`ChatPage.tsx` - Left Panel)
 
 ```
-Product Grid:  grid grid-cols-1 gap-6 sm:grid-cols-2 md:grid-cols-3
-               lg:grid-cols-4 xl:grid-cols-5
-Filter Bar:    mb-6 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:gap-4
-Search Input:  flex h-10 w-full rounded-md border border-input bg-background
-               px-3 py-2 pl-9 text-sm ring-offset-background
-               placeholder:text-muted-foreground focus-visible:outline-none
-               focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2
-Select:        flex h-10 w-full items-center rounded-md border border-input
-               bg-background px-3 py-2 text-sm (same focus ring as input)
-Clear Button:  inline-flex h-10 items-center gap-1.5 rounded-md border border-input
-               bg-background px-3 text-sm font-medium transition-colors hover:bg-muted
-Result Count:  mb-4 text-sm text-muted-foreground
-Empty State:   flex flex-col items-center justify-center py-20 text-muted-foreground
+Sidebar Wrapper: w-1/3 min-w-[350px] max-w-lg border-r border-border flex flex-col bg-card/50 backdrop-blur-3xl z-10 relative shadow-card
+Header:          h-16 border-b border-border flex items-center justify-between px-6 shrink-0 bg-muted/50
+Logo Box:        w-8 h-8 rounded-lg bg-primary/20 flex items-center justify-center border border-primary/30
+Header Title:    font-semibold text-foreground tracking-wide
+Header Action:   text-muted-foreground hover:text-foreground transition-colors p-2 rounded-lg hover:bg-muted flex items-center gap-2
+Chat Area:       flex-1 overflow-y-auto p-6 space-y-6 scroll-smooth custom-scrollbar
+Empty State:     h-full flex flex-col items-center justify-center text-center space-y-4 text-muted-foreground mt-12
+Sparkle Box:     w-16 h-16 rounded-2xl bg-muted flex items-center justify-center border border-border
+Message User:    bg-primary text-primary-foreground rounded-tr-sm shadow-card shadow-sm (max-w-[85%] rounded-2xl px-5 py-3.5 mt-2)
+Message Agent:   bg-surface text-foreground rounded-tl-sm border border-border (same wrapper classes)
+Message Text:    text-[15px] leading-relaxed whitespace-pre-wrap
+Loading Ind.:    bg-surface rounded-2xl rounded-tl-sm px-5 py-4 border border-border flex items-center gap-3
+Input Area:      p-4 bg-card border-t border-border shrink-0
+Input Box:       w-full bg-background border border-border rounded-xl pl-4 pr-12 py-3.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 transition-all placeholder:text-muted-foreground
+Submit Btn:      absolute right-2 p-2 bg-primary hover:bg-primary/90 text-primary-foreground rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed
+Notice Text:     text-[10px] text-center text-muted-foreground mt-3
 ```
 
-### 6.4 Data Tables (`CategoriesPage.tsx`, `ProductDetailPage.tsx`)
+### 6.4 Slide Canvas (`ChatPage.tsx` - Right Panel)
 
 ```
-Table Wrapper: overflow-hidden rounded-lg border bg-card shadow-card
-Table:         w-full caption-bottom text-sm
-Thead Row:     border-b bg-muted/50 transition-colors
-               [&_tr]:border-b  (on thead)
-Th:            h-12 px-4 text-left align-middle text-xs font-medium uppercase
-               tracking-wider text-muted-foreground
-  Right align: text-right
-Tbody:         [&_tr:last-child]:border-0
-Td:            p-4 align-middle
-  Font-mono:   font-mono text-xs  (for SKUs)
-  Font-medium: font-medium  (for names)
-  Numeric:     text-right tabular-nums
-Row Hover:     border-b transition-colors hover:bg-muted/50
-Editing Row:   border-b bg-muted/30 transition-colors
-Error Row:     border-b bg-destructive/5
+Canvas Wrapper: flex-1 relative bg-muted flex flex-col items-center justify-center overflow-hidden
+Background:     absolute inset-0 opacity-20 pointer-events-none (with radial gradient)
+Empty State:    flex flex-col items-center justify-center text-muted-foreground space-y-4
+Empty Icon:     w-16 h-16 opacity-30
+Empty Text:     text-xl font-medium tracking-wide
+Carousel Wrap:  relative w-full h-full p-12 lg:p-24 flex items-center justify-center
+Slide Box:      w-full max-w-6xl aspect-video relative
+Card (Active):  absolute inset-0 transition-all duration-700 ease-[cubic-bezier(0.23,1,0.32,1)] opacity-100 translate-x-0 z-10
+Card (Prev):    opacity-0 -translate-x-full z-0
+Card (Next):    opacity-0 translate-x-full z-0
+Controls Wrap:  absolute bottom-12 flex items-center gap-6 bg-card/80 backdrop-blur-xl border border-border px-6 py-3 rounded-full shadow-card z-20
+Control Btn:    p-2 text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors
+Dot Active:     h-1.5 rounded-full transition-all duration-300 w-6 bg-primary
+Dot Inactive:   w-1.5 bg-muted-foreground/30 hover:bg-muted-foreground/60
 ```
 
-### 6.5 Inline Edit Inputs (Variant Row)
+### 6.5 Settings Modal (`ChatPage.tsx`)
 
 ```
-SKU Input:     w-32 rounded border border-input bg-background px-2 py-1
-               font-mono text-xs focus:outline-none focus:ring-1 focus:ring-ring
-Name Input:    w-36 rounded border border-input bg-background px-2 py-1
-               text-sm font-medium focus:outline-none focus:ring-1 focus:ring-ring
-Price Input:   w-24 rounded border border-input bg-background px-2 py-1
-               text-right text-sm tabular-nums (same focus ring)
-Inventory Input: w-20 rounded border border-input bg-background px-2 py-1
-               text-right text-sm tabular-nums (same focus ring)
-Save Button:   inline-flex items-center gap-1 rounded-md border border-emerald-300
-               bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700
-               transition-colors hover:bg-emerald-100 disabled:opacity-50
-Cancel Button: inline-flex items-center gap-1 rounded-md border px-2.5 py-1
-               text-xs font-medium text-muted-foreground transition-colors
-               hover:bg-muted hover:text-foreground disabled:opacity-50
-```
-
-### 6.6 Form Cards (`CreateProductPage.tsx`)
-
-```
-Page Wrapper:  mx-auto max-w-4xl pb-16
-Section Card:  rounded-xl border border-divider bg-card p-6 shadow-sm
-Section Title: mb-4 text-lg font-semibold text-foreground
-Form Grid:     grid gap-6 md:grid-cols-2
-Label:         text-sm font-medium text-foreground
-Small Label:   text-xs font-medium text-muted-foreground
-Text Input:    w-full rounded-md border border-divider bg-background
-               px-3 py-2 text-sm text-foreground
-               focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary
-Textarea:      (same as text input pattern, rows=3)
-Select:        (same as text input pattern)
-Variant Card:  grid gap-4 rounded-lg border border-divider bg-background p-4
-               sm:grid-cols-5
-Error Banner:  mb-6 rounded-md bg-destructive/10 p-4 text-sm text-destructive
-Add Variant:   mt-4 flex items-center gap-2 rounded-md
-               border border-dashed border-divider bg-background px-4 py-2
-               text-sm font-medium text-foreground transition-colors
-               hover:border-primary hover:text-primary
-Submit Button: flex items-center gap-2 rounded-md bg-primary px-4 py-2
-               text-sm font-medium text-primary-foreground transition-colors
-               hover:bg-primary/90 disabled:opacity-50
-Cancel Link:   rounded-md border border-divider bg-background px-4 py-2
-               text-sm font-medium text-foreground transition-colors hover:bg-muted
-```
-
-### 6.7 Modals
-
-#### Confirm Delete Modal (`ConfirmDeleteModal.tsx`)
-
-```
-Backdrop:      fixed inset-0 z-50 bg-black/50 transition-opacity
-Container:     fixed left-1/2 top-1/2 z-50 w-full max-w-md
-               -translate-x-1/2 -translate-y-1/2 p-4
-Panel:         relative flex w-full flex-col overflow-hidden rounded-lg
-               border bg-background text-left align-middle shadow-xl transition-all
-Close Button:  absolute right-4 top-4 rounded-sm opacity-70
-               ring-offset-background transition-opacity hover:opacity-100
-               focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2
-               disabled:pointer-events-none
-               data-[state=open]:bg-accent data-[state=open]:text-muted-foreground
-Icon Circle:   flex h-10 w-10 flex-shrink-0 items-center justify-center
-               rounded-full bg-destructive/10 text-destructive
-Title:         text-lg font-semibold leading-none tracking-tight
-Description:   mt-2 text-sm text-muted-foreground
-Footer:        flex flex-col-reverse justify-end gap-2 bg-muted/40 p-4
-               sm:flex-row sm:items-center
-Cancel Button: inline-flex h-10 items-center justify-center rounded-md
-               border border-input bg-background px-4 py-2 text-sm font-medium
-               transition-colors hover:bg-accent hover:text-accent-foreground
-               focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring
-               focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50
-Delete Button: inline-flex h-10 items-center justify-center rounded-md
-               bg-destructive px-4 py-2 text-sm font-medium text-destructive-foreground
-               transition-colors hover:bg-destructive/90
-               (same focus-visible & disabled patterns)
-```
-
-#### Page Error / Success Modal (`PageErrorModal.tsx`)
-
-```
-Backdrop:      fixed inset-0 z-50 flex items-center justify-center bg-black/40
-Panel:         relative mx-4 w-full max-w-sm rounded-md border bg-card p-6 shadow-xl
-Close Button:  absolute right-3 top-3 rounded-md p-1 text-muted-foreground
-               transition-colors hover:bg-muted hover:text-foreground
-Error Icon:    mb-4 flex h-12 w-12 items-center justify-center rounded-full
-               bg-destructive/10   (AlertTriangle, text-destructive)
-Success Icon:  mb-4 flex h-12 w-12 items-center justify-center rounded-full
-               bg-emerald-100      (CheckCircle, text-emerald-600)
-Title:         text-base font-semibold text-foreground
-Message:       mt-1.5 text-sm text-muted-foreground
-Countdown:     text-xs text-muted-foreground
-               -> number span: tabular-nums text-foreground font-medium
-CTA Button:    ml-auto inline-flex items-center gap-1.5 rounded-md
-               bg-[#2E3330] px-4 py-2 text-sm font-medium text-white
-               transition-colors hover:bg-[#3a3f3c]
-```
-
-### 6.8 Product Not Found Page (`ProductNotFoundPage.tsx`)
-
-```
-Container:     flex flex-col items-center justify-center py-24 text-center
-Icon Circle:   mb-6 flex h-20 w-20 items-center justify-center rounded-full bg-muted
-               (PackageSearch, h-10 w-10 text-muted-foreground)
-Heading:       text-2xl font-bold tracking-tight text-foreground
-Subtext:       mt-2 max-w-sm text-sm text-muted-foreground
-Countdown:     mt-4 text-sm font-medium text-muted-foreground
-               -> number: tabular-nums text-foreground
-CTA Link:      mt-6 inline-flex h-10 items-center gap-2 rounded-md
-               bg-[#2E3330] px-5 text-sm font-medium text-white shadow-sm
-               transition-colors hover:bg-[#3a3f3c]
-```
-
-### 6.9 Loading Spinner
-
-```
-spinner: h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent
-wrapper: flex items-center justify-center py-20
+Modal Wrapper: absolute top-12 right-0 w-80 bg-card border border-border rounded-xl shadow-card p-6 z-50 animate-in fade-in slide-in-from-top-2
+Header:        flex justify-between items-start mb-4
+Title:         text-lg font-semibold text-foreground
+Close Btn:     text-muted-foreground hover:text-foreground
+Profile Pic:   w-12 h-12 rounded-full border border-border
+Profile Alt:   w-12 h-12 rounded-full bg-primary flex items-center justify-center text-lg text-primary-foreground font-bold shadow-sm
+Name:          text-[15px] font-medium text-foreground
+Email:         text-[13px] text-muted-foreground
+Info Box:      space-y-3 mb-6 bg-muted/20 rounded-lg p-3 border border-border
+Info Label:    text-[13px] text-muted-foreground
+Info Value:    text-[13px] text-foreground
+Action Row:    w-full flex items-center justify-center gap-2 bg-muted hover:bg-muted/80 text-foreground py-2.5 rounded-lg transition-colors text-sm font-medium border border-border
+Delete Row:    w-full flex items-center justify-center gap-2 bg-destructive/10 hover:bg-destructive/20 text-destructive py-2.5 rounded-lg transition-colors text-sm font-medium border border-destructive/20 disabled:opacity-50
 ```
 
 ---

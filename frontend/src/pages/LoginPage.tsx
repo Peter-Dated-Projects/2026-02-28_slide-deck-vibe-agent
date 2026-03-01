@@ -17,14 +17,12 @@ const LoginPage: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-background flex flex-col justify-center py-12 sm:px-6 lg:px-8 relative overflow-hidden">
-        {/* Background Gradients */}
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[1000px] h-[500px] bg-primary/20 rounded-full blur-[120px] pointer-events-none" />
-        <div className="absolute bottom-0 right-0 w-[600px] h-[400px] bg-primary/10 rounded-full blur-[100px] pointer-events-none" />
+        {/* Background Gradients Removed per user request */}
 
       <div className="sm:mx-auto sm:w-full sm:max-w-md relative z-10">
         <div className="flex justify-center mb-6">
             <div className="bg-primary/10 p-4 rounded-2xl border border-primary/20">
-               <Sparkles className="w-12 h-12 text-primary" />
+               <Sparkles className="w-12 h-12 text-primary fill-primary" />
             </div>
         </div>
         <h2 className="mt-2 text-center text-4xl font-extrabold text-foreground tracking-tight">
