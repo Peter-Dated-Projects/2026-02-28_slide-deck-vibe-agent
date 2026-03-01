@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../api';
 import { SlideRenderer, type SlideData } from '../components/SlideRenderer';
-import { Send, Loader2, LogOut, ChevronLeft, ChevronRight, Presentation } from 'lucide-react';
+import { Send, Loader2, LogOut, ChevronLeft, ChevronRight, Presentation, Settings, Trash2, CreditCard, X } from 'lucide-react';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -20,6 +20,8 @@ const ChatPage: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [slides, setSlides] = useState<SlideData[]>([]);
   const [currentSlideIndex, setCurrentSlideIndex] = useState(0);
+  const [showSettings, setShowSettings] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -128,6 +130,19 @@ const ChatPage: React.FC = () => {
   const nextSlide = () => setCurrentSlideIndex(prev => Math.min(prev + 1, slides.length - 1));
   const prevSlide = () => setCurrentSlideIndex(prev => Math.max(prev - 1, 0));
 
+  const handleDeleteAccount = async () => {
+    if (!window.confirm('Are you certain you want to delete your account? This action cannot be undone.')) return;
+    setIsDeleting(true);
+    try {
+      await api.delete('/user/me');
+      logout();
+    } catch (err) {
+      console.error('Failed to delete account', err);
+      alert('Failed to delete account');
+      setIsDeleting(false);
+    }
+  };
+
   return (
     <div className="h-screen w-screen flex bg-zinc-950 text-slate-200 overflow-hidden font-sans">
       
@@ -147,13 +162,30 @@ const ChatPage: React.FC = () => {
                <span className="font-semibold text-white tracking-wide">Vibe Agent</span>
             </div>
             
-            <button 
-                onClick={logout}
-                className="text-zinc-400 hover:text-white transition-colors p-2 rounded-lg hover:bg-white/5"
-                title="Logout"
-            >
-                <LogOut className="w-4 h-4" />
-            </button>
+            <div className="relative flex items-center gap-2">
+                <button 
+                  onClick={() => setShowSettings(!showSettings)}
+                  className="text-zinc-400 hover:text-white transition-colors p-2 rounded-lg hover:bg-white/5 flex items-center gap-2"
+                  title="Settings"
+                >
+                  {user?.profile_picture ? (
+                    <img src={user.profile_picture} alt="Profile" className="w-6 h-6 rounded-full" />
+                  ) : (
+                    <div className="w-6 h-6 rounded-full bg-indigo-500 flex items-center justify-center text-[10px] text-white font-bold">
+                        {user?.name?.charAt(0) || user?.email?.charAt(0) || 'U'}
+                    </div>
+                  )}
+                </button>
+                <button 
+                    onClick={logout}
+                    className="text-zinc-400 hover:text-white transition-colors p-2 rounded-lg hover:bg-white/5"
+                    title="Logout"
+                >
+                    <LogOut className="w-4 h-4" />
+                </button>
+
+                {showSettings && renderSettingsModal()}
+            </div>
         </div>
 
         {/* Message History */}
@@ -294,6 +326,64 @@ const ChatPage: React.FC = () => {
 
     </div>
   );
+
+  function renderSettingsModal() {
+    if (!user) return null;
+    return (
+      <div className="absolute top-12 right-0 w-80 bg-zinc-900 border border-white/10 rounded-xl shadow-2xl p-6 z-50 animate-in fade-in slide-in-from-top-2">
+        <div className="flex justify-between items-start mb-4">
+          <h3 className="text-lg font-semibold text-white">Profile Settings</h3>
+          <button onClick={() => setShowSettings(false)} className="text-zinc-400 hover:text-white">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+        
+        <div className="flex items-center gap-4 mb-6">
+          {user.profile_picture ? (
+            <img src={user.profile_picture} alt="Profile" className="w-12 h-12 rounded-full border border-white/10" />
+          ) : (
+            <div className="w-12 h-12 rounded-full bg-indigo-500 flex items-center justify-center text-lg text-white font-bold shadow-lg shadow-indigo-500/20">
+              {user.name?.charAt(0) || user.email?.charAt(0)}
+            </div>
+          )}
+          <div>
+            <div className="text-[15px] font-medium text-white">{user.name}</div>
+            <div className="text-[13px] text-zinc-400">{user.email}</div>
+          </div>
+        </div>
+
+        <div className="space-y-3 mb-6 bg-white/5 rounded-lg p-3 border border-white/5">
+            <div className="flex justify-between text-[13px]">
+              <span className="text-zinc-400">Age:</span>
+              <span className="text-zinc-200">{user.age ? user.age : 'Not specified'}</span>
+            </div>
+            <div className="flex justify-between text-[13px]">
+              <span className="text-zinc-400">Joined:</span>
+              <span className="text-zinc-200">{new Date(user.created_at).toLocaleDateString()}</span>
+            </div>
+            <div className="flex justify-between text-[13px]">
+              <span className="text-zinc-400">Current Theme:</span>
+              <span className="text-zinc-200 capitalize">{user.settings?.theme || 'Light'}</span>
+            </div>
+        </div>
+
+        <div className="space-y-2">
+          <button className="w-full flex items-center justify-center gap-2 bg-white/10 hover:bg-white/15 text-white py-2.5 rounded-lg transition-colors text-sm font-medium border border-white/5">
+            <CreditCard className="w-4 h-4" />
+            Billing Information
+          </button>
+          <button 
+            onClick={handleDeleteAccount}
+            disabled={isDeleting}
+            className="w-full flex items-center justify-center gap-2 bg-red-500/10 hover:bg-red-500/20 text-red-500 py-2.5 rounded-lg transition-colors text-sm font-medium border border-red-500/20 disabled:opacity-50"
+          >
+            {isDeleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+            Delete Account
+          </button>
+        </div>
+      </div>
+    );
+  }
 };
 
 // Utilities

@@ -2,9 +2,20 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import axios from 'axios';
 import api, { setAccessToken } from '../api';
 
-interface User {
+export interface UserSettings {
+  theme: 'light' | 'night';
+  billing: any;
+  registered_domains: string[];
+}
+
+export interface User {
   id: string;
   email: string;
+  name: string;
+  profile_picture: string | null;
+  age?: number;
+  settings: UserSettings;
+  created_at: string;
 }
 
 interface AuthContextType {
@@ -32,9 +43,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         );
         
         setAccessToken(response.data.accessToken);
-        // Note: For a real app, you might want the refresh endpoint to also return basic user info
-        // Here we just consider them authenticated to hit further protected routes that fetch me()
-        setUser({ id: 'restored-session', email: 'user@vibeslide.com' }); 
+
+        // Fetch real user info
+        const userResponse = await api.get('/user/me');
+        setUser(userResponse.data.user);
       } catch (error) {
         setAccessToken(null);
         setUser(null);

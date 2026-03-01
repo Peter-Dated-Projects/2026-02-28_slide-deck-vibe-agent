@@ -36,21 +36,23 @@ export const googleAuth = async (req: Request, res: Response): Promise<void> => 
 
     const email = payload.email;
     const googleId = payload.sub;
+    const name = payload.name || 'Unknown User';
+    const profile_picture = payload.picture || null;
 
     // Find or create user
-    const userResult = await db.query('SELECT id, email FROM users WHERE google_id = $1 OR email = $2', [googleId, email]);
+    const userResult = await db.query('SELECT id, email, name, profile_picture, settings FROM users WHERE google_id = $1 OR email = $2', [googleId, email]);
     let user;
 
     if (userResult.rows?.length > 0) {
         user = userResult.rows[0];
         // update google id if they signed up with email first (if we had email signup)
         if (!user.google_id) {
-             await db.query('UPDATE users SET google_id = $1 WHERE id = $2', [googleId, user.id]);
+             await db.query('UPDATE users SET google_id = $1, name = $2, profile_picture = $3 WHERE id = $4', [googleId, name, profile_picture, user.id]);
         }
     } else {
         const insertResult = await db.query(
-            'INSERT INTO users (email, google_id) VALUES ($1, $2) RETURNING id, email',
-            [email, googleId]
+            'INSERT INTO users (email, google_id, name, profile_picture) VALUES ($1, $2, $3, $4) RETURNING id, email, name, profile_picture, settings, created_at, age',
+            [email, googleId, name, profile_picture]
         );
         user = insertResult.rows[0];
     }
@@ -76,7 +78,18 @@ export const googleAuth = async (req: Request, res: Response): Promise<void> => 
         maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     });
 
-    res.json({ accessToken, user: { id: user.id, email: user.email } });
+    res.json({
+        accessToken,
+        user: {
+            id: user.id,
+            email: user.email,
+            name: user.name,
+            profile_picture: user.profile_picture,
+            settings: user.settings,
+            age: user.age,
+            created_at: user.created_at
+        }
+    });
   } catch (error) {
     console.error('Google Auth Error:', error);
     res.status(401).json({ error: 'Authentication failed' });
