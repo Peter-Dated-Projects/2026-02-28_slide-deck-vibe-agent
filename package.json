@@ -3,11 +3,13 @@
   "version": "1.0.0",
   "description": "Root package for Vibe Slide",
   "scripts": {
+    "postinstall": "cd backend && bun install && cd ../frontend && bun install",
     "dev": "concurrently \"docker compose --env-file .env.local up\" \"cd backend && NODE_ENV=local bun run dev\" \"cd frontend && bun run dev\"",
     "down": "docker compose down"
   },
   "devDependencies": {
-    "concurrently": "^9.2.1"
+    "concurrently": "^9.2.1",
+    "cross-env": "^10.1.0"
   },
   "dependencies": {
     "vibe-slide-root": "."
