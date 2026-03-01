@@ -5,12 +5,18 @@ CREATE TABLE users (
     email VARCHAR(255) UNIQUE NOT NULL,
     google_id VARCHAR(255) UNIQUE,
     name VARCHAR(255) NOT NULL,
+    first_name VARCHAR(255),
+    last_name VARCHAR(255),
+    phone VARCHAR(255),
+    field VARCHAR(255),
+    is_profile_complete BOOLEAN DEFAULT FALSE,
     age INT,
     profile_picture TEXT,
     settings JSONB DEFAULT '{"theme": "light", "billing": null, "registered_domains": []}'::jsonb,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+
 
 CREATE TABLE refresh_tokens (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
