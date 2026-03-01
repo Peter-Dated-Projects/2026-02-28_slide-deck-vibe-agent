@@ -36,7 +36,7 @@ export const getMe = async (req: Request, res: Response): Promise<void> => {
         }
 
         const result = await db.query(
-            'SELECT id, email, name, age, profile_picture, settings, created_at FROM users WHERE id = $1',
+            'SELECT id, email, name, first_name, last_name, phone, field, is_profile_complete, age, profile_picture, settings, created_at FROM users WHERE id = $1',
             [userId]
         );
 
@@ -91,7 +91,7 @@ export const updateMe = async (req: Request, res: Response): Promise<void> => {
         }
 
         queryParams.push(userId);
-        const query = `UPDATE users SET ${updateQueryPart.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = $${paramIndex} RETURNING id, email, name, age, profile_picture, settings, created_at`;
+        const query = `UPDATE users SET ${updateQueryPart.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = $${paramIndex} RETURNING id, email, name, first_name, last_name, phone, field, is_profile_complete, age, profile_picture, settings, created_at`;
 
         const result = await db.query(query, queryParams);
 
@@ -104,6 +104,42 @@ export const updateMe = async (req: Request, res: Response): Promise<void> => {
     } catch (error) {
         console.error('Error updating user profile:', error);
         res.status(500).json({ error: 'Internal server error' });
+    }
+};
+
+export const updateProfile = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const userId = (req as any).user?.userId;
+        if (!userId) {
+            res.status(401).json({ error: 'Unauthorized' });
+            return;
+        }
+
+        const { first_name, last_name, phone, field } = req.body;
+        
+        if (!first_name || !last_name || !field) {
+            res.status(400).json({ error: 'first_name, last_name, and field are required' });
+            return;
+        }
+
+        const query = `
+            UPDATE users 
+            SET first_name = $1, last_name = $2, phone = $3, field = $4, is_profile_complete = TRUE, updated_at = CURRENT_TIMESTAMP 
+            WHERE id = $5 
+            RETURNING id, email, name, first_name, last_name, phone, field, is_profile_complete, profile_picture, settings, created_at, age
+        `;
+
+        const result = await db.query(query, [first_name, last_name, phone || null, field, userId]);
+
+        if (result.rows.length === 0) {
+            res.status(404).json({ error: 'User not found' });
+            return;
+        }
+
+        res.json({ user: result.rows[0] });
+    } catch (error) {
+        console.error('Error updating user profile:', error);
+        res.status(500).json({ error: 'Internal server error while updating profile' });
     }
 };
 

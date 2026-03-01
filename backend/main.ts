@@ -11,7 +11,7 @@ import { config } from './src/config';
 const app = express();
 
 app.use(cors({
-  origin: process.env.NODE_ENV === 'production' ? process.env.FRONTEND_URL : 'http://localhost:3000',
+  origin: process.env.FRONTEND_URL,
   credentials: true
 }));
 app.use(express.json());
@@ -25,6 +25,7 @@ app.post('/api/auth/logout', authController.logout);
 // User Routes
 app.get('/api/user/me', requireAuth, userController.getMe);
 app.put('/api/user/me', requireAuth, userController.updateMe);
+app.patch('/api/user/profile', requireAuth, userController.updateProfile);
 app.delete('/api/user/me', requireAuth, userController.deleteUser);
 
 // Agent Chat Route
