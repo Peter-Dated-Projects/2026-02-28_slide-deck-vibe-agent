@@ -8,7 +8,7 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   const { isAuthenticated, isLoading } = useAuth();
   
   if (isLoading) {
-    return <div className="h-screen w-screen flex items-center justify-center text-white">Loading...</div>;
+    return <div className="h-screen w-screen flex items-center justify-center bg-background text-foreground">Loading...</div>;
   }
   
   if (!isAuthenticated) {

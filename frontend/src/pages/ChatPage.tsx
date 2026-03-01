@@ -144,22 +144,22 @@ const ChatPage: React.FC = () => {
   };
 
   return (
-    <div className="h-screen w-screen flex bg-zinc-950 text-slate-200 overflow-hidden font-sans">
+    <div className="h-screen w-screen flex bg-background text-foreground overflow-hidden font-sans">
       
       {/* 
         =========================================
         LEFT PANEL: CHAT INTERFACE
         =========================================
       */}
-      <div className="w-1/3 min-w-[350px] max-w-lg border-r border-white/10 flex flex-col bg-zinc-900/50 backdrop-blur-3xl z-10 relative shadow-2xl">
+      <div className="w-1/3 min-w-[350px] max-w-lg border-r border-border flex flex-col bg-card/50 backdrop-blur-3xl z-10 relative shadow-card">
         
         {/* Header */}
-        <div className="h-16 border-b border-white/5 flex items-center justify-between px-6 shrink-0 bg-white/5">
+        <div className="h-16 border-b border-border flex items-center justify-between px-6 shrink-0 bg-muted/50">
             <div className="flex items-center gap-3">
-               <div className="w-8 h-8 rounded-lg bg-indigo-500/20 flex items-center justify-center border border-indigo-400/30">
-                  <Presentation className="w-4 h-4 text-indigo-400" />
+               <div className="w-8 h-8 rounded-lg bg-primary/20 flex items-center justify-center border border-primary/30">
+                  <Presentation className="w-4 h-4 text-primary" />
                </div>
-               <span className="font-semibold text-white tracking-wide">Vibe Agent</span>
+               <span className="font-semibold text-foreground tracking-wide">Vibe Agent</span>
             </div>
             
             <div className="relative flex items-center gap-2">
@@ -171,14 +171,14 @@ const ChatPage: React.FC = () => {
                   {user?.profile_picture ? (
                     <img src={user.profile_picture} alt="Profile" className="w-6 h-6 rounded-full" />
                   ) : (
-                    <div className="w-6 h-6 rounded-full bg-indigo-500 flex items-center justify-center text-[10px] text-white font-bold">
+                    <div className="w-6 h-6 rounded-full bg-primary flex items-center justify-center text-[10px] text-primary-foreground font-bold">
                         {user?.name?.charAt(0) || user?.email?.charAt(0) || 'U'}
                     </div>
                   )}
                 </button>
                 <button 
                     onClick={logout}
-                    className="text-zinc-400 hover:text-white transition-colors p-2 rounded-lg hover:bg-white/5"
+                    className="text-muted-foreground hover:text-foreground transition-colors p-2 rounded-lg hover:bg-muted"
                     title="Logout"
                 >
                     <LogOut className="w-4 h-4" />
@@ -191,9 +191,9 @@ const ChatPage: React.FC = () => {
         {/* Message History */}
         <div className="flex-1 overflow-y-auto p-6 space-y-6 scroll-smooth custom-scrollbar">
             {messages.length === 0 && !isLoading && (
-                <div className="h-full flex flex-col items-center justify-center text-center space-y-4 text-zinc-500 mt-12">
-                    <div className="w-16 h-16 rounded-2xl bg-white/5 flex items-center justify-center border border-white/10">
-                        <SparklesIcon className="w-8 h-8 text-zinc-400" />
+                <div className="h-full flex flex-col items-center justify-center text-center space-y-4 text-muted-foreground mt-12">
+                    <div className="w-16 h-16 rounded-2xl bg-muted flex items-center justify-center border border-border">
+                        <SparklesIcon className="w-8 h-8 text-muted-foreground" />
                     </div>
                     <p className="max-w-[250px] leading-relaxed">
                         Hi {user?.email}! I'm Vibe. <br/> Describe the presentation you want to build.
@@ -206,8 +206,8 @@ const ChatPage: React.FC = () => {
                     <div className={cn(
                         "max-w-[85%] rounded-2xl px-5 py-3.5 mt-2",
                         m.role === 'user' 
-                            ? "bg-indigo-500 text-white rounded-tr-sm shadow-indigo-500/20 shadow-lg" 
-                            : "bg-white/10 text-slate-200 rounded-tl-sm border border-white/5"
+                            ? "bg-primary text-primary-foreground rounded-tr-sm shadow-card shadow-sm" 
+                            : "bg-surface text-foreground rounded-tl-sm border border-border"
                     )}>
                         <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{m.content}</p>
                     </div>
@@ -216,9 +216,9 @@ const ChatPage: React.FC = () => {
             
             {isLoading && (
                 <div className="flex justify-start">
-                    <div className="bg-white/5 rounded-2xl rounded-tl-sm px-5 py-4 border border-white/5 flex items-center gap-3">
-                        <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />
-                        <span className="text-sm text-zinc-400 animate-pulse">Designing slides...</span>
+                    <div className="bg-surface rounded-2xl rounded-tl-sm px-5 py-4 border border-border flex items-center gap-3">
+                        <Loader2 className="w-4 h-4 animate-spin text-primary" />
+                        <span className="text-sm text-muted-foreground animate-pulse">Designing slides...</span>
                     </div>
                 </div>
             )}
@@ -226,25 +226,25 @@ const ChatPage: React.FC = () => {
         </div>
 
         {/* Input Area */}
-        <div className="p-4 bg-zinc-900 border-t border-white/5 shrink-0">
+        <div className="p-4 bg-card border-t border-border shrink-0">
             <form onSubmit={handleSend} className="relative flex items-center">
                 <input 
                     type="text"
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
                     placeholder="E.g., Create a 3 slide deck about space..."
-                    className="w-full bg-black/50 border border-white/10 rounded-xl pl-4 pr-12 py-3.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500/50 transition-all placeholder:text-zinc-600"
+                    className="w-full bg-background border border-border rounded-xl pl-4 pr-12 py-3.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 transition-all placeholder:text-muted-foreground"
                     disabled={isLoading}
                 />
                 <button 
                     type="submit" 
                     disabled={isLoading || !input.trim()}
-                    className="absolute right-2 p-2 bg-indigo-500 hover:bg-indigo-400 text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="absolute right-2 p-2 bg-primary hover:bg-primary/90 text-primary-foreground rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                     <Send className="w-4 h-4" />
                 </button>
             </form>
-            <p className="text-[10px] text-center text-zinc-600 mt-3">Vibe can make mistakes. Check your slides.</p>
+            <p className="text-[10px] text-center text-muted-foreground mt-3">Vibe can make mistakes. Check your slides.</p>
         </div>
       </div>
 
@@ -253,12 +253,12 @@ const ChatPage: React.FC = () => {
         RIGHT PANEL: SLIDE RENDERER CANVAS
         =========================================
       */}
-      <div className="flex-1 relative bg-black flex flex-col items-center justify-center overflow-hidden">
+      <div className="flex-1 relative bg-muted flex flex-col items-center justify-center overflow-hidden">
          {/* Subtle Background Elements */}
-         <div className="absolute inset-0 opacity-20 pointer-events-none" style={{ backgroundImage: 'radial-gradient(circle at center, #333 1px, transparent 1px)', backgroundSize: '24px 24px' }} />
+         <div className="absolute inset-0 opacity-20 pointer-events-none" style={{ backgroundImage: 'radial-gradient(circle at center, #aaa 1px, transparent 1px)', backgroundSize: '24px 24px' }} />
          
          {slides.length === 0 ? (
-             <div className="flex flex-col items-center justify-center text-zinc-700 space-y-4">
+             <div className="flex flex-col items-center justify-center text-muted-foreground space-y-4">
                  <Presentation className="w-16 h-16 opacity-30" />
                  <p className="text-xl font-medium tracking-wide">Canvas is empty</p>
              </div>
@@ -290,11 +290,11 @@ const ChatPage: React.FC = () => {
                  </div>
 
                  {/* Navigation Controls */}
-                 <div className="absolute bottom-12 flex items-center gap-6 bg-zinc-900/80 backdrop-blur-xl border border-white/10 px-6 py-3 rounded-full shadow-2xl z-20">
+                 <div className="absolute bottom-12 flex items-center gap-6 bg-card/80 backdrop-blur-xl border border-border px-6 py-3 rounded-full shadow-card z-20">
                      <button 
                         onClick={prevSlide} 
                         disabled={currentSlideIndex === 0}
-                        className="p-2 text-zinc-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                        className="p-2 text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                      >
                          <ChevronLeft className="w-5 h-5" />
                      </button>
@@ -315,7 +315,7 @@ const ChatPage: React.FC = () => {
                      <button 
                         onClick={nextSlide} 
                         disabled={currentSlideIndex === slides.length - 1}
-                        className="p-2 text-zinc-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                        className="p-2 text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                      >
                          <ChevronRight className="w-5 h-5" />
                      </button>
@@ -330,45 +330,45 @@ const ChatPage: React.FC = () => {
   function renderSettingsModal() {
     if (!user) return null;
     return (
-      <div className="absolute top-12 right-0 w-80 bg-zinc-900 border border-white/10 rounded-xl shadow-2xl p-6 z-50 animate-in fade-in slide-in-from-top-2">
+      <div className="absolute top-12 right-0 w-80 bg-card border border-border rounded-xl shadow-card p-6 z-50 animate-in fade-in slide-in-from-top-2">
         <div className="flex justify-between items-start mb-4">
-          <h3 className="text-lg font-semibold text-white">Profile Settings</h3>
-          <button onClick={() => setShowSettings(false)} className="text-zinc-400 hover:text-white">
+          <h3 className="text-lg font-semibold text-foreground">Profile Settings</h3>
+          <button onClick={() => setShowSettings(false)} className="text-muted-foreground hover:text-foreground">
             <X className="w-5 h-5" />
           </button>
         </div>
         
         <div className="flex items-center gap-4 mb-6">
           {user.profile_picture ? (
-            <img src={user.profile_picture} alt="Profile" className="w-12 h-12 rounded-full border border-white/10" />
+            <img src={user.profile_picture} alt="Profile" className="w-12 h-12 rounded-full border border-border" />
           ) : (
-            <div className="w-12 h-12 rounded-full bg-indigo-500 flex items-center justify-center text-lg text-white font-bold shadow-lg shadow-indigo-500/20">
+            <div className="w-12 h-12 rounded-full bg-primary flex items-center justify-center text-lg text-primary-foreground font-bold shadow-sm">
               {user.name?.charAt(0) || user.email?.charAt(0)}
             </div>
           )}
           <div>
-            <div className="text-[15px] font-medium text-white">{user.name}</div>
-            <div className="text-[13px] text-zinc-400">{user.email}</div>
+            <div className="text-[15px] font-medium text-foreground">{user.name}</div>
+            <div className="text-[13px] text-muted-foreground">{user.email}</div>
           </div>
         </div>
 
-        <div className="space-y-3 mb-6 bg-white/5 rounded-lg p-3 border border-white/5">
+        <div className="space-y-3 mb-6 bg-muted/20 rounded-lg p-3 border border-border">
             <div className="flex justify-between text-[13px]">
-              <span className="text-zinc-400">Age:</span>
-              <span className="text-zinc-200">{user.age ? user.age : 'Not specified'}</span>
+              <span className="text-muted-foreground">Age:</span>
+              <span className="text-foreground">{user.age ? user.age : 'Not specified'}</span>
             </div>
             <div className="flex justify-between text-[13px]">
-              <span className="text-zinc-400">Joined:</span>
-              <span className="text-zinc-200">{new Date(user.created_at).toLocaleDateString()}</span>
+              <span className="text-muted-foreground">Joined:</span>
+              <span className="text-foreground">{new Date(user.created_at).toLocaleDateString()}</span>
             </div>
             <div className="flex justify-between text-[13px]">
-              <span className="text-zinc-400">Current Theme:</span>
-              <span className="text-zinc-200 capitalize">{user.settings?.theme || 'Light'}</span>
+              <span className="text-muted-foreground">Current Theme:</span>
+              <span className="text-foreground capitalize">{user.settings?.theme || 'Light'}</span>
             </div>
         </div>
 
         <div className="space-y-2">
-          <button className="w-full flex items-center justify-center gap-2 bg-white/10 hover:bg-white/15 text-white py-2.5 rounded-lg transition-colors text-sm font-medium border border-white/5">
+          <button className="w-full flex items-center justify-center gap-2 bg-muted hover:bg-muted/80 text-foreground py-2.5 rounded-lg transition-colors text-sm font-medium border border-border">
             <CreditCard className="w-4 h-4" />
             Billing Information
           </button>
