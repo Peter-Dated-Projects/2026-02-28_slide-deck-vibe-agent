@@ -4,7 +4,7 @@
   "description": "Root package for Vibe Slide",
   "scripts": {
     "postinstall": "cd backend && bun install && cd ../frontend && bun install",
-    "dev": "concurrently \"docker compose --env-file .env.local up\" \"cd backend && NODE_ENV=local bun run dev\" \"cd frontend && bun run dev\"",
+    "dev": "concurrently \"docker compose --env-file .env.local up\" \"cd backend && cross-env NODE_ENV=local bun run dev\" \"cd frontend && bun run dev\"",
     "down": "docker compose down",
     "build": "cd frontend && bun run build",
     "typecheck": "cd backend && bun run typecheck",

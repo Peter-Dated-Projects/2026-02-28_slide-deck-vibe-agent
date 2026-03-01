@@ -43,6 +43,16 @@ export const config = {
   auth: {
     jwtSecret: process.env.JWT_SECRET || 'super-secret-jwt-key',
     jwtRefreshSecret: process.env.JWT_REFRESH_SECRET || 'super-secret-refresh-key',
-    googleClientId: process.env.GOOGLE_CLIENT_ID,
+    googleClientId: (() => {
+      if (process.env.GOOGLE_OAUTH_CLIENT_JSON) {
+        try {
+          const parsed = JSON.parse(process.env.GOOGLE_OAUTH_CLIENT_JSON);
+          return parsed.web?.client_id || process.env.GOOGLE_CLIENT_ID;
+        } catch (e) {
+          console.error('Failed to parse GOOGLE_OAUTH_CLIENT_JSON');
+        }
+      }
+      return process.env.GOOGLE_CLIENT_ID;
+    })(),
   }
 };
