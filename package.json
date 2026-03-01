@@ -5,7 +5,11 @@
   "scripts": {
     "postinstall": "cd backend && bun install && cd ../frontend && bun install",
     "dev": "concurrently \"docker compose --env-file .env.local up\" \"cd backend && NODE_ENV=local bun run dev\" \"cd frontend && bun run dev\"",
-    "down": "docker compose down"
+    "down": "docker compose down",
+    "build": "cd frontend && bun run build",
+    "typecheck": "cd backend && bun run typecheck",
+    "init:db": "cd backend && bun run init:db",
+    "test": "cd backend && bun test"
   },
   "devDependencies": {
     "concurrently": "^9.2.1",

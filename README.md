@@ -37,4 +37,30 @@ As professional software stewards, we prioritize the integrity and privacy of us
 
 1. Clone the repository.
 2. Create a `.env.local` file in the root based on the provided template.
-3. Start the entire ecosystem:
+3. Install dependencies across the root, frontend, and backend:
+   ```bash
+   bun install
+   ```
+
+### Development & DevOps Commands
+
+We use [Bun](https://bun.sh/) as our primary package manager and task runner. We have added helpful scripts to the root `package.json` so you can run everything from the root folder:
+
+* **Start the entire ecosystem** (Starts Docker containers, frontend, and backend concurrently):
+  ```bash
+  bun run dev
+  ```
+* **Stop the ecosystem** (Shuts down Docker containers):
+  ```bash
+  bun run down
+  ```
+* **Run tests**:
+  ```bash
+  bun run test
+  ```
+* **Other utility commands**:
+  ```bash
+  bun run typecheck
+  bun run init:db
+  bun run build
+  ```
