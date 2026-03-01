@@ -4,9 +4,10 @@ CREATE TABLE users (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     email VARCHAR(255) UNIQUE NOT NULL,
     google_id VARCHAR(255) UNIQUE,
-    name VARCHAR(255),
+    name VARCHAR(255) NOT NULL,
+    age INT,
     profile_picture TEXT,
-    settings JSONB DEFAULT '{}'::jsonb,
+    settings JSONB DEFAULT '{"theme": "light", "billing": null, "registered_domains": []}'::jsonb,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
