@@ -3,7 +3,20 @@ import { GoogleOAuthProvider, GoogleLogin } from '@react-oauth/google';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 
-const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
+const getClientId = () => {
+  const jsonStr = import.meta.env.GOOGLE_OAUTH_CLIENT_JSON;
+  if (jsonStr) {
+    try {
+      const parsed = JSON.parse(jsonStr);
+      return parsed.web?.client_id || '';
+    } catch (e) {
+      console.error('Failed to parse GOOGLE_OAUTH_CLIENT_JSON', e);
+    }
+  }
+  return import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
+};
+
+const clientId = getClientId();
 
 const GoogleAuthWrapper: React.FC = () => {
   const { loginWithGoogle } = useAuth();
