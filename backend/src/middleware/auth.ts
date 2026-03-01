@@ -16,7 +16,7 @@ export const requireAuth = (req: AuthRequest, res: Response, next: NextFunction)
     return;
   }
 
-  const token = authHeader.split(' ')[1];
+  const token = authHeader.split(' ')[1] as string;
 
   try {
     const secret = config.auth.jwtSecret || 'secret';
