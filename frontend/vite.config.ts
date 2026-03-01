@@ -9,6 +9,9 @@ export default defineConfig({
   server: {
     port: 3000,
     host: true,
+    headers: {
+      'Cross-Origin-Opener-Policy': 'same-origin-allow-popups'
+    },
     proxy: {
       '/api': {
         target: 'http://127.0.0.1:3001',
@@ -19,6 +22,9 @@ export default defineConfig({
   preview: {
     port: 3000,
     host: true,
+    headers: {
+      'Cross-Origin-Opener-Policy': 'same-origin-allow-popups'
+    },
     proxy: {
       '/api': {
         target: 'http://127.0.0.1:3001',
