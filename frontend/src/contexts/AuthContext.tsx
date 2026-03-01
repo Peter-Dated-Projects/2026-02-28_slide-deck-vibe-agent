@@ -12,6 +12,11 @@ export interface User {
   id: string;
   email: string;
   name: string;
+  first_name?: string;
+  last_name?: string;
+  phone?: string;
+  field?: string;
+  is_profile_complete: boolean;
   profile_picture: string | null;
   age?: number;
   settings: UserSettings;
@@ -24,6 +29,7 @@ interface AuthContextType {
   isLoading: boolean;
   loginWithGoogle: (credential: string) => Promise<void>;
   logout: () => Promise<void>;
+  refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -37,7 +43,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const checkAuthStatus = async () => {
       try {
         const response = await axios.post(
-          `${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/auth/refresh`,
+          `${import.meta.env.VITE_API_URL}/auth/refresh`,
           {},
           { withCredentials: true }
         );
@@ -66,6 +72,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => window.removeEventListener('auth:unauthorized', handleUnauthorized);
   }, []);
 
+  const refreshUser = async () => {
+    try {
+      const userResponse = await api.get('/user/me');
+      setUser(userResponse.data.user);
+    } catch (error) {
+      console.error('Failed to refresh user', error);
+    }
+  };
+
   const loginWithGoogle = async (credential: string) => {
     setIsLoading(true);
     try {
@@ -92,7 +107,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   return (
-    <AuthContext.Provider value={{ user, isAuthenticated: !!user, isLoading, loginWithGoogle, logout }}>
+    <AuthContext.Provider value={{ user, isAuthenticated: !!user, isLoading, loginWithGoogle, logout, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );

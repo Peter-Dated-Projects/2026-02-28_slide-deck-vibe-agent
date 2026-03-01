@@ -23,7 +23,7 @@
     }
   },
   "include": [
-    "next-env.d.ts",
+    "src/vite-env.d.ts",
     "**/*.ts",
     "**/*.tsx",
     ".next/types/**/*.ts",
