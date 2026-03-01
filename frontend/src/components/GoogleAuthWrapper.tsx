@@ -36,7 +36,7 @@ const GoogleAuthWrapper: React.FC = () => {
         }}
         useOneTap
         shape="rectangular"
-        theme="filled_black"
+        theme="outline"
         size="large"
       />
     </GoogleOAuthProvider>

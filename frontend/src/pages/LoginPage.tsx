@@ -31,7 +31,7 @@ const LoginPage: React.FC = () => {
           Vibe Slide
         </h2>
         <p className="mt-4 text-center text-muted-foreground max-w-sm mx-auto">
-          Generate stunning, web-native presentations instantly using Claude 3.7.
+          Generate stunning, web-native <br /> presentations hands-free, instantly.
         </p>
       </div>
 
@@ -39,7 +39,6 @@ const LoginPage: React.FC = () => {
         <div className="bg-card/50 backdrop-blur-xl py-12 px-4 shadow-card rounded-2xl sm:px-10 border border-border mx-4 sm:mx-0">
             <div className="flex flex-col items-center justify-center space-y-8">
                  <div className="text-center space-y-2">
-                     <h3 className="text-xl font-semibold text-card-foreground">Welcome Back</h3>
                      <p className="text-sm text-muted-foreground">Sign in to sync your presentations</p>
                  </div>
                  
