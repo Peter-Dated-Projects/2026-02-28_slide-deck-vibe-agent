@@ -60,7 +60,7 @@ const initDb = async () => {
         console.log('Inserting default seed data...');
         // Insert a test user
         const userRes = await appPool.query(
-             `INSERT INTO users (email, google_id) VALUES ('test@vibeslide.com', 'test-google-id-123') RETURNING id`
+             `INSERT INTO users (email, google_id, name) VALUES ('test@vibeslide.com', 'test-google-id-123', 'Test User') RETURNING id`
         );
         const userId = userRes.rows[0].id;
         console.log(`Inserted test user: test@vibeslide.com [ID: ${userId}]`);
