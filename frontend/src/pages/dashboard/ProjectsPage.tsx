@@ -1,28 +1,7 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { ProjectCard, ProjectData } from '../../components/dashboard/ProjectCard';
 import { ChevronLeft, ChevronRight, Plus } from 'lucide-react';
-
-// Mock generation for prototyping
-const generateMockProjects = (count: number): ProjectData[] => {
-  return Array.from({ length: count }).map((_, i) => {
-    // Some are recent, some are older
-    const isRecent = Math.random() > 0.6;
-    const daysAgo = isRecent ? Math.floor(Math.random() * 3) : 4 + Math.floor(Math.random() * 30);
-    const date = new Date();
-    date.setDate(date.getDate() - daysAgo);
-
-    return {
-      id: `proj-${i}`,
-      name: `Untitled Project ${i + 1}`,
-      updatedAt: date.toISOString(),
-      createdAt: date.toISOString(),
-      theme: ['Professional', 'Creative', 'Minimal', 'Dark Mode'][Math.floor(Math.random() * 4)],
-      thumbnailUrl: `https://picsum.photos/seed/${i + 1}/800/450`
-    };
-  });
-};
-
-const mockProjects = generateMockProjects(45);
+import api from '../../api';
 
 export default function ProjectsPage() {
   const [currentPage, setCurrentPage] = useState(1);
@@ -49,20 +28,37 @@ export default function ProjectsPage() {
 
   const itemsPerPage = Math.min(20, columns * 4);
 
+  const [projectsData, setProjectsData] = useState<ProjectData[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchProjects = async () => {
+      try {
+        const response = await api.get('/projects');
+        setProjectsData(response.data.projects || []);
+      } catch (err) {
+        console.error('Failed to fetch projects', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchProjects();
+  }, []);
+
   // Derived state
   const recentProjects = useMemo(() => {
     const threeDaysAgo = new Date();
     threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
     
-    return mockProjects
+    return projectsData
       .filter(p => new Date(p.updatedAt) >= threeDaysAgo)
       .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
       .slice(0, 5); // Keep top 5 most recent max
-  }, []);
+  }, [projectsData]);
 
   const sortedAllProjects = useMemo(() => {
-    return [...mockProjects].sort((a, b) => new Date(b.createdAt || b.updatedAt).getTime() - new Date(a.createdAt || a.updatedAt).getTime());
-  }, []);
+    return [...projectsData].sort((a, b) => new Date(b.createdAt || b.updatedAt).getTime() - new Date(a.createdAt || a.updatedAt).getTime());
+  }, [projectsData]);
 
   const totalPages = Math.ceil(sortedAllProjects.length / itemsPerPage);
 
@@ -83,6 +79,14 @@ export default function ProjectsPage() {
       setCurrentPage(newPage);
     }
   };
+
+  if (loading) {
+    return (
+      <div className="max-w-7xl mx-auto pb-12 flex items-center justify-center min-h-[50vh]">
+        <div className="text-muted-foreground animate-pulse">Loading projects...</div>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-7xl mx-auto pb-12">
@@ -122,15 +126,26 @@ export default function ProjectsPage() {
           </span>
         </div>
 
-        <div ref={containerRef} className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-6 mb-8 auto-rows-max">
-          {paginatedProjects.map(project => (
-            <div key={project.id} className="min-w-0 flex items-stretch">
-              <div className="w-full h-full flex items-stretch justify-start">
-                <ProjectCard project={project} className="w-full" />
+        {projectsData.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-16 text-center border-2 border-dashed border-white/10 rounded-xl">
+            <h3 className="text-xl font-medium text-foreground mb-2">No Projects</h3>
+            <p className="text-muted-foreground mb-6">You haven't created any projects yet.</p>
+            <button className="bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 inline-flex items-center justify-center gap-1.5 rounded-md transition-colors">
+              <Plus className="h-4 w-4" />
+              <span>Create your first project</span>
+            </button>
+          </div>
+        ) : (
+          <div ref={containerRef} className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-6 mb-8 auto-rows-max">
+            {paginatedProjects.map(project => (
+              <div key={project.id} className="min-w-0 flex items-stretch">
+                <div className="w-full h-full flex items-stretch justify-start">
+                  <ProjectCard project={project} className="w-full" />
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
 
         {/* Pagination Controls */}
         {totalPages > 1 && (

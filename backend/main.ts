@@ -3,6 +3,7 @@ import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import * as authController from './src/controllers/auth';
 import * as userController from './src/controllers/user';
+import * as projectController from './src/controllers/project';
 import { requireAuth, type AuthRequest } from './src/middleware/auth';
 import { dbService as db } from './src/core/container';
 import { chatWithAgent, processToolCall } from './src/services/agent';
@@ -27,6 +28,9 @@ app.get('/api/user/me', requireAuth, userController.getMe);
 app.put('/api/user/me', requireAuth, userController.updateMe);
 app.patch('/api/user/profile', requireAuth, userController.updateProfile);
 app.delete('/api/user/me', requireAuth, userController.deleteUser);
+
+// Project Routes
+app.get('/api/projects', requireAuth, projectController.getProjects);
 
 // Agent Chat Route
 app.post('/api/chat', requireAuth, async (req: AuthRequest, res: express.Response): Promise<void> => {
