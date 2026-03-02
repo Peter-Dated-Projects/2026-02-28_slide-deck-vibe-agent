@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { ProjectCard, ProjectData } from '../../components/dashboard/ProjectCard';
 import { ChevronLeft, ChevronRight, Plus } from 'lucide-react';
 
@@ -15,6 +15,7 @@ const generateMockProjects = (count: number): ProjectData[] => {
       id: `proj-${i}`,
       name: `Untitled Project ${i + 1}`,
       updatedAt: date.toISOString(),
+      createdAt: date.toISOString(),
       theme: ['Professional', 'Creative', 'Minimal', 'Dark Mode'][Math.floor(Math.random() * 4)],
       thumbnailUrl: `https://picsum.photos/seed/${i + 1}/800/450`
     };
@@ -25,7 +26,28 @@ const mockProjects = generateMockProjects(45);
 
 export default function ProjectsPage() {
   const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 20;
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [columns, setColumns] = useState(4); // Default to 4
+
+  // Setup ResizeObserver to calculate columns dynamically
+  useEffect(() => {
+    if (!containerRef.current) return;
+    
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const width = entry.contentRect.width;
+        // Calculation: min-width is 300px, gap is 24px (1.5rem)
+        let cols = Math.floor((width + 24) / 324);
+        if (cols < 1) cols = 1;
+        setColumns(cols);
+      }
+    });
+
+    observer.observe(containerRef.current);
+    return () => observer.disconnect();
+  }, []);
+
+  const itemsPerPage = Math.min(20, columns * 4);
 
   // Derived state
   const recentProjects = useMemo(() => {
@@ -39,20 +61,26 @@ export default function ProjectsPage() {
   }, []);
 
   const sortedAllProjects = useMemo(() => {
-    return [...mockProjects].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+    return [...mockProjects].sort((a, b) => new Date(b.createdAt || b.updatedAt).getTime() - new Date(a.createdAt || a.updatedAt).getTime());
   }, []);
 
   const totalPages = Math.ceil(sortedAllProjects.length / itemsPerPage);
-  
+
+  // Adjust current page if total pages decreases
+  useEffect(() => {
+    if (currentPage > totalPages && totalPages > 0) {
+      setCurrentPage(totalPages);
+    }
+  }, [totalPages, currentPage]);
+
   const paginatedProjects = useMemo(() => {
     const startIndex = (currentPage - 1) * itemsPerPage;
     return sortedAllProjects.slice(startIndex, startIndex + itemsPerPage);
-  }, [sortedAllProjects, currentPage]);
+  }, [sortedAllProjects, currentPage, itemsPerPage]);
 
   const handlePageChange = (newPage: number) => {
     if (newPage >= 1 && newPage <= totalPages) {
       setCurrentPage(newPage);
-      window.scrollTo({ top: 0, behavior: 'smooth' });
     }
   };
 
@@ -72,10 +100,16 @@ export default function ProjectsPage() {
       {recentProjects.length > 0 && (
         <section className="mb-12">
           <h2 className="text-lg font-semibold text-foreground mb-4">Recents</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-            {recentProjects.map(project => (
-              <ProjectCard key={project.id} project={project} />
-            ))}
+          <div className="relative">
+            <div className="flex overflow-x-auto gap-6 pb-4 snap-x [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+              {recentProjects.map(project => (
+                <ProjectCard key={project.id} project={project} className="w-[300px] sm:w-[320px] max-h-[250px] shrink-0 snap-start" />
+              ))}
+              {/* Spacer empty div to allow scrolling past the fade overlay */}
+              <div className="w-4 shrink-0" />
+            </div>
+            {/* Overlay gradient to simulate fade out without expensive mask-image paint */}
+            <div className="absolute top-0 right-0 bottom-4 w-32 bg-gradient-to-l from-background to-transparent pointer-events-none" />
           </div>
         </section>
       )}
@@ -88,11 +122,11 @@ export default function ProjectsPage() {
           </span>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-6 mb-8 auto-rows-max">
+        <div ref={containerRef} className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-6 mb-8 auto-rows-max">
           {paginatedProjects.map(project => (
             <div key={project.id} className="min-w-0 flex items-stretch">
-              <div className="w-full h-full flex items-stretch">
-                <ProjectCard project={project} />
+              <div className="w-full h-full flex items-stretch justify-start">
+                <ProjectCard project={project} className="w-full" />
               </div>
             </div>
           ))}

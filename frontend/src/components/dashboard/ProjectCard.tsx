@@ -6,6 +6,7 @@ export interface ProjectData {
   id: string;
   name: string;
   updatedAt: string;
+  createdAt?: string;
   thumbnailUrl?: string;
   theme?: string;
 }
@@ -14,9 +15,10 @@ interface ProjectCardProps {
   project: ProjectData;
   onEdit?: (id: string) => void;
   onDelete?: (id: string) => void;
+  className?: string;
 }
 
-export const ProjectCard: React.FC<ProjectCardProps> = ({ project, onEdit, onDelete }) => {
+export const ProjectCard: React.FC<ProjectCardProps> = ({ project, onEdit, onDelete, className = "" }) => {
   // Mock format date
   const dateStr = new Date(project.updatedAt).toLocaleDateString(undefined, {
     month: 'short',
@@ -25,7 +27,7 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({ project, onEdit, onDel
   });
 
   return (
-    <div className="group relative flex flex-col bg-card/60 backdrop-blur-xl border border-border rounded-xl shadow-card hover:shadow-card-hover transition-all duration-200 overflow-hidden min-w-[300px] max-w-[500px]">
+    <div className={`group relative flex flex-col bg-card/60 backdrop-blur-xl border border-border rounded-xl shadow-card hover:shadow-card-hover transition-all duration-200 overflow-hidden min-w-[300px] max-w-[500px] ${className}`}>
       <Link to={`/chat/${project.id}`} className="block flex-1">
         {/* 16:9 Thumbnail Area */}
         <div className="w-full aspect-video bg-muted relative overflow-hidden flex items-center justify-center group-hover:bg-muted/80 transition-colors pointer-events-none">
