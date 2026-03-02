@@ -82,7 +82,7 @@ const SetupProfilePage: React.FC = () => {
       // We can securely navigate and refresh context without risking a race condition 
       // or reloading the entire generic app context unnecessarily
       await refreshUser();
-      navigate('/chat', { replace: true });
+      navigate('/dashboard/projects', { replace: true });
     } catch (err: any) {
       console.error(err);
       setError(err.response?.data?.error || 'Failed to update profile. Please try again.');
