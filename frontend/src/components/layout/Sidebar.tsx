@@ -5,7 +5,6 @@ import { useAuth } from '../../contexts/AuthContext';
 
 const navigation = [
   { name: 'Projects', href: '/dashboard/projects', icon: LayoutGrid },
-  { name: 'Templates', href: '/dashboard/templates', icon: FileText },
   { name: 'Settings', href: '/dashboard/settings', icon: Settings },
 ];
 
