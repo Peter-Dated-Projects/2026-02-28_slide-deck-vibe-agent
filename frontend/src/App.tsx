@@ -6,7 +6,6 @@ import ChatPage from './pages/ChatPage';
 import SetupProfilePage from './pages/SetupProfilePage';
 import { DashboardLayout } from './components/layout/DashboardLayout';
 import ProjectsPage from './pages/dashboard/ProjectsPage';
-import TemplatesPage from './pages/dashboard/TemplatesPage';
 import SettingsPage from './pages/dashboard/SettingsPage';
 import ProfilePage from './pages/dashboard/ProfilePage';
 
@@ -72,7 +71,6 @@ function App() {
           >
             <Route index element={<Navigate to="/dashboard/projects" replace />} />
             <Route path="projects" element={<ProjectsPage />} />
-            <Route path="templates" element={<TemplatesPage />} />
             <Route path="settings" element={<SettingsPage />} />
             <Route path="profile" element={<ProfilePage />} />
           </Route>

@@ -58,6 +58,10 @@ We use [Bun](https://bun.sh/) as our primary package manager and task runner. We
   ```bash
   bun run test
   ```
+* **Seed the database with sample projects**:
+  ```bash
+  cd backend && bun run scripts/seed-projects.ts
+  ```
 * **Other utility commands**:
   ```bash
   bun run typecheck
