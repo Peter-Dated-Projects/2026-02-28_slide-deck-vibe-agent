@@ -28,7 +28,7 @@ const GoogleAuthWrapper: React.FC = () => {
         onSuccess={async (credentialResponse) => {
           if (credentialResponse.credential) {
             await loginWithGoogle(credentialResponse.credential);
-            navigate('/chat');
+            navigate('/dashboard/projects');
           }
         }}
         onError={() => {

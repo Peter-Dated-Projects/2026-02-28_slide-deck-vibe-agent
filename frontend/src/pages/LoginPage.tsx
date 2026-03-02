@@ -12,7 +12,7 @@ const LoginPage: React.FC = () => {
   }
 
   if (isAuthenticated) {
-    return <Navigate to="/chat" replace />;
+    return <Navigate to="/dashboard/projects" replace />;
   }
 
   return (
