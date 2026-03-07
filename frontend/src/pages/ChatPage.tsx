@@ -3,26 +3,50 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../api';
 import { SlideRenderer, type SlideData } from '../components/SlideRenderer';
-import { Send, Loader2, LogOut, ChevronLeft, ChevronRight, Presentation, Settings, Trash2, CreditCard, X } from 'lucide-react';
+import { ChatMessage, type ChatMessageData } from '../components/chat/ChatMessage';
+import {
+  Send, Loader2, LogOut, ChevronLeft, ChevronRight,
+  Presentation, Trash2, CreditCard, X,
+} from 'lucide-react';
 
-interface Message {
-  role: 'user' | 'assistant';
-  content: string;
+// ─────────────────────────────────────────────────────
+// Utilities
+// ─────────────────────────────────────────────────────
+
+function cn(...classes: (string | undefined | null | false)[]) {
+  return classes.filter(Boolean).join(' ');
 }
+
+function SparklesIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
+      <path d="M5 3v4" /><path d="M19 17v4" /><path d="M3 5h4" /><path d="M17 19h4" />
+    </svg>
+  );
+}
+
+function generateId() {
+  return Math.random().toString(36).slice(2, 10);
+}
+
+// ─────────────────────────────────────────────────────
+// ChatPage
+// ─────────────────────────────────────────────────────
 
 const ChatPage: React.FC = () => {
   const { conversationId } = useParams<{ conversationId?: string }>();
   const navigate = useNavigate();
   const { user, logout } = useAuth();
-  
-  const [messages, setMessages] = useState<Message[]>([]);
+
+  const [messages, setMessages] = useState<ChatMessageData[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [slides, setSlides] = useState<SlideData[]>([]);
   const [currentSlideIndex, setCurrentSlideIndex] = useState(0);
   const [showSettings, setShowSettings] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
-  
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -44,84 +68,120 @@ const ChatPage: React.FC = () => {
     try {
       const res = await api.get(`/presentation/${id}`);
       if (res.data.slides && res.data.slides.length > 0) {
-          // Typically here we would fetch the raw MinIO strings
-          // For MVP, if theme_data exists or if there's raw HTML stored we map it.
-          // Due to cross-origin limitations, we might need the backend to proxy the MinIO file contents.
-          
-          // Let's assume the backend /presentation/ returns the slides meta
-          // We will map them. For a true implementation we would fetch the raw HTML from MinIO.
-          const formattedSlides: SlideData[] = res.data.slides.map((s: any, i: number) => ({
-             id: s.minio_object_key || `slide-${i}`,
-             title: `Slide ${i + 1}`,
-             content: 'Loading slide content...',
-             layoutType: 'title', // Fallback
-             minio_object_key: s.minio_object_key,
-             theme_data: s.theme_data
-          }));
-          
-          setSlides(formattedSlides);
+        const formattedSlides: SlideData[] = res.data.slides.map((s: any, i: number) => ({
+          id: s.minio_object_key || `slide-${i}`,
+          title: `Slide ${i + 1}`,
+          content: 'Loading slide content...',
+          layoutType: 'title',
+          minio_object_key: s.minio_object_key,
+          theme_data: s.theme_data,
+        }));
+        setSlides(formattedSlides);
 
-          // Eager load MinIO contents
-          formattedSlides.forEach(async (slide, idx) => {
-              if (slide.minio_object_key) {
-                   try {
-                       // We need a backend endpoint for this in reality, or presigned URLs.
-                       // For the sake of this demo UI, let's assume we have a proxy on the backend 
-                       // `GET /api/storage?key=...` or similar. Let's mock it for the MVP UI view
-                       const slideRes = await api.get(`/storage?key=${slide.minio_object_key}`);
-                       setSlides(prev => {
-                           const next = [...prev];
-                           next[idx] = { ...next[idx], rawHtml: slideRes.data };
-                           return next;
-                       });
-                   } catch (e) { console.error('Failed fetching slide html');}
-              }
-          });
+        formattedSlides.forEach(async (slide, idx) => {
+          if (slide.minio_object_key) {
+            try {
+              const slideRes = await api.get(`/storage?key=${slide.minio_object_key}`);
+              setSlides(prev => {
+                const next = [...prev];
+                next[idx] = { ...next[idx], rawHtml: slideRes.data };
+                return next;
+              });
+            } catch (e) { console.error('Failed fetching slide html'); }
+          }
+        });
       }
     } catch (error) {
       console.error('Failed to fetch presentation:', error);
     }
   };
 
+  // ─────────────────────────────────────────────────────
+  // Send message handler with mock frontend simulation
+  // ─────────────────────────────────────────────────────
+
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim() || isLoading) return;
 
-    const userMessage = input.trim();
+    const userText = input.trim();
     setInput('');
-    setMessages(prev => [...prev, { role: 'user', content: userMessage }]);
     setIsLoading(true);
+
+    // 1. Add user message
+    const userMsg: ChatMessageData = {
+      id: generateId(),
+      role: 'user',
+      content: userText,
+    };
+    setMessages(prev => [...prev, userMsg]);
+
+    // 2. Add a thinking assistant message immediately
+    const assistantId = generateId();
+    const thinkingStartedAt = Date.now();
+
+    const thinkingMsg: ChatMessageData = {
+      id: assistantId,
+      role: 'assistant',
+      content: '',
+      isThinking: true,
+      thinkingStartedAt,
+      thinkingContent: '',
+    };
+    setMessages(prev => [...prev, thinkingMsg]);
 
     try {
       const payload = {
-          message: userMessage,
-          ...(conversationId ? { conversationId } : {})
+        message: userText,
+        ...(conversationId ? { conversationId } : {}),
       };
 
       const res = await api.post('/chat', payload);
-      
-      // Navigate to the new conversation URL if we just created it
+
+      // Navigate to the new conversation URL if we just created one
       if (!conversationId && res.data.conversationId) {
-          navigate(`/chat/${res.data.conversationId}`, { replace: true });
+        navigate(`/chat/${res.data.conversationId}`, { replace: true });
       }
 
-      // Anthropic returns an array of content blocks, we filter for text responses 
-      // as tools are handled by the backend Agent loop.
       const textResponses = res.data.response
-          .filter((b: any) => b.type === 'text')
-          .map((b: any) => b.text)
-          .join('\n');
+        .filter((b: any) => b.type === 'text')
+        .map((b: any) => b.text)
+        .join('\n');
 
-      setMessages(prev => [...prev, { role: 'assistant', content: textResponses || 'Processed your request and generated/updated slides.' }]);
+      const thinkingElapsed = Math.floor((Date.now() - thinkingStartedAt) / 1000);
 
-      // Refetch presentation to see new slides
+      // 3. Resolve thinking message → show response
+      setMessages(prev => prev.map(m =>
+        m.id === assistantId
+          ? {
+              ...m,
+              content: textResponses || 'Processed your request and generated/updated slides.',
+              isThinking: false,
+              thinkingTime: thinkingElapsed,
+              thinkingContent: `Processed: "${userText}"`,
+            }
+          : m
+      ));
+
       if (res.data.conversationId) {
-          fetchPresentation(res.data.conversationId);
+        fetchPresentation(res.data.conversationId);
       }
 
-    } catch (error) {
+    } catch (error: any) {
       console.error('Chat error:', error);
-      setMessages(prev => [...prev, { role: 'assistant', content: 'Sorry, I encountered an error processing your request.' }]);
+      const thinkingElapsed = Math.floor((Date.now() - thinkingStartedAt) / 1000);
+
+      // Resolve thinking message → show error
+      setMessages(prev => prev.map(m =>
+        m.id === assistantId
+          ? {
+              ...m,
+              content: 'Sorry, I encountered an error processing your request.',
+              isThinking: false,
+              thinkingTime: thinkingElapsed,
+            }
+          : m
+      ));
     } finally {
       setIsLoading(false);
     }
@@ -143,185 +203,172 @@ const ChatPage: React.FC = () => {
     }
   };
 
+  // ─────────────────────────────────────────────────────
+  // Render
+  // ─────────────────────────────────────────────────────
+
   return (
     <div className="h-screen w-screen flex bg-background text-foreground overflow-hidden font-sans">
-      
-      {/* 
+
+      {/*
         =========================================
         LEFT PANEL: CHAT INTERFACE
         =========================================
       */}
       <div className="w-1/3 min-w-[350px] max-w-lg border-r border-border flex flex-col bg-card/50 backdrop-blur-3xl z-10 relative shadow-card">
-        
+
         {/* Header */}
         <div className="h-16 border-b border-border flex items-center justify-between px-6 shrink-0 bg-muted/50">
-            <div className="flex items-center gap-3">
-               <div className="w-8 h-8 rounded-lg bg-primary/20 flex items-center justify-center border border-primary/30">
-                  <Presentation className="w-4 h-4 text-primary" />
-               </div>
-               <span className="font-semibold text-foreground tracking-wide">Vibe Agent</span>
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-primary/20 flex items-center justify-center border border-primary/30">
+              <Presentation className="w-4 h-4 text-primary" />
             </div>
-            
-            <div className="relative flex items-center gap-2">
-                <button 
-                  onClick={() => setShowSettings(!showSettings)}
-                  className="text-zinc-400 hover:text-white transition-colors p-2 rounded-lg hover:bg-white/5 flex items-center gap-2"
-                  title="Settings"
-                >
-                  {user?.profile_picture ? (
-                    <img src={user.profile_picture} alt="Profile" className="w-6 h-6 rounded-full" />
-                  ) : (
-                    <div className="w-6 h-6 rounded-full bg-primary flex items-center justify-center text-[10px] text-primary-foreground font-bold">
-                        {user?.name?.charAt(0) || user?.email?.charAt(0) || 'U'}
-                    </div>
-                  )}
-                </button>
-                <button 
-                    onClick={logout}
-                    className="text-muted-foreground hover:text-foreground transition-colors p-2 rounded-lg hover:bg-muted"
-                    title="Logout"
-                >
-                    <LogOut className="w-4 h-4" />
-                </button>
+            <span className="font-semibold text-foreground tracking-wide">Vibe Agent</span>
+          </div>
 
-                {showSettings && renderSettingsModal()}
-            </div>
+          <div className="relative flex items-center gap-2">
+            <button
+              onClick={() => setShowSettings(!showSettings)}
+              className="text-zinc-400 hover:text-white transition-colors p-2 rounded-lg hover:bg-white/5 flex items-center gap-2"
+              title="Settings"
+            >
+              {user?.profile_picture ? (
+                <img src={user.profile_picture} alt="Profile" className="w-6 h-6 rounded-full" />
+              ) : (
+                <div className="w-6 h-6 rounded-full bg-primary flex items-center justify-center text-[10px] text-primary-foreground font-bold">
+                  {user?.name?.charAt(0) || user?.email?.charAt(0) || 'U'}
+                </div>
+              )}
+            </button>
+            <button
+              onClick={logout}
+              className="text-muted-foreground hover:text-foreground transition-colors p-2 rounded-lg hover:bg-muted"
+              title="Logout"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
+
+            {showSettings && renderSettingsModal()}
+          </div>
         </div>
 
         {/* Message History */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-6 scroll-smooth custom-scrollbar">
-            {messages.length === 0 && !isLoading && (
-                <div className="h-full flex flex-col items-center justify-center text-center space-y-4 text-muted-foreground mt-12">
-                    <div className="w-16 h-16 rounded-2xl bg-muted flex items-center justify-center border border-border">
-                        <SparklesIcon className="w-8 h-8 text-muted-foreground" />
-                    </div>
-                    <p className="max-w-[250px] leading-relaxed">
-                        Hi {user?.email}! I'm Vibe. <br/> Describe the presentation you want to build.
-                    </p>
-                </div>
-            )}
-            
-            {messages.map((m, idx) => (
-                <div key={idx} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                    <div className={cn(
-                        "max-w-[85%] rounded-2xl px-5 py-3.5 mt-2",
-                        m.role === 'user' 
-                            ? "bg-primary text-primary-foreground rounded-tr-sm shadow-card shadow-sm" 
-                            : "bg-surface text-foreground rounded-tl-sm border border-border"
-                    )}>
-                        <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{m.content}</p>
-                    </div>
-                </div>
-            ))}
-            
-            {isLoading && (
-                <div className="flex justify-start">
-                    <div className="bg-surface rounded-2xl rounded-tl-sm px-5 py-4 border border-border flex items-center gap-3">
-                        <Loader2 className="w-4 h-4 animate-spin text-primary" />
-                        <span className="text-sm text-muted-foreground animate-pulse">Designing slides...</span>
-                    </div>
-                </div>
-            )}
-            <div ref={messagesEndRef} />
+        <div className="flex-1 overflow-y-auto p-6 space-y-1 scroll-smooth custom-scrollbar">
+          {messages.length === 0 && !isLoading && (
+            <div className="h-full flex flex-col items-center justify-center text-center space-y-4 text-muted-foreground mt-12">
+              <div className="w-16 h-16 rounded-2xl bg-muted flex items-center justify-center border border-border">
+                <SparklesIcon className="w-8 h-8 text-muted-foreground" />
+              </div>
+              <p className="max-w-[250px] leading-relaxed">
+                Hi {user?.email}! I'm Vibe. <br /> Describe the presentation you want to build.
+              </p>
+            </div>
+          )}
+
+          {messages.map((m) => (
+            <ChatMessage key={m.id} message={m} />
+          ))}
+
+          <div ref={messagesEndRef} />
         </div>
 
         {/* Input Area */}
         <div className="p-4 bg-card border-t border-border shrink-0">
-            <form onSubmit={handleSend} className="relative flex items-center">
-                <input 
-                    type="text"
-                    value={input}
-                    onChange={(e) => setInput(e.target.value)}
-                    placeholder="E.g., Create a 3 slide deck about space..."
-                    className="w-full bg-background border border-border rounded-xl pl-4 pr-12 py-3.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 transition-all placeholder:text-muted-foreground"
-                    disabled={isLoading}
-                />
-                <button 
-                    type="submit" 
-                    disabled={isLoading || !input.trim()}
-                    className="absolute right-2 p-2 bg-primary hover:bg-primary/90 text-primary-foreground rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                    <Send className="w-4 h-4" />
-                </button>
-            </form>
-            <p className="text-[10px] text-center text-muted-foreground mt-3">Vibe can make mistakes. Check your slides.</p>
+          <form onSubmit={handleSend} className="relative flex items-center">
+            <input
+              type="text"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder="E.g., Create a 3 slide deck about space..."
+              className="w-full bg-background border border-border rounded-xl pl-4 pr-12 py-3.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 transition-all placeholder:text-muted-foreground"
+              disabled={isLoading}
+            />
+            <button
+              type="submit"
+              disabled={isLoading || !input.trim()}
+              className="absolute right-2 p-2 bg-primary hover:bg-primary/90 text-primary-foreground rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+            </button>
+          </form>
+          <p className="text-[10px] text-center text-muted-foreground mt-3">Vibe can make mistakes. Check your slides.</p>
         </div>
       </div>
 
-      {/* 
+      {/*
         =========================================
         RIGHT PANEL: SLIDE RENDERER CANVAS
         =========================================
       */}
       <div className="flex-1 relative bg-muted flex flex-col items-center justify-center overflow-hidden">
-         {/* Subtle Background Elements */}
-         <div className="absolute inset-0 opacity-20 pointer-events-none" style={{ backgroundImage: 'radial-gradient(circle at center, #aaa 1px, transparent 1px)', backgroundSize: '24px 24px' }} />
-         
-         {slides.length === 0 ? (
-             <div className="flex flex-col items-center justify-center text-muted-foreground space-y-4">
-                 <Presentation className="w-16 h-16 opacity-30" />
-                 <p className="text-xl font-medium tracking-wide">Canvas is empty</p>
-             </div>
-         ) : (
-             <>
-                 {/* Main Slide Carousel */}
-                 <div className="relative w-full h-full p-12 lg:p-24 flex items-center justify-center">
-                     <div className="w-full max-w-6xl aspect-video relative">
-                         {slides.map((slide, idx) => (
-                             <div 
-                                key={slide.id || idx}
-                                className={cn(
-                                    "absolute inset-0 transition-all duration-700 ease-[cubic-bezier(0.23,1,0.32,1)]",
-                                    idx === currentSlideIndex 
-                                        ? "opacity-100 translate-x-0 z-10" 
-                                        : idx < currentSlideIndex 
-                                            ? "opacity-0 -translate-x-full z-0" 
-                                            : "opacity-0 translate-x-full z-0"
-                                )}
-                             >
-                                 <SlideRenderer 
-                                    slide={slide} 
-                                    theme={slide.theme_data || slides[0]?.theme_data} 
-                                    isActive={idx === currentSlideIndex} 
-                                 />
-                             </div>
-                         ))}
-                     </div>
-                 </div>
+        {/* Subtle Background Elements */}
+        <div className="absolute inset-0 opacity-20 pointer-events-none" style={{ backgroundImage: 'radial-gradient(circle at center, #aaa 1px, transparent 1px)', backgroundSize: '24px 24px' }} />
 
-                 {/* Navigation Controls */}
-                 <div className="absolute bottom-12 flex items-center gap-6 bg-card/80 backdrop-blur-xl border border-border px-6 py-3 rounded-full shadow-card z-20">
-                     <button 
-                        onClick={prevSlide} 
-                        disabled={currentSlideIndex === 0}
-                        className="p-2 text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                     >
-                         <ChevronLeft className="w-5 h-5" />
-                     </button>
-                     
-                     <div className="flex gap-2">
-                        {slides.map((_, idx) => (
-                             <button
-                                 key={idx}
-                                 onClick={() => setCurrentSlideIndex(idx)}
-                                 className={cn(
-                                     "h-1.5 rounded-full transition-all duration-300",
-                                     idx === currentSlideIndex ? "w-6 bg-indigo-500" : "w-1.5 bg-white/20 hover:bg-white/40"
-                                 )}
-                             />
-                        ))}
-                     </div>
+        {slides.length === 0 ? (
+          <div className="flex flex-col items-center justify-center text-muted-foreground space-y-4">
+            <Presentation className="w-16 h-16 opacity-30" />
+            <p className="text-xl font-medium tracking-wide">Canvas is empty</p>
+          </div>
+        ) : (
+          <>
+            {/* Main Slide Carousel */}
+            <div className="relative w-full h-full p-12 lg:p-24 flex items-center justify-center">
+              <div className="w-full max-w-6xl aspect-video relative">
+                {slides.map((slide, idx) => (
+                  <div
+                    key={slide.id || idx}
+                    className={cn(
+                      'absolute inset-0 transition-all duration-700 ease-[cubic-bezier(0.23,1,0.32,1)]',
+                      idx === currentSlideIndex
+                        ? 'opacity-100 translate-x-0 z-10'
+                        : idx < currentSlideIndex
+                          ? 'opacity-0 -translate-x-full z-0'
+                          : 'opacity-0 translate-x-full z-0'
+                    )}
+                  >
+                    <SlideRenderer
+                      slide={slide}
+                      theme={slide.theme_data || slides[0]?.theme_data}
+                      isActive={idx === currentSlideIndex}
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
 
-                     <button 
-                        onClick={nextSlide} 
-                        disabled={currentSlideIndex === slides.length - 1}
-                        className="p-2 text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                     >
-                         <ChevronRight className="w-5 h-5" />
-                     </button>
-                 </div>
-             </>
-         )}
+            {/* Navigation Controls */}
+            <div className="absolute bottom-12 flex items-center gap-6 bg-card/80 backdrop-blur-xl border border-border px-6 py-3 rounded-full shadow-card z-20">
+              <button
+                onClick={prevSlide}
+                disabled={currentSlideIndex === 0}
+                className="p-2 text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              >
+                <ChevronLeft className="w-5 h-5" />
+              </button>
+
+              <div className="flex gap-2">
+                {slides.map((_, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() => setCurrentSlideIndex(idx)}
+                    className={cn(
+                      'h-1.5 rounded-full transition-all duration-300',
+                      idx === currentSlideIndex ? 'w-6 bg-indigo-500' : 'w-1.5 bg-white/20 hover:bg-white/40'
+                    )}
+                  />
+                ))}
+              </div>
+
+              <button
+                onClick={nextSlide}
+                disabled={currentSlideIndex === slides.length - 1}
+                className="p-2 text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              >
+                <ChevronRight className="w-5 h-5" />
+              </button>
+            </div>
+          </>
+        )}
       </div>
 
     </div>
@@ -337,7 +384,7 @@ const ChatPage: React.FC = () => {
             <X className="w-5 h-5" />
           </button>
         </div>
-        
+
         <div className="flex items-center gap-4 mb-6">
           {user.profile_picture ? (
             <img src={user.profile_picture} alt="Profile" className="w-12 h-12 rounded-full border border-border" />
@@ -353,18 +400,18 @@ const ChatPage: React.FC = () => {
         </div>
 
         <div className="space-y-3 mb-6 bg-muted/20 rounded-lg p-3 border border-border">
-            <div className="flex justify-between text-[13px]">
-              <span className="text-muted-foreground">Age:</span>
-              <span className="text-foreground">{user.age ? user.age : 'Not specified'}</span>
-            </div>
-            <div className="flex justify-between text-[13px]">
-              <span className="text-muted-foreground">Joined:</span>
-              <span className="text-foreground">{new Date(user.created_at).toLocaleDateString()}</span>
-            </div>
-            <div className="flex justify-between text-[13px]">
-              <span className="text-muted-foreground">Current Theme:</span>
-              <span className="text-foreground capitalize">{user.settings?.theme || 'Light'}</span>
-            </div>
+          <div className="flex justify-between text-[13px]">
+            <span className="text-muted-foreground">Age:</span>
+            <span className="text-foreground">{user.age ? user.age : 'Not specified'}</span>
+          </div>
+          <div className="flex justify-between text-[13px]">
+            <span className="text-muted-foreground">Joined:</span>
+            <span className="text-foreground">{new Date(user.created_at).toLocaleDateString()}</span>
+          </div>
+          <div className="flex justify-between text-[13px]">
+            <span className="text-muted-foreground">Current Theme:</span>
+            <span className="text-foreground capitalize">{user.settings?.theme || 'Light'}</span>
+          </div>
         </div>
 
         <div className="space-y-2">
@@ -372,7 +419,7 @@ const ChatPage: React.FC = () => {
             <CreditCard className="w-4 h-4" />
             Billing Information
           </button>
-          <button 
+          <button
             onClick={handleDeleteAccount}
             disabled={isDeleting}
             className="w-full flex items-center justify-center gap-2 bg-red-500/10 hover:bg-red-500/20 text-red-500 py-2.5 rounded-lg transition-colors text-sm font-medium border border-red-500/20 disabled:opacity-50"
@@ -385,22 +432,5 @@ const ChatPage: React.FC = () => {
     );
   }
 };
-
-// Utilities
-function cn(...classes: (string | undefined | null | false)[]) {
-    return classes.filter(Boolean).join(' ');
-}
-
-function SparklesIcon(props: React.SVGProps<SVGSVGElement>) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
-      <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
-      <path d="M5 3v4" />
-      <path d="M19 17v4" />
-      <path d="M3 5h4" />
-      <path d="M17 19h4" />
-    </svg>
-  );
-}
 
 export default ChatPage;
