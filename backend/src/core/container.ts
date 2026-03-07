@@ -4,7 +4,7 @@ import type { ILLMService } from './interfaces/ILLMService';
 import type { IStorageService } from './interfaces/IStorageService';
 import type { IDatabaseService } from './interfaces/IDatabaseService';
 
-import { ClaudeProvider } from '../infrastructure/providers/llm/ClaudeProvider';
+import { QwenProvider } from '../infrastructure/providers/llm/QwenProvider';
 import { OllamaProvider } from '../infrastructure/providers/llm/OllamaProvider';
 import { MinioProvider } from '../infrastructure/providers/storage/MinioProvider';
 import { GCPStorageProvider } from '../infrastructure/providers/storage/GCPStorageProvider';
@@ -43,8 +43,8 @@ export const llmService: ILLMService = isLocal
         dbService,
         storageService
     )
-    : new ClaudeProvider(
-        config.anthropic.apiKey || '',
+    : new QwenProvider(
+        config.qwen.apiKey || '',
         dbService,
         storageService
     );

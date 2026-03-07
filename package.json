@@ -1,6 +1,10 @@
 {
   "name": "vibe-slide-root",
   "version": "1.0.0",
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "cross-env": "^10.1.0"
+  },
   "description": "Root package for Vibe Slide",
   "scripts": {
     "postinstall": "cd backend && bun install && cd ../frontend && bun install",
@@ -11,13 +15,5 @@
     "init:db": "cd backend && bun run init:db",
     "test": "cd backend && bun test",
     "start": "concurrently \"docker compose --env-file .env.local up\" \"cd backend && cross-env NODE_ENV=local bun run dev\" \"cd frontend && bun run preview\""
-  },
-  "devDependencies": {
-    "concurrently": "^9.2.1",
-    "cross-env": "^10.1.0"
-  },
-  "dependencies": {
-    "openai": "^6.27.0",
-    "vibe-slide-root": "."
   }
 }
