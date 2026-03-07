@@ -65,9 +65,42 @@ const ChatPage: React.FC = () => {
   const [currentSlideIndex, setCurrentSlideIndex] = useState(0);
   const [showSettings, setShowSettings] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState(380);
+  const [isResizingState, setIsResizingState] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const isResizing = useRef(false);
+  const startX = useRef(0);
+  const startWidth = useRef(0);
+
+  const handleResizeMouseDown = (e: React.MouseEvent) => {
+    isResizing.current = true;
+    startX.current = e.clientX;
+    startWidth.current = sidebarWidth;
+    setIsResizingState(true);
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+
+    const onMouseMove = (ev: MouseEvent) => {
+      if (!isResizing.current) return;
+      const delta = ev.clientX - startX.current;
+      const newWidth = Math.min(550, Math.max(350, startWidth.current + delta));
+      setSidebarWidth(newWidth);
+    };
+
+    const onMouseUp = () => {
+      isResizing.current = false;
+      setIsResizingState(false);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+    };
+
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
+  };
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -140,7 +173,7 @@ const ChatPage: React.FC = () => {
     setInput(e.target.value);
     // Auto-grow: reset then set to scrollHeight
     e.target.style.height = "auto";
-    e.target.style.height = Math.min(e.target.scrollHeight, 160) + "px";
+    e.target.style.height = Math.min(e.target.scrollHeight, 400) + "px";
   };
 
   // ─────────────────────────────────────────────────────
@@ -287,19 +320,24 @@ const ChatPage: React.FC = () => {
 
   return (
     <div className="h-screen w-screen flex bg-background text-foreground overflow-hidden font-sans">
+      {/* Full-screen overlay during resize to capture events over iframes */}
+      {isResizingState && <div className="fixed inset-0 z-[9999] cursor-col-resize" />}
       {/*
         =========================================
         LEFT PANEL: CHAT INTERFACE
         =========================================
       */}
-      <div className="w-[380px] shrink-0 border-r border-border flex flex-col bg-card">
+      <div
+        className="shrink-0 border-r border-border flex flex-col bg-card"
+        style={{ width: sidebarWidth }}
+      >
         {/* Header */}
         <div className="h-16 border-b border-border flex items-center justify-between px-6 shrink-0 bg-muted/50">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded-lg bg-primary/20 flex items-center justify-center border border-primary/30">
               <Presentation className="w-4 h-4 text-primary" />
             </div>
-            <span className="font-semibold text-foreground tracking-wide">Vibe Agent</span>
+            <span className="font-semibold text-foreground tracking-wide text-sm">Vibe Agent</span>
           </div>
 
           <div className="relative flex items-center gap-2">
@@ -341,7 +379,7 @@ const ChatPage: React.FC = () => {
               <div className="w-16 h-16 rounded-2xl bg-muted flex items-center justify-center border border-border">
                 <SparklesIcon className="w-8 h-8 text-muted-foreground" />
               </div>
-              <p className="max-w-[250px] leading-relaxed">
+              <p className="max-w-[250px] leading-relaxed text-xs">
                 Hi {user?.email}! I'm Vibe. <br /> Describe the presentation you want to build.
               </p>
             </div>
@@ -357,15 +395,15 @@ const ChatPage: React.FC = () => {
           <form onSubmit={handleFormSubmit} className="relative flex items-end gap-2">
             <textarea
               ref={textareaRef}
-              rows={1}
+              rows={3}
               value={input}
               onChange={handleTextareaChange}
               onKeyDown={handleKeyDown}
               placeholder="Describe the slides you want to build… (Shift+Enter for newline)"
               className={cn(
-                "flex-1 bg-background border border-border rounded-xl pl-4 pr-4 py-3 text-sm text-foreground resize-none overflow-hidden",
+                "flex-1 bg-background border border-border rounded-xl pl-3.5 pr-3.5 py-2 text-xs text-foreground resize-none overflow-y-auto",
                 "focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 transition-all placeholder:text-muted-foreground",
-                "min-h-[46px] max-h-[160px] leading-relaxed",
+                "max-h-[400px] leading-relaxed",
               )}
               disabled={isLoading}
             />
@@ -381,10 +419,19 @@ const ChatPage: React.FC = () => {
               )}
             </button>
           </form>
-          <p className="text-[10px] text-center text-muted-foreground mt-3">
+          <p className="text-[9px] text-center text-muted-foreground mt-2">
             Vibe can make mistakes. Check your slides.
           </p>
         </div>
+      </div>
+
+      {/* ── Resize Handle ── */}
+      <div
+        onMouseDown={handleResizeMouseDown}
+        className="w-1.5 shrink-0 cursor-col-resize bg-transparent hover:bg-primary/40 active:bg-primary/60 transition-colors relative group"
+        title="Drag to resize"
+      >
+        <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-0.5 bg-border group-hover:bg-primary/50 transition-colors" />
       </div>
 
       {/*
