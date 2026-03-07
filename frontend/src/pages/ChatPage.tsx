@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../api';
@@ -42,28 +42,55 @@ const ChatPage: React.FC = () => {
   const [messages, setMessages] = useState<ChatMessageData[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const [slides, setSlides] = useState<SlideData[]>([]);
   const [currentSlideIndex, setCurrentSlideIndex] = useState(0);
   const [showSettings, setShowSettings] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const scrollToBottom = () => {
+  const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
+  }, []);
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages]);
+  }, [messages, scrollToBottom]);
 
-  // Fetch presentation if conversationId exists
+  // ─────────────────────────────────────────────────────
+  // Load message history when conversation already exists
+  // ─────────────────────────────────────────────────────
   useEffect(() => {
-    if (conversationId) {
-      fetchPresentation(conversationId);
-    }
+    if (!conversationId) return;
+
+    setHistoryLoading(true);
+    Promise.all([
+      api.get(`/conversations/${conversationId}/messages`),
+      fetchPresentation(conversationId),
+    ])
+      .then(([msgRes]) => {
+        const hydratedMessages: ChatMessageData[] = (msgRes.data.messages ?? []).map(
+          (m: { id: string; role: 'user' | 'assistant'; content: string }) => ({
+            id: m.id,
+            role: m.role,
+            content: m.content,
+          })
+        );
+        setMessages(hydratedMessages);
+      })
+      .catch((err) => {
+        console.error('Failed to load conversation history:', err);
+      })
+      .finally(() => {
+        setHistoryLoading(false);
+      });
   }, [conversationId]);
 
+  // ─────────────────────────────────────────────────────
+  // Slide fetching
+  // ─────────────────────────────────────────────────────
   const fetchPresentation = async (id: string) => {
     try {
       const res = await api.get(`/presentation/${id}`);
@@ -76,20 +103,12 @@ const ChatPage: React.FC = () => {
           minio_object_key: s.minio_object_key,
           theme_data: s.theme_data,
         }));
-        setSlides(formattedSlides);
+        // TODO: replace with real S3 content once /api/storage is wired up.
+        // For now, load the default placeholder HTML from public/default.html.
+        const defaultHtmlRes = await fetch('/default.html').catch(() => null);
+        const defaultHtml = defaultHtmlRes?.ok ? await defaultHtmlRes.text() : '';
 
-        formattedSlides.forEach(async (slide, idx) => {
-          if (slide.minio_object_key) {
-            try {
-              const slideRes = await api.get(`/storage?key=${slide.minio_object_key}`);
-              setSlides(prev => {
-                const next = [...prev];
-                next[idx] = { ...next[idx], rawHtml: slideRes.data };
-                return next;
-              });
-            } catch (e) { console.error('Failed fetching slide html'); }
-          }
-        });
+        setSlides(formattedSlides.map(slide => ({ ...slide, rawHtml: defaultHtml })));
       }
     } catch (error) {
       console.error('Failed to fetch presentation:', error);
@@ -97,18 +116,42 @@ const ChatPage: React.FC = () => {
   };
 
   // ─────────────────────────────────────────────────────
-  // Send message handler with mock frontend simulation
+  // Auto-grow textarea height
   // ─────────────────────────────────────────────────────
+  const handleTextareaChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setInput(e.target.value);
+    // Auto-grow: reset then set to scrollHeight
+    e.target.style.height = 'auto';
+    e.target.style.height = Math.min(e.target.scrollHeight, 160) + 'px';
+  };
 
-  const handleSend = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!input.trim() || isLoading) return;
+  // ─────────────────────────────────────────────────────
+  // Keyboard handler: Enter sends, Shift+Enter newline
+  // ─────────────────────────────────────────────────────
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      if (!isLoading && input.trim()) {
+        submitMessage();
+      }
+    }
+  };
 
+  // ─────────────────────────────────────────────────────
+  // Send message
+  // ─────────────────────────────────────────────────────
+  const submitMessage = async () => {
     const userText = input.trim();
+    if (!userText || isLoading) return;
+
     setInput('');
+    // Reset textarea height
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+    }
     setIsLoading(true);
 
-    // 1. Add user message
+    // 1. Append user message to the UI immediately
     const userMsg: ChatMessageData = {
       id: generateId(),
       role: 'user',
@@ -116,75 +159,84 @@ const ChatPage: React.FC = () => {
     };
     setMessages(prev => [...prev, userMsg]);
 
-    // 2. Add a thinking assistant message immediately
+    // 2. Insert a thinking placeholder for the assistant
     const assistantId = generateId();
     const thinkingStartedAt = Date.now();
-
-    const thinkingMsg: ChatMessageData = {
-      id: assistantId,
-      role: 'assistant',
-      content: '',
-      isThinking: true,
-      thinkingStartedAt,
-      thinkingContent: '',
-    };
-    setMessages(prev => [...prev, thinkingMsg]);
+    setMessages(prev => [
+      ...prev,
+      {
+        id: assistantId,
+        role: 'assistant',
+        content: '',
+        isThinking: true,
+        thinkingStartedAt,
+        thinkingContent: '',
+      },
+    ]);
 
     try {
-      const payload = {
-        message: userText,
-        ...(conversationId ? { conversationId } : {}),
-      };
+      const payload: Record<string, string> = { message: userText };
+      if (conversationId) payload.conversationId = conversationId;
 
       const res = await api.post('/chat', payload);
 
-      // Navigate to the new conversation URL if we just created one
+      // Navigate to the conversation URL on first message
       if (!conversationId && res.data.conversationId) {
         navigate(`/chat/${res.data.conversationId}`, { replace: true });
       }
 
-      const textResponses = res.data.response
-        .filter((b: any) => b.type === 'text')
-        .map((b: any) => b.text)
-        .join('\n');
+      // Extract text from the response content blocks
+      const responseBlocks: { type: string; text: string }[] = res.data.response ?? [];
+      const responseText = responseBlocks
+        .filter(b => b.type === 'text')
+        .map(b => b.text)
+        .join('\n')
+        .trim() || 'Processed your request.';
 
       const thinkingElapsed = Math.floor((Date.now() - thinkingStartedAt) / 1000);
 
-      // 3. Resolve thinking message → show response
-      setMessages(prev => prev.map(m =>
-        m.id === assistantId
-          ? {
-              ...m,
-              content: textResponses || 'Processed your request and generated/updated slides.',
-              isThinking: false,
-              thinkingTime: thinkingElapsed,
-              thinkingContent: `Processed: "${userText}"`,
-            }
-          : m
-      ));
+      // 3. Resolve the thinking block and inject response text
+      setMessages(prev =>
+        prev.map(m =>
+          m.id === assistantId
+            ? {
+                ...m,
+                content: responseText,
+                isThinking: false,
+                thinkingTime: thinkingElapsed,
+                thinkingContent: `Processed message in ${thinkingElapsed}s`,
+              }
+            : m
+        )
+      );
 
+      // Refetch slides in case the agent updated them
       if (res.data.conversationId) {
         fetchPresentation(res.data.conversationId);
       }
-
     } catch (error: any) {
       console.error('Chat error:', error);
       const thinkingElapsed = Math.floor((Date.now() - thinkingStartedAt) / 1000);
-
-      // Resolve thinking message → show error
-      setMessages(prev => prev.map(m =>
-        m.id === assistantId
-          ? {
-              ...m,
-              content: 'Sorry, I encountered an error processing your request.',
-              isThinking: false,
-              thinkingTime: thinkingElapsed,
-            }
-          : m
-      ));
+      setMessages(prev =>
+        prev.map(m =>
+          m.id === assistantId
+            ? {
+                ...m,
+                content: 'Sorry, I encountered an error processing your request. Please try again.',
+                isThinking: false,
+                thinkingTime: thinkingElapsed,
+              }
+            : m
+        )
+      );
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleFormSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    submitMessage();
   };
 
   const nextSlide = () => setCurrentSlideIndex(prev => Math.min(prev + 1, slides.length - 1));
@@ -206,6 +258,8 @@ const ChatPage: React.FC = () => {
   // ─────────────────────────────────────────────────────
   // Render
   // ─────────────────────────────────────────────────────
+
+  const isEmpty = messages.length === 0 && !isLoading && !historyLoading;
 
   return (
     <div className="h-screen w-screen flex bg-background text-foreground overflow-hidden font-sans">
@@ -229,7 +283,7 @@ const ChatPage: React.FC = () => {
           <div className="relative flex items-center gap-2">
             <button
               onClick={() => setShowSettings(!showSettings)}
-              className="text-zinc-400 hover:text-white transition-colors p-2 rounded-lg hover:bg-white/5 flex items-center gap-2"
+              className="text-zinc-400 hover:text-white transition-colors p-2 rounded-lg hover:bg-white/5"
               title="Settings"
             >
               {user?.profile_picture ? (
@@ -247,14 +301,20 @@ const ChatPage: React.FC = () => {
             >
               <LogOut className="w-4 h-4" />
             </button>
-
             {showSettings && renderSettingsModal()}
           </div>
         </div>
 
         {/* Message History */}
         <div className="flex-1 overflow-y-auto p-6 space-y-1 scroll-smooth custom-scrollbar">
-          {messages.length === 0 && !isLoading && (
+          {historyLoading && (
+            <div className="h-full flex items-center justify-center text-muted-foreground">
+              <Loader2 className="w-5 h-5 animate-spin mr-2" />
+              <span className="text-sm">Loading conversation…</span>
+            </div>
+          )}
+
+          {isEmpty && (
             <div className="h-full flex flex-col items-center justify-center text-center space-y-4 text-muted-foreground mt-12">
               <div className="w-16 h-16 rounded-2xl bg-muted flex items-center justify-center border border-border">
                 <SparklesIcon className="w-8 h-8 text-muted-foreground" />
@@ -265,7 +325,7 @@ const ChatPage: React.FC = () => {
             </div>
           )}
 
-          {messages.map((m) => (
+          {!historyLoading && messages.map((m) => (
             <ChatMessage key={m.id} message={m} />
           ))}
 
@@ -274,19 +334,25 @@ const ChatPage: React.FC = () => {
 
         {/* Input Area */}
         <div className="p-4 bg-card border-t border-border shrink-0">
-          <form onSubmit={handleSend} className="relative flex items-center">
-            <input
-              type="text"
+          <form onSubmit={handleFormSubmit} className="relative flex items-end gap-2">
+            <textarea
+              ref={textareaRef}
+              rows={1}
               value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder="E.g., Create a 3 slide deck about space..."
-              className="w-full bg-background border border-border rounded-xl pl-4 pr-12 py-3.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 transition-all placeholder:text-muted-foreground"
+              onChange={handleTextareaChange}
+              onKeyDown={handleKeyDown}
+              placeholder="Describe the slides you want to build… (Shift+Enter for newline)"
+              className={cn(
+                'flex-1 bg-background border border-border rounded-xl pl-4 pr-4 py-3 text-sm text-foreground resize-none overflow-hidden',
+                'focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 transition-all placeholder:text-muted-foreground',
+                'min-h-[46px] max-h-[160px] leading-relaxed'
+              )}
               disabled={isLoading}
             />
             <button
               type="submit"
               disabled={isLoading || !input.trim()}
-              className="absolute right-2 p-2 bg-primary hover:bg-primary/90 text-primary-foreground rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="p-2.5 bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0 self-end"
             >
               {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
             </button>
@@ -301,7 +367,6 @@ const ChatPage: React.FC = () => {
         =========================================
       */}
       <div className="flex-1 relative bg-muted flex flex-col items-center justify-center overflow-hidden">
-        {/* Subtle Background Elements */}
         <div className="absolute inset-0 opacity-20 pointer-events-none" style={{ backgroundImage: 'radial-gradient(circle at center, #aaa 1px, transparent 1px)', backgroundSize: '24px 24px' }} />
 
         {slides.length === 0 ? (
@@ -311,8 +376,7 @@ const ChatPage: React.FC = () => {
           </div>
         ) : (
           <>
-            {/* Main Slide Carousel */}
-            <div className="relative w-full h-full p-12 lg:p-24 flex items-center justify-center">
+            <div className="relative w-full h-full p-2 flex items-center justify-center">
               <div className="w-full max-w-6xl aspect-video relative">
                 {slides.map((slide, idx) => (
                   <div
@@ -336,7 +400,6 @@ const ChatPage: React.FC = () => {
               </div>
             </div>
 
-            {/* Navigation Controls */}
             <div className="absolute bottom-12 flex items-center gap-6 bg-card/80 backdrop-blur-xl border border-border px-6 py-3 rounded-full shadow-card z-20">
               <button
                 onClick={prevSlide}
