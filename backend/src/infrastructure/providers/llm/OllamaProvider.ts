@@ -4,11 +4,13 @@ import type { IStorageService } from "../../../core/interfaces/IStorageService";
 
 export class OllamaProvider implements ILLMService {
     private baseUrl: string;
+    private model: string;
     private dbService: IDatabaseService;
     private storageService: IStorageService;
 
-    constructor(baseUrl: string, dbService: IDatabaseService, storageService: IStorageService) {
+    constructor(baseUrl: string, model: string, dbService: IDatabaseService, storageService: IStorageService) {
         this.baseUrl = baseUrl;
+        this.model = model;
         this.dbService = dbService;
         this.storageService = storageService;
     }
@@ -19,7 +21,7 @@ export class OllamaProvider implements ILLMService {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                model: 'llama3.2',
+                model: this.model,
                 messages: [
                     {
                         role: 'system',

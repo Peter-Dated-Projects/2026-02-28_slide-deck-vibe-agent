@@ -11,7 +11,7 @@ export class QwenProvider implements ILLMService {
     constructor(apiKey: string, dbService: IDatabaseService, storageService: IStorageService) {
         this.openai = new OpenAI({ 
             apiKey,
-            baseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+            baseURL: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
         });
         this.dbService = dbService;
         this.storageService = storageService;
@@ -44,10 +44,13 @@ export class QwenProvider implements ILLMService {
             temperature: 0.7,
         });
 
-        const message = response.choices[0].message;
+        const message = response.choices[0]?.message;
+        if (!message) {
+            throw new Error('Qwen returned no choices in response.');
+        }
 
         return {
-            content: [{ type: 'text', text: message.content }],
+            content: [{ type: 'text', text: message.content ?? '' }],
             stop_reason: 'end_turn'
         };
     }
