@@ -1,9 +1,11 @@
-import React, { useState, useMemo, useRef, useEffect } from 'react';
+import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { ProjectCard, ProjectData } from '../../components/dashboard/ProjectCard';
-import { ChevronLeft, ChevronRight, Plus } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, Loader2 } from 'lucide-react';
 import api from '../../api';
 
 export default function ProjectsPage() {
+  const navigate = useNavigate();
   const [currentPage, setCurrentPage] = useState(1);
   const containerRef = useRef<HTMLDivElement>(null);
   const [columns, setColumns] = useState(4); // Default to 4
@@ -80,6 +82,23 @@ export default function ProjectsPage() {
     }
   };
 
+  const [creating, setCreating] = useState(false);
+
+  const handleCreateProject = useCallback(async () => {
+    if (creating) return;
+    setCreating(true);
+    try {
+      const response = await api.post('/projects');
+      const newProject: ProjectData = response.data.project;
+      setProjectsData(prev => [newProject, ...prev]);
+      navigate(`/chat/${newProject.id}`);
+    } catch (err) {
+      console.error('Failed to create project', err);
+    } finally {
+      setCreating(false);
+    }
+  }, [creating, navigate]);
+
   if (loading) {
     return (
       <div className="max-w-7xl mx-auto pb-12 flex items-center justify-center min-h-[50vh]">
@@ -95,8 +114,12 @@ export default function ProjectsPage() {
           <h1 className="text-2xl font-bold tracking-tight text-foreground md:text-3xl">Projects</h1>
           <p className="text-sm text-muted-foreground mt-1">Manage your presentations and slide decks.</p>
         </div>
-        <button className="bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 inline-flex items-center justify-center gap-1.5 rounded-md transition-colors">
-          <Plus className="h-4 w-4" />
+        <button
+          onClick={handleCreateProject}
+          disabled={creating}
+          className="cursor-pointer bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 inline-flex items-center justify-center gap-1.5 rounded-md transition-colors disabled:opacity-50 disabled:pointer-events-none"
+        >
+          {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
           <span>New Project</span>
         </button>
       </div>
@@ -130,8 +153,12 @@ export default function ProjectsPage() {
           <div className="flex flex-col items-center justify-center py-16 text-center border-2 border-dashed border-white/10 rounded-xl">
             <h3 className="text-xl font-medium text-foreground mb-2">No Projects</h3>
             <p className="text-muted-foreground mb-6">You haven't created any projects yet.</p>
-            <button className="bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 inline-flex items-center justify-center gap-1.5 rounded-md transition-colors">
-              <Plus className="h-4 w-4" />
+            <button
+              onClick={handleCreateProject}
+              disabled={creating}
+              className="cursor-pointer bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 inline-flex items-center justify-center gap-1.5 rounded-md transition-colors disabled:opacity-50 disabled:pointer-events-none"
+            >
+              {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
               <span>Create your first project</span>
             </button>
           </div>

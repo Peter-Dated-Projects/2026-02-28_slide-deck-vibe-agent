@@ -1,5 +1,5 @@
 import type { Request, Response } from 'express';
-import { dbService as db } from '../core/container';
+import { dbService as db, storageService } from '../core/container';
 
 export const getProjects = async (req: Request, res: Response): Promise<void> => {
     try {
@@ -52,6 +52,62 @@ export const getProjects = async (req: Request, res: Response): Promise<void> =>
         res.json({ projects });
     } catch (error) {
         console.error('Error fetching projects:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+};
+
+export const createProject = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const userId = (req as any).user?.userId;
+        if (!userId) {
+            res.status(401).json({ error: 'Unauthorized' });
+            return;
+        }
+
+        const defaultTitle = 'New Project';
+
+        // 1. Create conversation record in postgres
+        const convResult = await db.query(
+            'INSERT INTO conversations (user_id, title) VALUES ($1, $2) RETURNING id, title, created_at, updated_at',
+            [userId, defaultTitle]
+        );
+        const conversation = convResult.rows[0];
+        const projectId = conversation.id;
+
+        // 2. Upload skeleton HTML file to S3
+        const s3Key = `users/${userId}/${projectId}.html`;
+        const skeletonHtml = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>${defaultTitle}</title>
+</head>
+<body>
+</body>
+</html>`;
+
+        await storageService.uploadFile(s3Key, skeletonHtml, 'text/html');
+
+        // 3. Create a slide record linking the conversation to the S3 file
+        await db.query(
+            'INSERT INTO slides (conversation_id, minio_object_key) VALUES ($1, $2)',
+            [projectId, s3Key]
+        );
+
+        // 4. Return the new project in the same shape as getProjects
+        res.status(201).json({
+            project: {
+                id: projectId,
+                name: conversation.title,
+                createdAt: conversation.created_at,
+                updatedAt: conversation.updated_at,
+                theme: 'Professional',
+                thumbnailUrl: undefined,
+            }
+        });
+    } catch (error) {
+        console.error('Error creating project:', error);
         res.status(500).json({ error: 'Internal server error' });
     }
 };

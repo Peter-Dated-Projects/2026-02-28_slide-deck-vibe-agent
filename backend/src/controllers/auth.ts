@@ -2,7 +2,7 @@ import type { Request, Response } from 'express';
 import { OAuth2Client } from 'google-auth-library';
 import jwt from 'jsonwebtoken';
 import { config } from '../config';
-import { dbService as db } from '../core/container';
+import { dbService as db, storageService } from '../core/container';
 import crypto from 'crypto';
 
 const client = new OAuth2Client(config.auth.googleClientId);
@@ -61,6 +61,8 @@ export const googleAuth = async (req: Request, res: Response): Promise<void> => 
                     [email, googleId, name, profile_picture]
                 );
                 user = insertResult.rows[0];
+                // Initialize user's S3 folder for the recreated user
+                await storageService.uploadFile(`users/${user.id}/.keep`, '', 'text/plain').catch(() => {});
             } else {
                  // update google id if they signed up with email first (if we had email signup)
                  if (!user.google_id) {
@@ -79,6 +81,8 @@ export const googleAuth = async (req: Request, res: Response): Promise<void> => 
             [email, googleId, name, profile_picture]
         );
         user = insertResult.rows[0];
+        // Initialize user's S3 folder
+        await storageService.uploadFile(`users/${user.id}/.keep`, '', 'text/plain').catch(() => {});
     }
 
     // Generate tokens
