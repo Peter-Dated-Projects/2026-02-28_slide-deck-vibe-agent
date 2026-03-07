@@ -37,8 +37,8 @@ export const config = {
     secretKey: process.env.S3_SECRET_KEY || 'admin123',
     bucketName: process.env.S3_BUCKET_NAME || 'vibe-slides',
   },
-  anthropic: {
-    apiKey: process.env.CLAUDE_API_KEY,
+  qwen: {
+    apiKey: process.env.QWEN_API_KEY,
   },
   auth: {
     jwtSecret: process.env.JWT_SECRET || 'super-secret-jwt-key',

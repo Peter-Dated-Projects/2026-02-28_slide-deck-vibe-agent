@@ -3,7 +3,7 @@
   "private": true,
   "scripts": {
     "dev": "bun --watch main.ts",
-    "test": "jest",
+    "test": "NODE_ENV=test jest",
     "typecheck": "tsc --noEmit",
     "init:db": "bun run scripts/init-db.ts"
   },
@@ -38,6 +38,7 @@
     "express": "^5.2.1",
     "google-auth-library": "^10.6.1",
     "jsonwebtoken": "^9.0.3",
+    "openai": "^6.27.0",
     "pg": "^8.19.0"
   }
 }

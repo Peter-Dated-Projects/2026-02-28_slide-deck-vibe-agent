@@ -4,7 +4,7 @@ import type { ILLMService } from './interfaces/ILLMService';
 import type { IStorageService } from './interfaces/IStorageService';
 import type { IDatabaseService } from './interfaces/IDatabaseService';
 
-import { ClaudeProvider } from '../infrastructure/providers/llm/ClaudeProvider';
+import { QwenProvider } from '../infrastructure/providers/llm/QwenProvider';
 import { OllamaProvider } from '../infrastructure/providers/llm/OllamaProvider';
 import { MinioProvider } from '../infrastructure/providers/storage/MinioProvider';
 import { GCPStorageProvider } from '../infrastructure/providers/storage/GCPStorageProvider';
@@ -40,11 +40,13 @@ export const storageService: IStorageService = isLocal
 export const llmService: ILLMService = isLocal
     ? new OllamaProvider(
         process.env.OLLAMA_BASE_URL || 'http://localhost:11434',
+        process.env.OLLAMA_MODEL_KEY || 'llama3.2',
         dbService,
         storageService
     )
-    : new ClaudeProvider(
-        config.anthropic.apiKey || '',
+    : new QwenProvider(
+        config.qwen.apiKey || '',
+        process.env.QWEN_MODEL_KEY || 'qwen3.5-flash',
         dbService,
         storageService
     );

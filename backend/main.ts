@@ -6,7 +6,7 @@ import * as userController from './src/controllers/user';
 import * as projectController from './src/controllers/project';
 import { requireAuth, type AuthRequest } from './src/middleware/auth';
 import { dbService as db } from './src/core/container';
-import { chatWithAgent, processToolCall } from './src/services/agent';
+import { chatWithAgent } from './src/services/agent';
 import { config } from './src/config';
 
 const app = express();
@@ -71,52 +71,20 @@ app.post('/api/chat', requireAuth, async (req: AuthRequest, res: express.Respons
             content: (row.content as any).text || row.content // Handle both string and complex block structures
         }));
 
-        // Call Claude
-        let claudeResponse = await chatWithAgent(currentConvId, messagesContext);
+        // Call Agent
+        let agentResponse = await chatWithAgent(currentConvId, messagesContext);
         
-        // Handle Iterative Tool Calls loop (up to 5 iterations to prevent infinite loops)
-        let iterations = 0;
-        while (claudeResponse.stop_reason === 'tool_use' && iterations < 5) {
-            iterations++;
-            
-            // Save Assistant's tool request
-            await db.query(
-                 'INSERT INTO messages (conversation_id, role, content) VALUES ($1, $2, $3)',
-                 [currentConvId, 'assistant', JSON.stringify(claudeResponse.content)]
-            );
-             messagesContext.push({ role: 'assistant', content: claudeResponse.content });
-
-            // Process Tools
-            const toolResults = [];
-            for (const content of claudeResponse.content) {
-                if (content.type === 'tool_use') {
-                    const result = await processToolCall(content, currentConvId);
-                    toolResults.push(result);
-                }
-            }
-
-            // Save Tool Results
-            await db.query(
-                'INSERT INTO messages (conversation_id, role, content) VALUES ($1, $2, $3)',
-                [currentConvId, 'tool', JSON.stringify(toolResults)]
-           );
-           messagesContext.push({ role: 'tool', content: toolResults });
-
-            // Send back to Claude
-            claudeResponse = await chatWithAgent(currentConvId, messagesContext);
-        }
-
         // Save Final Assistant Response
-        if (claudeResponse.content.length > 0) {
+        if (agentResponse.content.length > 0) {
              await db.query(
                 'INSERT INTO messages (conversation_id, role, content) VALUES ($1, $2, $3)',
-                [currentConvId, 'assistant', JSON.stringify(claudeResponse.content)]
+                [currentConvId, 'assistant', JSON.stringify(agentResponse.content)]
             );
         }
 
         res.json({
              conversationId: currentConvId,
-             response: claudeResponse.content
+             response: agentResponse.content
         });
 
     } catch (error) {
