@@ -31,6 +31,7 @@ app.delete('/api/user/me', requireAuth, userController.deleteUser);
 
 // Project Routes
 app.get('/api/projects', requireAuth, projectController.getProjects);
+app.post('/api/projects', requireAuth, projectController.createProject);
 
 // Agent Chat Route
 app.post('/api/chat', requireAuth, async (req: AuthRequest, res: express.Response): Promise<void> => {

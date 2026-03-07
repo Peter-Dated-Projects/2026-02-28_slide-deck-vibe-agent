@@ -13,6 +13,8 @@
     "build": "cd frontend && bun run build",
     "typecheck": "cd backend && bun run typecheck",
     "init:db": "cd backend && bun run init:db",
+    "sync:db": "cd backend && cross-env NODE_ENV=local bun run sync:db",
+    "manage:db": "cd backend && cross-env NODE_ENV=local bun run manage:db --",
     "test": "cd backend && bun test",
     "start": "concurrently \"docker compose --env-file .env.local up\" \"cd backend && cross-env NODE_ENV=local bun run dev\" \"cd frontend && bun run preview\""
   }
