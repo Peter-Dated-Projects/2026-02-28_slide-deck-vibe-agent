@@ -25,7 +25,8 @@ describe('Qwen LLM - Conversation', () => {
     beforeAll(() => {
         const apiKey = process.env.QWEN_API_KEY;
         if (!apiKey) throw new Error('QWEN_API_KEY is not set in .env.test');
-        provider = new QwenProvider(apiKey, dbStub, storageStub);
+        const model = process.env.QWEN_MODEL_KEY || 'qwen-max';
+        provider = new QwenProvider(apiKey, model, dbStub, storageStub);
     });
 
     it('should complete a 3-turn conversation and return non-empty responses', async () => {
@@ -43,6 +44,10 @@ describe('Qwen LLM - Conversation', () => {
             expect(text!.trim().length).toBeGreaterThan(0);
 
             messages.push({ role: 'assistant', content: text! });
+
+            // Print out conversation
+            console.log(`Turn ${i + 1} - User: "${userMessage}"`);
+            console.log(`Turn ${i + 1} - Assistant: "${text}"`);
         }
     }, 60_000); // 60s timeout for live API calls
 });

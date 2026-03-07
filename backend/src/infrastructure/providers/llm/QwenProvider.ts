@@ -5,14 +5,16 @@ import type { IStorageService } from "../../../core/interfaces/IStorageService";
 
 export class QwenProvider implements ILLMService {
     private openai: OpenAI;
+    private model: string;
     private dbService: IDatabaseService;
     private storageService: IStorageService;
 
-    constructor(apiKey: string, dbService: IDatabaseService, storageService: IStorageService) {
+    constructor(apiKey: string, model: string, dbService: IDatabaseService, storageService: IStorageService) {
         this.openai = new OpenAI({ 
             apiKey,
             baseURL: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
         });
+        this.model = model;
         this.dbService = dbService;
         this.storageService = storageService;
     }
@@ -32,7 +34,7 @@ export class QwenProvider implements ILLMService {
         });
 
         const response = await this.openai.chat.completions.create({
-            model: 'qwen-max',
+            model: this.model,
             messages: [
                 {
                     role: 'system',

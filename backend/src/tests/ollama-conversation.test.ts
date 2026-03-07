@@ -44,6 +44,10 @@ describe('Ollama LLM - Conversation', () => {
             expect(text!.trim().length).toBeGreaterThan(0);
 
             messages.push({ role: 'assistant', content: text! });
+
+            // Print out conversation
+            console.log(`Turn ${i + 1} - User: "${userMessage}"`);
+            console.log(`Turn ${i + 1} - Assistant: "${text}"`);
         }
     }, 120_000); // 120s timeout — local models can be slow
 });

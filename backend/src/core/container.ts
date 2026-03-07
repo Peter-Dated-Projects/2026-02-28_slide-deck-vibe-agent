@@ -46,6 +46,7 @@ export const llmService: ILLMService = isLocal
     )
     : new QwenProvider(
         config.qwen.apiKey || '',
+        process.env.QWEN_MODEL_KEY || 'qwen3.5-flash',
         dbService,
         storageService
     );

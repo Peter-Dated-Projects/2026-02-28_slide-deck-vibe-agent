@@ -41,8 +41,9 @@ describe('Qwen LLM - Tool Calling', () => {
     });
 
     it('should trigger the echo_test dummy tool call', async () => {
+        const model = process.env.QWEN_MODEL_KEY || 'qwen-max';
         const response = await openai.chat.completions.create({
-            model: 'qwen-max',
+            model,
             messages: [
                 {
                     role: 'system',
