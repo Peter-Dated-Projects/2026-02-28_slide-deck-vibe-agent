@@ -1,9 +1,11 @@
 import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { ProjectCard, ProjectData } from '../../components/dashboard/ProjectCard';
 import { ChevronLeft, ChevronRight, Plus, Loader2 } from 'lucide-react';
 import api from '../../api';
 
 export default function ProjectsPage() {
+  const navigate = useNavigate();
   const [currentPage, setCurrentPage] = useState(1);
   const containerRef = useRef<HTMLDivElement>(null);
   const [columns, setColumns] = useState(4); // Default to 4
@@ -89,12 +91,13 @@ export default function ProjectsPage() {
       const response = await api.post('/projects');
       const newProject: ProjectData = response.data.project;
       setProjectsData(prev => [newProject, ...prev]);
+      navigate(`/chat/${newProject.id}`);
     } catch (err) {
       console.error('Failed to create project', err);
     } finally {
       setCreating(false);
     }
-  }, [creating]);
+  }, [creating, navigate]);
 
   if (loading) {
     return (
