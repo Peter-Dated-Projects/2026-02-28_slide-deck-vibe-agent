@@ -1,11 +1,11 @@
 import { expect, test, describe, beforeAll, afterAll } from "bun:test";
-import { VibeManager } from "./vibeManager";
+import { VibeManager } from "../../core/vibeManager";
 import * as fs from "fs/promises";
 import * as path from "path";
 
 const FIXTURE_DIR = path.join(__dirname, "fixtures");
 const TEST_TEMPLATE_PATH = path.join(FIXTURE_DIR, "template.test.html");
-const ORIGINAL_TEMPLATE_PATH = path.join(__dirname, "template.html");
+const ORIGINAL_TEMPLATE_PATH = path.join(__dirname, "../../core/template.html");
 
 describe("VibeManager", () => {
   beforeAll(async () => {
