@@ -190,7 +190,7 @@ const mdComponents = {
     </a>
   ),
   table: ({ node: _n, children }: any) => (
-    <div className="overflow-x-auto my-2">
+    <div className="overflow-x-auto my-2 w-full">
       <table className="text-[11px] border-collapse w-full">{children}</table>
     </div>
   ),
@@ -234,7 +234,8 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
     <div className={cn("flex w-full", isUser ? "justify-end" : "justify-start")}>
       <div
         className={cn(
-          "max-w-[85%] rounded-[8px] px-4 py-2.5 mt-2 transition-all duration-200",
+          isUser ? "max-w-[70%]" : "w-full",
+          "rounded-[8px] px-4 py-2.5 mt-2 transition-all duration-200",
           isUser
             ? "bg-primary text-primary-foreground rounded-tr-[2px] shadow-sm"
             : "bg-card text-foreground rounded-tl-[2px] border border-border",

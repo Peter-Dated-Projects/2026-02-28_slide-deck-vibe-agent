@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
-import api from "../api";
+import api, { getAccessToken } from "../api";
 import { SlideRenderer, type SlideData } from "../components/SlideRenderer";
 import { ChatMessage, type ChatMessageData } from "../components/chat/ChatMessage";
 import {
@@ -72,10 +72,12 @@ const ChatPage: React.FC = () => {
   const [isTitleFocused, setIsTitleFocused] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const isResizing = useRef(false);
   const startX = useRef(0);
   const startWidth = useRef(0);
+  const userScrolledUp = useRef(false);
 
   const handleResizeMouseDown = (e: React.MouseEvent) => {
     isResizing.current = true;
@@ -106,7 +108,20 @@ const ChatPage: React.FC = () => {
   };
 
   const scrollToBottom = useCallback(() => {
+    if (userScrolledUp.current) return;
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, []);
+
+  // Detect manual upward scroll — stop auto-scrolling while user is reading
+  useEffect(() => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+    const onScroll = () => {
+      const distFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+      userScrolledUp.current = distFromBottom > 80;
+    };
+    container.addEventListener("scroll", onScroll, { passive: true });
+    return () => container.removeEventListener("scroll", onScroll);
   }, []);
 
   useEffect(() => {
@@ -134,6 +149,9 @@ const ChatPage: React.FC = () => {
         );
         setMessages(hydratedMessages);
         if (msgRes.data.title) setDeckTitle(msgRes.data.title);
+        // Always start at the bottom when opening a conversation
+        userScrolledUp.current = false;
+        setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: "instant" }), 50);
       })
       .catch((err) => {
         console.error("Failed to load conversation history:", err);
@@ -213,13 +231,11 @@ const ChatPage: React.FC = () => {
     if (!userText || isLoading) return;
 
     setInput("");
-    // Reset textarea height
-    if (textareaRef.current) {
-      textareaRef.current.style.height = "auto";
-    }
+    if (textareaRef.current) textareaRef.current.style.height = "auto";
+    userScrolledUp.current = false; // snap back to bottom for new message
     setIsLoading(true);
 
-    // 1. Append user message to the UI immediately
+    // 1. Append user message immediately
     const userMsg: ChatMessageData = {
       id: generateId(),
       role: "user",
@@ -227,7 +243,7 @@ const ChatPage: React.FC = () => {
     };
     setMessages((prev) => [...prev, userMsg]);
 
-    // 2. Insert a thinking placeholder for the assistant
+    // 2. Insert thinking placeholder
     const assistantId = generateId();
     const thinkingStartedAt = Date.now();
     setMessages((prev) => [
@@ -246,43 +262,86 @@ const ChatPage: React.FC = () => {
       const payload: Record<string, string> = { message: userText };
       if (conversationId) payload.conversationId = conversationId;
 
-      const res = await api.post("/chat", payload);
+      const token = getAccessToken();
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/chat/stream`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        credentials: "include",
+        body: JSON.stringify(payload),
+      });
 
-      // Navigate to the conversation URL on first message
-      if (!conversationId && res.data.conversationId) {
-        navigate(`/chat/${res.data.conversationId}`, { replace: true });
+      if (!response.ok || !response.body) {
+        throw new Error(`Stream request failed: ${response.status}`);
       }
 
-      // Extract text from the response content blocks
-      const responseBlocks: { type: string; text: string }[] = res.data.response ?? [];
-      const responseText =
-        responseBlocks
-          .filter((b) => b.type === "text")
-          .map((b) => b.text)
-          .join("\n")
-          .trim() || "Processed your request.";
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let accumulatedText = "";
+      let firstToken = true;
+      let doneConvId = conversationId ?? null;
 
-      const thinkingElapsed = Math.floor((Date.now() - thinkingStartedAt) / 1000);
+      outer: while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
 
-      // 3. Resolve the thinking block and inject response text
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === assistantId
-            ? {
-                ...m,
-                content: responseText,
-                isThinking: false,
-                thinkingTime: thinkingElapsed,
-                thinkingContent: `Processed message in ${thinkingElapsed}s`,
-              }
-            : m,
-        ),
-      );
+        buffer += decoder.decode(value, { stream: true });
 
-      // Refetch slides in case the agent updated them
-      if (res.data.conversationId) {
-        fetchPresentation(res.data.conversationId);
+        // SSE format: "event: <name>\ndata: <json>\n\n"
+        const parts = buffer.split("\n\n");
+        buffer = parts.pop() ?? "";
+
+        for (const part of parts) {
+          const eventMatch = part.match(/^event: (\w+)/);
+          const dataMatch = part.match(/^data: (.+)$/m);
+          if (!dataMatch) continue;
+
+          const eventName = eventMatch?.[1] ?? "message";
+          const data = JSON.parse(dataMatch[1]);
+
+          if (eventName === "token") {
+            accumulatedText += data.token;
+
+            // Dismiss thinking block on the very first token
+            if (firstToken) {
+              firstToken = false;
+              const thinkingElapsed = Math.floor((Date.now() - thinkingStartedAt) / 1000);
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantId
+                    ? {
+                        ...m,
+                        isThinking: false,
+                        thinkingTime: thinkingElapsed,
+                        content: accumulatedText,
+                      }
+                    : m,
+                ),
+              );
+            } else {
+              setMessages((prev) =>
+                prev.map((m) => (m.id === assistantId ? { ...m, content: accumulatedText } : m)),
+              );
+            }
+          } else if (eventName === "done") {
+            doneConvId = data.conversationId;
+            break outer;
+          } else if (eventName === "error") {
+            throw new Error(data.message ?? "Stream error");
+          }
+        }
       }
+
+      // Navigate to conversation URL on first message
+      if (!conversationId && doneConvId) {
+        navigate(`/chat/${doneConvId}`, { replace: true });
+      }
+
+      // Refetch slides
+      if (doneConvId) fetchPresentation(doneConvId);
     } catch (error: any) {
       console.error("Chat error:", error);
       const thinkingElapsed = Math.floor((Date.now() - thinkingStartedAt) / 1000);
@@ -395,7 +454,10 @@ const ChatPage: React.FC = () => {
         </div>
 
         {/* Message History */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-1 scroll-smooth custom-scrollbar">
+        <div
+          ref={messagesContainerRef}
+          className="flex-1 overflow-y-auto p-6 space-y-1 scroll-smooth custom-scrollbar"
+        >
           {historyLoading && (
             <div className="h-full flex items-center justify-center text-muted-foreground">
               <Loader2 className="w-5 h-5 animate-spin mr-2" />

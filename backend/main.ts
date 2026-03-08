@@ -6,7 +6,7 @@ import * as userController from './src/controllers/user';
 import * as projectController from './src/controllers/project';
 import { requireAuth, type AuthRequest } from './src/middleware/auth';
 import { dbService as db } from './src/core/container';
-import { chatWithAgent } from './src/services/agent';
+import { chatWithAgent, chatWithAgentStream } from './src/services/agent';
 import { config } from './src/config';
 
 const app = express();
@@ -103,6 +103,89 @@ app.post('/api/chat', requireAuth, async (req: AuthRequest, res: express.Respons
     } catch (error) {
         console.error('Chat error:', error);
         res.status(500).json({ error: 'Internal server error processing chat' });
+    }
+});
+
+// ── Streaming Chat Route (SSE) ──────────────────────────────────────────────
+app.post('/api/chat/stream', requireAuth, async (req: AuthRequest, res: express.Response): Promise<void> => {
+    const { message, conversationId } = req.body;
+    const userId = req.user!.userId;
+
+    if (!message) {
+        res.status(400).json({ error: 'Message is required' });
+        return;
+    }
+
+    // SSE headers — disable buffering so tokens arrive immediately
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no'); // disable nginx buffering if proxied
+    res.flushHeaders();
+
+    const send = (event: string, data: string) => {
+        res.write(`event: ${event}\ndata: ${data}\n\n`);
+    };
+
+    try {
+        let currentConvId = conversationId;
+
+        // Create conversation if needed
+        if (!currentConvId) {
+            const convResult = await db.query(
+                'INSERT INTO conversations (user_id, title) VALUES ($1, $2) RETURNING id',
+                [userId, message.substring(0, 50) + '...']
+            );
+            currentConvId = convResult.rows[0].id;
+        }
+
+        // Save user message
+        await db.query(
+            'INSERT INTO messages (conversation_id, role, content) VALUES ($1, $2, $3)',
+            [currentConvId, 'user', JSON.stringify({ text: message })]
+        );
+
+        // Fetch conversation history
+        const historyResult = await db.query(
+            'SELECT role, content FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC',
+            [currentConvId]
+        );
+
+        const messagesContext: any[] = historyResult.rows.map((row: any) => {
+            const raw = row.content;
+            let text: string;
+            if (typeof raw === 'string') {
+                text = raw;
+            } else if (raw?.text) {
+                text = raw.text;
+            } else if (Array.isArray(raw)) {
+                text = raw.filter((b: any) => b.type === 'text').map((b: any) => b.text).join('\n');
+            } else {
+                text = JSON.stringify(raw);
+            }
+            return { role: row.role as string, content: text };
+        });
+
+        // Stream tokens to client
+        const fullText = await chatWithAgentStream(currentConvId, messagesContext, (token) => {
+            send('token', JSON.stringify({ token }));
+        });
+
+        // Persist full response
+        if (fullText) {
+            await db.query(
+                'INSERT INTO messages (conversation_id, role, content) VALUES ($1, $2, $3)',
+                [currentConvId, 'assistant', JSON.stringify([{ type: 'text', text: fullText }])]
+            );
+        }
+
+        // Signal completion
+        send('done', JSON.stringify({ conversationId: currentConvId }));
+        res.end();
+    } catch (error) {
+        console.error('Stream chat error:', error);
+        send('error', JSON.stringify({ message: 'Error processing your request' }));
+        res.end();
     }
 });
 
