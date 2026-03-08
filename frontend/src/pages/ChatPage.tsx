@@ -7,13 +7,14 @@ import { ChatMessage, type ChatMessageData } from "../components/chat/ChatMessag
 import {
   Send,
   Loader2,
-  LogOut,
   ChevronLeft,
   ChevronRight,
   Presentation,
   Trash2,
   CreditCard,
   X,
+  Home,
+  Pencil,
 } from "lucide-react";
 
 // ─────────────────────────────────────────────────────
@@ -67,6 +68,8 @@ const ChatPage: React.FC = () => {
   const [isDeleting, setIsDeleting] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(380);
   const [isResizingState, setIsResizingState] = useState(false);
+  const [deckTitle, setDeckTitle] = useState("New Presentation");
+  const [isTitleFocused, setIsTitleFocused] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -130,6 +133,7 @@ const ChatPage: React.FC = () => {
           }),
         );
         setMessages(hydratedMessages);
+        if (msgRes.data.title) setDeckTitle(msgRes.data.title);
       })
       .catch((err) => {
         console.error("Failed to load conversation history:", err);
@@ -138,6 +142,19 @@ const ChatPage: React.FC = () => {
         setHistoryLoading(false);
       });
   }, [conversationId]);
+
+  // ─────────────────────────────────────────────────────
+  // Debounced title save
+  // ─────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!conversationId || !deckTitle.trim()) return;
+    const timer = setTimeout(() => {
+      api
+        .patch(`/conversations/${conversationId}/title`, { title: deckTitle.trim() })
+        .catch((err) => console.error("Failed to save title:", err));
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [conversationId, deckTitle]);
 
   // ─────────────────────────────────────────────────────
   // Slide fetching
@@ -332,37 +349,49 @@ const ChatPage: React.FC = () => {
         style={{ width: sidebarWidth }}
       >
         {/* Header */}
-        <div className="h-16 border-b border-border flex items-center justify-between px-6 shrink-0 bg-muted/50">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-primary/20 flex items-center justify-center border border-primary/30">
-              <Presentation className="w-4 h-4 text-primary" />
-            </div>
-            <span className="font-semibold text-foreground tracking-wide text-sm">Vibe Agent</span>
+        <div className="h-16 border-b border-border flex items-center gap-2 px-4 shrink-0 bg-muted/50">
+          {/* Logo icon — clickable, returns to dashboard */}
+          <button
+            onClick={() => navigate("/")}
+            className="flex-shrink-0 w-8 h-8 rounded-lg bg-primary/20 flex items-center justify-center border border-primary/30 hover:opacity-75 transition-opacity cursor-pointer"
+            title="Back to Dashboard"
+          >
+            <Presentation className="w-4 h-4 text-primary" />
+          </button>
+
+          {/* Editable deck title */}
+          <div className="relative flex-1 min-w-0 flex items-center group">
+            <input
+              type="text"
+              value={deckTitle}
+              onChange={(e) => setDeckTitle(e.target.value)}
+              onFocus={() => setIsTitleFocused(true)}
+              onBlur={() => setIsTitleFocused(false)}
+              onClick={(e) => e.stopPropagation()}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") e.currentTarget.blur();
+              }}
+              className={cn(
+                "w-full bg-transparent text-sm font-semibold text-foreground tracking-wide",
+                "px-1.5 py-0.5 rounded-md outline-none truncate transition-all",
+                isTitleFocused ? "ring-1 ring-primary/50 bg-muted/60" : "hover:bg-muted/40",
+              )}
+              title={deckTitle}
+              maxLength={120}
+            />
+            {!isTitleFocused && (
+              <Pencil className="w-3 h-3 text-muted-foreground opacity-0 group-hover:opacity-60 transition-opacity absolute right-1.5 pointer-events-none" />
+            )}
           </div>
 
-          <div className="relative flex items-center gap-2">
-            <button
-              onClick={() => setShowSettings(!showSettings)}
-              className="text-zinc-400 hover:text-white transition-colors p-2 rounded-lg hover:bg-white/5"
-              title="Settings"
-            >
-              {user?.profile_picture ? (
-                <img src={user.profile_picture} alt="Profile" className="w-6 h-6 rounded-full" />
-              ) : (
-                <div className="w-6 h-6 rounded-full bg-primary flex items-center justify-center text-[10px] text-primary-foreground font-bold">
-                  {user?.name?.charAt(0) || user?.email?.charAt(0) || "U"}
-                </div>
-              )}
-            </button>
-            <button
-              onClick={logout}
-              className="text-muted-foreground hover:text-foreground transition-colors p-2 rounded-lg hover:bg-muted"
-              title="Logout"
-            >
-              <LogOut className="w-4 h-4" />
-            </button>
-            {showSettings && renderSettingsModal()}
-          </div>
+          {/* Home button */}
+          <button
+            onClick={() => navigate("/")}
+            className="text-muted-foreground hover:text-foreground transition-colors p-2 rounded-lg hover:bg-muted cursor-pointer"
+            title="Back to Dashboard"
+          >
+            <Home className="w-4 h-4" />
+          </button>
         </div>
 
         {/* Message History */}
@@ -439,9 +468,34 @@ const ChatPage: React.FC = () => {
         RIGHT PANEL: SLIDE RENDERER CANVAS
         =========================================
       */}
-      <div className="flex-1 relative bg-muted overflow-hidden">
+      <div className="flex-1 relative bg-muted overflow-hidden flex flex-col">
+        {/* ── Canvas Top Bar: reserved space for profile ── */}
+        <div className="h-14 shrink-0 flex items-center justify-end px-4 z-30 relative bg-card/60 backdrop-blur-sm shadow-[0_1px_6px_rgba(0,0,0,0.12)]">
+          <div className="relative">
+            <button
+              onClick={() => setShowSettings(!showSettings)}
+              className="text-zinc-400 hover:text-white transition-colors p-1.5 rounded-full hover:bg-white/10 cursor-pointer"
+              title="Profile & Settings"
+            >
+              {user?.profile_picture ? (
+                <img
+                  src={user.profile_picture}
+                  alt="Profile"
+                  className="w-8 h-8 rounded-full ring-2 ring-border"
+                />
+              ) : (
+                <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-xs text-primary-foreground font-bold ring-2 ring-border">
+                  {user?.name?.charAt(0) || user?.email?.charAt(0) || "U"}
+                </div>
+              )}
+            </button>
+            {showSettings && renderSettingsModal()}
+          </div>
+        </div>
+
+        {/* ── Dot-grid background (below top bar) ── */}
         <div
-          className="absolute inset-0 opacity-20 pointer-events-none"
+          className="absolute inset-x-2 bottom-2 top-16 opacity-20 pointer-events-none"
           style={{
             backgroundImage: "radial-gradient(circle at center, #aaa 1px, transparent 1px)",
             backgroundSize: "24px 24px",
@@ -449,14 +503,14 @@ const ChatPage: React.FC = () => {
         />
 
         {slides.length === 0 ? (
-          <div className="absolute inset-0 flex flex-col items-center justify-center text-muted-foreground space-y-4">
+          <div className="absolute inset-x-2 bottom-2 top-16 flex flex-col items-center justify-center text-muted-foreground space-y-4">
             <Presentation className="w-16 h-16 opacity-30" />
             <p className="text-xl font-medium tracking-wide">Canvas is empty</p>
           </div>
         ) : (
           <>
-            {/* Slides fill the entire right panel, edge-to-edge */}
-            <div className="absolute inset-0">
+            {/* Slides fill the canvas below the top bar */}
+            <div className="absolute inset-x-2 bottom-2 top-16">
               {slides.map((slide, idx) => (
                 <div
                   key={slide.id || idx}
@@ -478,7 +532,7 @@ const ChatPage: React.FC = () => {
               ))}
             </div>
 
-            <div className="absolute bottom-12 flex items-center gap-6 bg-card/80 backdrop-blur-xl border border-border px-6 py-3 rounded-full shadow-card z-20">
+            <div className="absolute bottom-12 left-1/2 -translate-x-1/2 flex items-center gap-6 bg-card/80 backdrop-blur-xl border border-border px-6 py-3 rounded-full shadow-card z-20">
               <button
                 onClick={prevSlide}
                 disabled={currentSlideIndex === 0}
@@ -519,7 +573,7 @@ const ChatPage: React.FC = () => {
   function renderSettingsModal() {
     if (!user) return null;
     return (
-      <div className="absolute top-12 right-0 w-80 bg-card border border-border rounded-xl shadow-card p-6 z-50 animate-in fade-in slide-in-from-top-2">
+      <div className="absolute top-10 right-0 w-80 bg-card border border-border rounded-xl shadow-card p-6 z-50 animate-in fade-in slide-in-from-top-2">
         <div className="flex justify-between items-start mb-4">
           <h3 className="text-lg font-semibold text-foreground">Profile Settings</h3>
           <button

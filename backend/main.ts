@@ -112,9 +112,9 @@ app.get('/api/conversations/:conversationId/messages', requireAuth, async (req: 
         const { conversationId } = req.params;
         const userId = req.user!.userId;
 
-        // Verify ownership
+        // Verify ownership and fetch title
         const convResult = await db.query(
-            'SELECT user_id FROM conversations WHERE id = $1',
+            'SELECT user_id, title FROM conversations WHERE id = $1',
             [conversationId]
         );
         if (convResult.rows.length === 0 || convResult.rows[0].user_id !== userId) {
@@ -151,10 +151,43 @@ app.get('/api/conversations/:conversationId/messages', requireAuth, async (req: 
             };
         });
 
-        res.json({ messages });
+        res.json({ messages, title: convResult.rows[0].title ?? 'Untitled' });
     } catch (error) {
         console.error('Error fetching messages:', error);
         res.status(500).json({ error: 'Error fetching conversation messages' });
+    }
+});
+
+// Update Conversation Title Route (Protected)
+app.patch('/api/conversations/:conversationId/title', requireAuth, async (req: AuthRequest, res: express.Response): Promise<void> => {
+    try {
+        const { conversationId } = req.params;
+        const { title } = req.body;
+        const userId = req.user!.userId;
+
+        if (!title || typeof title !== 'string') {
+            res.status(400).json({ error: 'title is required' });
+            return;
+        }
+
+        const check = await db.query(
+            'SELECT user_id FROM conversations WHERE id = $1',
+            [conversationId]
+        );
+        if (check.rows.length === 0 || check.rows[0].user_id !== userId) {
+            res.status(404).json({ error: 'Conversation not found' });
+            return;
+        }
+
+        await db.query(
+            'UPDATE conversations SET title = $1, updated_at = NOW() WHERE id = $2',
+            [title.trim(), conversationId]
+        );
+
+        res.json({ title: title.trim() });
+    } catch (error) {
+        console.error('Error updating conversation title:', error);
+        res.status(500).json({ error: 'Internal server error' });
     }
 });
 
