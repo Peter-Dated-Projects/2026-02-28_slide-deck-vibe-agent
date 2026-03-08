@@ -5,6 +5,7 @@
  * Requires OLLAMA_MODEL_KEY in .env.test. OLLAMA_BASE_URL defaults to http://localhost:11434.
  */
 
+import { describe, expect, beforeAll, it } from "bun:test";
 import '../config';
 import { OllamaProvider } from '../infrastructure/providers/llm/OllamaProvider';
 import type { IDatabaseService } from '../core/interfaces/IDatabaseService';
@@ -19,7 +20,10 @@ const USER_MESSAGES = [
     "What slide topics would you suggest for the deck?"
 ];
 
-describe('Ollama LLM - Conversation', () => {
+// Check if the user ran 'bun test integration'
+const isIntegrationRun = process.argv.join(' ').includes('integration');
+
+describe.skipIf(!isIntegrationRun)('Ollama LLM - Conversation', () => {
     let provider: OllamaProvider;
 
     beforeAll(() => {

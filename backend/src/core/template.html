@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vibe Slide Engine Dashboard Template</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css" rel="stylesheet">
+    <style>
+        /* --- CORE ENGINE (READ ONLY) --- */
+        :root {
+            --base-width: 1920px;
+            --base-height: 1080px;
+            --vibe-scale: 1; /* Managed by JS */
+        }
+
+        <!-- VIBE_THEME_START -->
+        :root {
+            --vibe-primary: #3b82f6;
+            --vibe-secondary: #8b5cf6;
+            --vibe-bg: #0f172a;
+            --vibe-text: #f8fafc;
+            --vibe-accent: #10b981;
+            --vibe-font: 'Inter', system-ui, sans-serif;
+        }
+        <!-- VIBE_THEME_END -->
+
+        /* --- TRANSITIONS --- */
+        .slide-container {
+            scroll-behavior: smooth;
+            perspective: 2000px;
+        }
+
+        .slide {
+            transition: all 0.8s cubic-bezier(0.22, 1, 0.36, 1);
+            opacity: 1;
+        }
+
+        .vibe-transition-blur .slide-aspect-ratio-box {
+            animation: blurReveal 1s ease-out forwards;
+        }
+
+        @keyframes blurReveal {
+            from { opacity: 0; filter: blur(20px); transform: scale(calc(var(--vibe-scale) * 1.05)); }
+            to { opacity: 1; filter: blur(0); transform: scale(var(--vibe-scale)); }
+        }
+
+        /* --- BASE STYLES --- */
+        body, html {
+            background-color: #000;
+            margin: 0; padding: 0;
+            width: 100%; height: 100%;
+            overflow: hidden;
+            display: flex; justify-content: center; align-items: center;
+            font-family: var(--vibe-font);
+        }
+
+        .slide-container {
+            width: 100vw; height: 100vh;
+            scroll-snap-type: y mandatory;
+            overflow-y: auto; overflow-x: hidden;
+        }
+
+        .slide {
+            width: 100vw; height: 100vh;
+            scroll-snap-align: start;
+            display: flex; justify-content: center; align-items: center;
+            background-color: var(--vibe-bg);
+        }
+
+        .slide-aspect-ratio-box {
+            width: var(--base-width);
+            height: var(--base-height);
+            background-color: var(--vibe-bg);
+            color: var(--vibe-text);
+            position: relative;
+            flex-shrink: 0;
+            display: flex; flex-direction: column; justify-content: center;
+            padding: 80px; box-sizing: border-box;
+            transform-origin: center center;
+            backface-visibility: hidden;
+            transform: scale(var(--vibe-scale));
+        }
+
+        .vibe-nav {
+            position: fixed; bottom: 30px; right: 30px;
+            display: flex; gap: 15px; z-index: 100;
+        }
+
+        .nav-btn {
+            background: rgba(0, 0, 0, 0.4); backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: white; width: 60px; height: 60px; border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            cursor: pointer; font-size: 24px;
+        }
+    </style>
+</head>
+<body class="vibe-transition-blur">
+
+    <div class="slide-container" id="vibe-deck">
+        <!-- VIBE_SLIDES_CONTAINER_START -->
+        
+        <!-- VIBE_SLIDE_1_START -->
+        <section class="slide">
+            <div class="slide-aspect-ratio-box items-center text-center">
+                <h1 class="text-[120px] font-black text-[var(--vibe-primary)] leading-none mb-10">New Presentation</h1>
+                <p class="text-[48px] opacity-80 max-w-4xl">Edit Theme and Add Slides using the AI Agent</p>
+            </div>
+        </section>
+        <!-- VIBE_SLIDE_1_END -->
+
+
+        <!-- VIBE_SLIDES_CONTAINER_END -->
+    </div>
+
+    <nav class="vibe-nav">
+        <button class="nav-btn" onclick="prevSlide()">↑</button>
+        <button class="nav-btn" onclick="nextSlide()">↓</button>
+    </nav>
+
+    <script>
+        const container = document.getElementById('vibe-deck');
+        
+        function updateScale() {
+            const scale = Math.min(window.innerWidth / 1920, window.innerHeight / 1080);
+            document.documentElement.style.setProperty('--vibe-scale', scale);
+        }
+
+        function nextSlide() { container.scrollBy({ top: window.innerHeight, behavior: 'smooth' }); }
+        function prevSlide() { container.scrollBy({ top: -window.innerHeight, behavior: 'smooth' }); }
+
+        window.addEventListener('resize', updateScale);
+        window.addEventListener('load', updateScale);
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowDown') nextSlide();
+            if (e.key === 'ArrowUp') prevSlide();
+        });
+        updateScale();
+    </script>
+</body>
+</html>
