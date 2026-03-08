@@ -14,6 +14,7 @@ import {
   CreditCard,
   X,
   Home,
+  Pencil,
 } from "lucide-react";
 
 // ─────────────────────────────────────────────────────
@@ -67,6 +68,8 @@ const ChatPage: React.FC = () => {
   const [isDeleting, setIsDeleting] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(380);
   const [isResizingState, setIsResizingState] = useState(false);
+  const [deckTitle, setDeckTitle] = useState("New Presentation");
+  const [isTitleFocused, setIsTitleFocused] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -130,6 +133,7 @@ const ChatPage: React.FC = () => {
           }),
         );
         setMessages(hydratedMessages);
+        if (msgRes.data.title) setDeckTitle(msgRes.data.title);
       })
       .catch((err) => {
         console.error("Failed to load conversation history:", err);
@@ -138,6 +142,19 @@ const ChatPage: React.FC = () => {
         setHistoryLoading(false);
       });
   }, [conversationId]);
+
+  // ─────────────────────────────────────────────────────
+  // Debounced title save
+  // ─────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!conversationId || !deckTitle.trim()) return;
+    const timer = setTimeout(() => {
+      api
+        .patch(`/conversations/${conversationId}/title`, { title: deckTitle.trim() })
+        .catch((err) => console.error("Failed to save title:", err));
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [conversationId, deckTitle]);
 
   // ─────────────────────────────────────────────────────
   // Slide fetching
@@ -332,18 +349,40 @@ const ChatPage: React.FC = () => {
         style={{ width: sidebarWidth }}
       >
         {/* Header */}
-        <div className="h-16 border-b border-border flex items-center justify-between px-4 shrink-0 bg-muted/50">
-          {/* Logo — clickable, returns to dashboard */}
+        <div className="h-16 border-b border-border flex items-center gap-2 px-4 shrink-0 bg-muted/50">
+          {/* Logo icon — clickable, returns to dashboard */}
           <button
             onClick={() => navigate("/")}
-            className="flex items-center gap-3 hover:opacity-75 transition-opacity rounded-lg px-2 py-1"
+            className="flex-shrink-0 w-8 h-8 rounded-lg bg-primary/20 flex items-center justify-center border border-primary/30 hover:opacity-75 transition-opacity cursor-pointer"
             title="Back to Dashboard"
           >
-            <div className="w-8 h-8 rounded-lg bg-primary/20 flex items-center justify-center border border-primary/30">
-              <Presentation className="w-4 h-4 text-primary" />
-            </div>
-            <span className="font-semibold text-foreground tracking-wide text-sm">Vibe Agent</span>
+            <Presentation className="w-4 h-4 text-primary" />
           </button>
+
+          {/* Editable deck title */}
+          <div className="relative flex-1 min-w-0 flex items-center group">
+            <input
+              type="text"
+              value={deckTitle}
+              onChange={(e) => setDeckTitle(e.target.value)}
+              onFocus={() => setIsTitleFocused(true)}
+              onBlur={() => setIsTitleFocused(false)}
+              onClick={(e) => e.stopPropagation()}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") e.currentTarget.blur();
+              }}
+              className={cn(
+                "w-full bg-transparent text-sm font-semibold text-foreground tracking-wide",
+                "px-1.5 py-0.5 rounded-md outline-none truncate transition-all",
+                isTitleFocused ? "ring-1 ring-primary/50 bg-muted/60" : "hover:bg-muted/40",
+              )}
+              title={deckTitle}
+              maxLength={120}
+            />
+            {!isTitleFocused && (
+              <Pencil className="w-3 h-3 text-muted-foreground opacity-0 group-hover:opacity-60 transition-opacity absolute right-1.5 pointer-events-none" />
+            )}
+          </div>
 
           {/* Home button */}
           <button
@@ -431,11 +470,11 @@ const ChatPage: React.FC = () => {
       */}
       <div className="flex-1 relative bg-muted overflow-hidden flex flex-col">
         {/* ── Canvas Top Bar: reserved space for profile ── */}
-        <div className="h-14 shrink-0 flex items-center justify-end px-4 z-30 relative">
+        <div className="h-14 shrink-0 flex items-center justify-end px-4 z-30 relative bg-card/60 backdrop-blur-sm shadow-[0_1px_6px_rgba(0,0,0,0.12)]">
           <div className="relative">
             <button
               onClick={() => setShowSettings(!showSettings)}
-              className="text-zinc-400 hover:text-white transition-colors p-1.5 rounded-full hover:bg-white/10"
+              className="text-zinc-400 hover:text-white transition-colors p-1.5 rounded-full hover:bg-white/10 cursor-pointer"
               title="Profile & Settings"
             >
               {user?.profile_picture ? (
@@ -456,7 +495,7 @@ const ChatPage: React.FC = () => {
 
         {/* ── Dot-grid background (below top bar) ── */}
         <div
-          className="absolute inset-x-0 bottom-0 top-14 opacity-20 pointer-events-none"
+          className="absolute inset-x-2 bottom-2 top-16 opacity-20 pointer-events-none"
           style={{
             backgroundImage: "radial-gradient(circle at center, #aaa 1px, transparent 1px)",
             backgroundSize: "24px 24px",
@@ -464,14 +503,14 @@ const ChatPage: React.FC = () => {
         />
 
         {slides.length === 0 ? (
-          <div className="absolute inset-x-0 bottom-0 top-14 flex flex-col items-center justify-center text-muted-foreground space-y-4">
+          <div className="absolute inset-x-2 bottom-2 top-16 flex flex-col items-center justify-center text-muted-foreground space-y-4">
             <Presentation className="w-16 h-16 opacity-30" />
             <p className="text-xl font-medium tracking-wide">Canvas is empty</p>
           </div>
         ) : (
           <>
             {/* Slides fill the canvas below the top bar */}
-            <div className="absolute inset-x-0 bottom-0 top-14">
+            <div className="absolute inset-x-2 bottom-2 top-16">
               {slides.map((slide, idx) => (
                 <div
                   key={slide.id || idx}
