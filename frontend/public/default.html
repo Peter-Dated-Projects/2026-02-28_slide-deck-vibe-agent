@@ -3,59 +3,99 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Vibe Slide Preview - 16:9 Proportional</title>
+    <title>Vibe Slide Engine</title>
+    <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css" rel="stylesheet">
     <style>
+        /* --- CORE ENGINE (READ ONLY) --- */
+        :root {
+            --base-width: 1920px;
+            --base-height: 1080px;
+            --vibe-scale: 1; /* Managed by JS */
+        }
+
+        /* <!-- VIBE_THEME_START --> */
         :root {
             --vibe-primary: #3b82f6;
             --vibe-secondary: #10b981;
             --vibe-bg: #0f172a;
             --vibe-text: #f8fafc;
             --vibe-accent: #f59e0b;
-            
-            /* Internal constants for the scaling engine */
-            --base-width: 1920px;
-            --base-height: 1080px;
+            --vibe-font: 'Inter', sans-serif;
         }
+        /* <!-- VIBE_THEME_END --> */
+
+        /* <!-- VIBE_TRANSITIONS_START --> */
+        .slide-container {
+            scroll-behavior: smooth;
+            perspective: 2000px;
+        }
+
+        .slide {
+            transition: all 0.8s cubic-bezier(0.22, 1, 0.36, 1);
+            opacity: 1;
+        }
+
+        /* Animations now respect the calculated --vibe-scale */
+        .vibe-transition-zoom .slide-aspect-ratio-box {
+            animation: zoomIn 0.7s ease-out forwards;
+        }
+
+        .vibe-transition-blur .slide-aspect-ratio-box {
+            animation: blurReveal 1s ease-out forwards;
+        }
+
+        .vibe-transition-flip .slide-aspect-ratio-box {
+            animation: flip3D 0.8s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+        }
+
+        @keyframes zoomIn {
+            from { opacity: 0; transform: scale(calc(var(--vibe-scale) * 0.85)) translateY(30px); }
+            to { opacity: 1; transform: scale(var(--vibe-scale)) translateY(0); }
+        }
+
+        @keyframes blurReveal {
+            from { opacity: 0; filter: blur(20px); transform: scale(calc(var(--vibe-scale) * 1.05)); }
+            to { opacity: 1; filter: blur(0); transform: scale(var(--vibe-scale)); }
+        }
+
+        @keyframes flip3D {
+            from { opacity: 0; transform: rotateX(-15deg) translateZ(-200px) scale(var(--vibe-scale)); }
+            to { opacity: 1; transform: rotateX(0) translateZ(0) scale(var(--vibe-scale)); }
+        }
+
+        .slide-aspect-ratio-box > div {
+            animation: slideUpFade 0.8s ease-out forwards;
+        }
+
+        @keyframes slideUpFade {
+            from { opacity: 0; transform: translateY(40px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        /* <!-- VIBE_TRANSITIONS_END --> */
 
         body, html {
-            background-color: #000; /* Letterbox color */
-            margin: 0;
-            padding: 0;
-            width: 100%;
-            height: 100%;
+            background-color: #000;
+            margin: 0; padding: 0;
+            width: 100%; height: 100%;
             overflow: hidden;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            justify-self: center;
-            align-self: center;
-            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+            display: flex; justify-content: center; align-items: center;
+            font-family: var(--vibe-font);
         }
 
-        /* The Scrollable Deck */
         .slide-container {
-            width: 100vw;
-            height: 100vh;
+            width: 100vw; height: 100vh;
             scroll-snap-type: y mandatory;
-            overflow-y: auto;
-            overflow-x: hidden;
-            display: block;
+            overflow-y: auto; overflow-x: hidden;
         }
 
-        /* The individual slide sections */
         .slide {
-            width: 100vw;
-            height: 100vh;
+            width: 100vw; height: 100vh;
             scroll-snap-align: start;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            position: relative;
+            display: flex; justify-content: center; align-items: center;
             background-color: var(--vibe-bg);
         }
 
-        /* The 1920x1080 Aspect Ratio Box */
         .slide-aspect-ratio-box {
             width: var(--base-width);
             height: var(--base-height);
@@ -63,102 +103,109 @@
             color: var(--vibe-text);
             position: relative;
             flex-shrink: 0;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            padding: 80px; /* Proportional padding */
-            box-sizing: border-box;
+            display: flex; flex-direction: column; justify-content: center;
+            padding: 80px; box-sizing: border-box;
             transform-origin: center center;
-            /* Default scale will be set by JS */
+            backface-visibility: hidden;
+            /* Default transform using the scale variable */
+            transform: scale(var(--vibe-scale));
         }
 
-        /* Typography & Components using fixed sizing for scaling */
-        .slide-title {
-            font-size: 80px;
-            font-weight: 800;
-            margin-bottom: 40px;
-            color: var(--vibe-primary);
-            line-height: 1.1;
-        }
-
-        .slide-content {
-            font-size: 36px;
-            line-height: 1.5;
-            max-width: 1200px;
-        }
-
-        .vibe-card {
-            background: rgba(255, 255, 255, 0.05);
-            border-radius: 40px;
-            padding: 60px;
-            border: 2px solid rgba(255, 255, 255, 0.1);
-        }
-
-        /* Nav Controls (Stays pinned to viewport, not slide) */
         .vibe-nav {
-            position: fixed;
-            bottom: 30px;
-            right: 30px;
-            display: flex;
-            gap: 15px;
-            z-index: 100;
+            position: fixed; bottom: 30px; right: 30px;
+            display: flex; gap: 15px; z-index: 100;
         }
 
         .nav-btn {
-            background: rgba(0, 0, 0, 0.4);
-            backdrop-filter: blur(12px);
+            background: rgba(0, 0, 0, 0.4); backdrop-filter: blur(12px);
             border: 1px solid rgba(255, 255, 255, 0.2);
-            color: white;
-            width: 60px;
-            height: 60px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            font-size: 24px;
-        }
-
-        .nav-btn:hover {
-            background: var(--vibe-primary);
-            transform: scale(1.1);
+            color: white; width: 60px; height: 60px; border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            cursor: pointer; font-size: 24px;
         }
     </style>
 </head>
-<body>
+<body class="vibe-transition-blur">
 
     <div class="slide-container" id="vibe-deck">
-        <!-- Slide 1: Hero -->
+        <!-- VIBE_SLIDES_CONTAINER_START -->
+        
+        <!-- VIBE_SLIDE_1_START -->
         <section class="slide">
             <div class="slide-aspect-ratio-box">
-                <div class="animate__animated animate__fadeInUp">
-                    <h1 class="slide-title">16:9 Aspect Ratio</h1>
-                    <p class="slide-content">
-                        This layout is built for 1920x1080. It scales perfectly to fit your screen while remaining centered. 
-                        No more broken layouts on smaller displays.
-                    </p>
-                </div>
+                <h1 class="text-[120px] font-black text-[var(--vibe-primary)] leading-none mb-10">Vibe Pro</h1>
+                <p class="text-[48px] opacity-80 max-w-4xl">The next generation of website-style presentations. Built on 1920x1080 foundations.</p>
             </div>
         </section>
+        <!-- VIBE_SLIDE_1_END -->
 
-        <!-- Slide 2: Proportional Scaling -->
+        <!-- VIBE_SLIDE_2_START -->
         <section class="slide">
             <div class="slide-aspect-ratio-box">
-                <div class="vibe-card animate__animated animate__fadeInLeft">
-                    <h2 style="font-size:60px;font-weight:700;margin-bottom:32px;color:#34d399;">Fixed Canvas System</h2>
-                    <ul style="list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:24px;font-size:40px;">
-                        <li>📏 Defined as 1920x1080</li>
-                        <li>🎯 Centered vertically and horizontally</li>
-                        <li>⚖️ Proportional font and asset scaling</li>
-                        <li>💻 Desktop, Tablet, and Mobile compatible</li>
-                    </ul>
+                <div class="grid grid-cols-2 gap-20 items-center">
+                    <div>
+                        <h2 class="text-[80px] font-black mb-10 leading-tight">Split Screen Layout</h2>
+                        <p class="text-[32px] opacity-70 mb-10">Perfect for comparing features or showing a product next to its benefits.</p>
+                        <div class="space-y-6">
+                            <div class="flex items-center gap-6">
+                                <div class="w-12 h-12 rounded-full bg-[var(--vibe-secondary)] flex items-center justify-center text-2xl font-bold">✓</div>
+                                <span class="text-3xl font-medium">Fully Responsive Scaling</span>
+                            </div>
+                            <div class="flex items-center gap-6">
+                                <div class="w-12 h-12 rounded-full bg-[var(--vibe-secondary)] flex items-center justify-center text-2xl font-bold">✓</div>
+                                <span class="text-3xl font-medium">AI-Surgical Updates</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="h-[600px] w-full bg-white/5 rounded-[60px] border border-white/10 flex items-center justify-center overflow-hidden">
+                         <div class="text-[100px] opacity-20">IMAGE</div>
+                    </div>
                 </div>
             </div>
         </section>
+        <!-- VIBE_SLIDE_2_END -->
+
+        <!-- VIBE_SLIDE_3_START -->
+        <section class="slide">
+            <div class="slide-aspect-ratio-box">
+                <h2 class="text-[64px] font-black text-center mb-20 text-[var(--vibe-accent)]">Key Performance Indicators</h2>
+                <div class="grid grid-cols-3 gap-12">
+                    <div class="p-16 bg-white/5 rounded-[40px] border border-white/10 text-center transform transition hover:scale-105">
+                        <div class="text-[80px] font-black text-[var(--vibe-primary)] mb-4">98%</div>
+                        <div class="text-2xl uppercase tracking-widest opacity-60">Accuracy</div>
+                    </div>
+                    <div class="p-16 bg-white/5 rounded-[40px] border border-white/10 text-center transform transition hover:scale-105">
+                        <div class="text-[80px] font-black text-[var(--vibe-secondary)] mb-4">0.4s</div>
+                        <div class="text-2xl uppercase tracking-widest opacity-60">Latency</div>
+                    </div>
+                    <div class="p-16 bg-white/5 rounded-[40px] border border-white/10 text-center transform transition hover:scale-105">
+                        <div class="text-[80px] font-black text-[var(--vibe-accent)] mb-4">15x</div>
+                        <div class="text-2xl uppercase tracking-widest opacity-60">Efficiency</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+        <!-- VIBE_SLIDE_3_END -->
+
+        <!-- VIBE_SLIDE_4_START -->
+        <section class="slide">
+            <div class="slide-aspect-ratio-box items-center text-center">
+                <div class="max-w-5xl">
+                    <h2 class="text-[100px] font-black mb-10 leading-none">Ready to start?</h2>
+                    <p class="text-[36px] opacity-70 mb-20">Join over 10,000 creators using Vibe Slide to build high-converting web decks.</p>
+                    <div class="flex gap-10 justify-center">
+                        <button class="px-16 py-8 bg-[var(--vibe-primary)] text-3xl font-black rounded-full shadow-2xl shadow-blue-500/20 hover:scale-110 transition">Start Free</button>
+                        <button class="px-16 py-8 bg-white/10 text-3xl font-black rounded-full border border-white/20 hover:bg-white/20 transition">Learn More</button>
+                    </div>
+                    <p class="mt-20 text-xl opacity-40">No credit card required. Cancel anytime.</p>
+                </div>
+            </div>
+        </section>
+        <!-- VIBE_SLIDE_4_END -->
+
+        <!-- VIBE_SLIDES_CONTAINER_END -->
     </div>
 
-    <!-- Controls -->
     <nav class="vibe-nav">
         <button class="nav-btn" onclick="prevSlide()">↑</button>
         <button class="nav-btn" onclick="nextSlide()">↓</button>
@@ -166,44 +213,22 @@
 
     <script>
         const container = document.getElementById('vibe-deck');
-        const slides = document.querySelectorAll('.slide-aspect-ratio-box');
         
-        /**
-         * The Scaling Engine
-         * Calculates the scale factor to fit 1920x1080 into the current window
-         */
         function updateScale() {
-            const windowWidth = window.innerWidth;
-            const windowHeight = window.innerHeight;
-            const baseWidth = 1920;
-            const baseHeight = 1080;
-
-            // Calculate scale to fit both width and height (contain)
-            const scale = Math.min(windowWidth / baseWidth, windowHeight / baseHeight);
-
-            slides.forEach(slide => {
-                slide.style.transform = `scale(${scale})`;
-            });
+            const scale = Math.min(window.innerWidth / 1920, window.innerHeight / 1080);
+            // Set scale globally on the root so CSS animations can use it
+            document.documentElement.style.setProperty('--vibe-scale', scale);
         }
 
-        function nextSlide() {
-            container.scrollBy({ top: window.innerHeight, behavior: 'smooth' });
-        }
+        function nextSlide() { container.scrollBy({ top: window.innerHeight, behavior: 'smooth' }); }
+        function prevSlide() { container.scrollBy({ top: -window.innerHeight, behavior: 'smooth' }); }
 
-        function prevSlide() {
-            container.scrollBy({ top: -window.innerHeight, behavior: 'smooth' });
-        }
-
-        // Event Listeners
         window.addEventListener('resize', updateScale);
         window.addEventListener('load', updateScale);
-
         window.addEventListener('keydown', (e) => {
-            if (e.key === 'ArrowDown' || e.key === 'PageDown') nextSlide();
-            if (e.key === 'ArrowUp' || e.key === 'PageUp') prevSlide();
+            if (e.key === 'ArrowDown') nextSlide();
+            if (e.key === 'ArrowUp') prevSlide();
         });
-
-        // Initial call
         updateScale();
     </script>
 </body>
