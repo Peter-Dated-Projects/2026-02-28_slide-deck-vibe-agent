@@ -70,6 +70,7 @@ export class OllamaProvider implements ILLMService {
         const reader = response.body!.getReader();
         const decoder = new TextDecoder();
         let fullText = '';
+        let isThinking = false;
 
         while (true) {
             const { done, value } = await reader.read();
@@ -81,12 +82,36 @@ export class OllamaProvider implements ILLMService {
                 if (!line.trim()) continue;
                 try {
                     const json: any = JSON.parse(line);
+                    
+                    const thinkingToken: string = json.message?.thinking ?? '';
+                    if (thinkingToken) {
+                        if (!isThinking) {
+                            onChunk('<think>');
+                            fullText += '<think>';
+                            isThinking = true;
+                        }
+                        onChunk(thinkingToken);
+                        fullText += thinkingToken;
+                    }
+
                     const token: string = json.message?.content ?? '';
                     if (token) {
+                        if (isThinking) {
+                            onChunk('</think>');
+                            fullText += '</think>';
+                            isThinking = false;
+                        }
                         onChunk(token);
                         fullText += token;
                     }
-                    if (json.done) return fullText;
+                    
+                    if (json.done) {
+                        if (isThinking) {
+                            onChunk('</think>');
+                            fullText += '</think>';
+                        }
+                        return fullText;
+                    }
                 } catch {
                     // Incomplete JSON chunk — skip
                 }
