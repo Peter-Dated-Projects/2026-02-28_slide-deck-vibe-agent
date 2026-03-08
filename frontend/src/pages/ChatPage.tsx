@@ -281,58 +281,77 @@ const ChatPage: React.FC = () => {
       const decoder = new TextDecoder();
       let buffer = "";
       let accumulatedText = "";
+      let pendingText = ""; // tokens waiting to be flushed to React state
       let firstToken = true;
       let doneConvId = conversationId ?? null;
 
-      outer: while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+      // Flush pending tokens to React state at most every 50ms — prevents
+      // per-token re-renders from making the textarea feel laggy while typing.
+      const flushInterval = setInterval(() => {
+        if (!pendingText) return;
+        const snapshot = accumulatedText;
+        pendingText = "";
+        if (firstToken) return; // not yet shown — handled separately below
+        setMessages((prev) =>
+          prev.map((m) => (m.id === assistantId ? { ...m, content: snapshot } : m)),
+        );
+      }, 50);
 
-        buffer += decoder.decode(value, { stream: true });
+      try {
+        outer: while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
 
-        // SSE format: "event: <name>\ndata: <json>\n\n"
-        const parts = buffer.split("\n\n");
-        buffer = parts.pop() ?? "";
+          buffer += decoder.decode(value, { stream: true });
 
-        for (const part of parts) {
-          const eventMatch = part.match(/^event: (\w+)/);
-          const dataMatch = part.match(/^data: (.+)$/m);
-          if (!dataMatch) continue;
+          // SSE format: "event: <name>\ndata: <json>\n\n"
+          const parts = buffer.split("\n\n");
+          buffer = parts.pop() ?? "";
 
-          const eventName = eventMatch?.[1] ?? "message";
-          const data = JSON.parse(dataMatch[1]);
+          for (const part of parts) {
+            const eventMatch = part.match(/^event: (\w+)/);
+            const dataMatch = part.match(/^data: (.+)$/m);
+            if (!dataMatch) continue;
 
-          if (eventName === "token") {
-            accumulatedText += data.token;
+            const eventName = eventMatch?.[1] ?? "message";
+            const data = JSON.parse(dataMatch[1]);
 
-            // Dismiss thinking block on the very first token
-            if (firstToken) {
-              firstToken = false;
-              const thinkingElapsed = Math.floor((Date.now() - thinkingStartedAt) / 1000);
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === assistantId
-                    ? {
-                        ...m,
-                        isThinking: false,
-                        thinkingTime: thinkingElapsed,
-                        content: accumulatedText,
-                      }
-                    : m,
-                ),
-              );
-            } else {
-              setMessages((prev) =>
-                prev.map((m) => (m.id === assistantId ? { ...m, content: accumulatedText } : m)),
-              );
+            if (eventName === "token") {
+              accumulatedText += data.token;
+              pendingText += data.token;
+
+              // Dismiss thinking block immediately on the very first token
+              if (firstToken) {
+                firstToken = false;
+                const thinkingElapsed = Math.floor((Date.now() - thinkingStartedAt) / 1000);
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === assistantId
+                      ? {
+                          ...m,
+                          isThinking: false,
+                          thinkingTime: thinkingElapsed,
+                          content: accumulatedText,
+                        }
+                      : m,
+                  ),
+                );
+                pendingText = "";
+              }
+            } else if (eventName === "done") {
+              doneConvId = data.conversationId;
+              break outer;
+            } else if (eventName === "error") {
+              throw new Error(data.message ?? "Stream error");
             }
-          } else if (eventName === "done") {
-            doneConvId = data.conversationId;
-            break outer;
-          } else if (eventName === "error") {
-            throw new Error(data.message ?? "Stream error");
           }
         }
+      } finally {
+        clearInterval(flushInterval);
+        // Final flush — ensure the complete text is committed
+        setMessages((prev) =>
+          prev.map((m) => (m.id === assistantId ? { ...m, content: accumulatedText } : m)),
+        );
       }
 
       // Navigate to conversation URL on first message

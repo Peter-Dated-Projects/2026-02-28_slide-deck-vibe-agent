@@ -226,7 +226,7 @@ interface ChatMessageProps {
   message: ChatMessageData;
 }
 
-export const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
+export const ChatMessage: React.FC<ChatMessageProps> = React.memo(({ message }) => {
   const isUser = message.role === "user";
   const hasThinking = message.thinkingStartedAt !== undefined || message.thinkingTime !== undefined;
 
@@ -266,4 +266,4 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
       </div>
     </div>
   );
-};
+});
