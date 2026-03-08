@@ -18,13 +18,18 @@ All integration tests must be run using the `.env.test` environment. Ensure your
 From the `backend/` directory:
 
 ```bash
+# Run all integration tests (must end in .integration.test.ts)
+bun test integration
+
+# Or run them individually:
+
 # Qwen
-NODE_ENV=test bun run src/tests/qwen-conversation.integration.ts
-NODE_ENV=test bun run src/tests/qwen-tools.integration.ts
+NODE_ENV=test bun test src/tests/qwen-conversation.integration.test.ts
+NODE_ENV=test bun test src/tests/qwen-tools.integration.test.ts
 
 # Ollama (requires a running local Ollama instance)
-NODE_ENV=test bun run src/tests/ollama-conversation.integration.ts
-NODE_ENV=test bun run src/tests/ollama-tools.integration.ts
+NODE_ENV=test bun test src/tests/ollama-conversation.integration.test.ts
+NODE_ENV=test bun test src/tests/ollama-tools.integration.test.ts
 ```
 
 ### What Each Test Does
