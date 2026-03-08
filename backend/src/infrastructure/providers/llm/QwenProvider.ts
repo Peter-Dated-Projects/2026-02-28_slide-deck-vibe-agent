@@ -19,29 +19,29 @@ export class QwenProvider implements ILLMService {
         this.storageService = storageService;
     }
 
-    async chatWithAgent(conversationId: string, messages: any[]) {
-        const formattedMessages = messages.map(m => {
+    private buildMessages(messages: any[]) {
+        const formatted = messages.map(m => {
             if (m.role === 'tool' || (m.role === 'user' && m.content && Array.isArray(m.content))) {
                 return {
                     role: 'user',
                     content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content)
                 };
             }
-            return {
-                role: m.role,
-                content: m.content
-            };
+            return { role: m.role, content: m.content };
         });
+        return [
+            {
+                role: 'system',
+                content: "You are Vibe Agent, an expert frontend engineer creating beautiful web-native presentations. You communicate directly with the user to understand their slide deck needs. Keep slides modern, interactive, and visually stunning."
+            },
+            ...formatted
+        ] as any[];
+    }
 
+    async chatWithAgent(conversationId: string, messages: any[]) {
         const response = await this.openai.chat.completions.create({
             model: this.model,
-            messages: [
-                {
-                    role: 'system',
-                    content: "You are Vibe Agent, an expert frontend engineer creating beautiful web-native presentations. You communicate directly with the user to understand their slide deck needs. Keep slides modern, interactive, and visually stunning."
-                },
-                ...formattedMessages
-            ] as any[],
+            messages: this.buildMessages(messages),
             max_tokens: 4096,
             temperature: 0.7,
         });
@@ -55,5 +55,29 @@ export class QwenProvider implements ILLMService {
             content: [{ type: 'text', text: message.content ?? '' }],
             stop_reason: 'end_turn'
         };
+    }
+
+    async chatWithAgentStream(
+        conversationId: string,
+        messages: any[],
+        onChunk: (token: string) => void
+    ): Promise<string> {
+        const stream = await this.openai.chat.completions.create({
+            model: this.model,
+            messages: this.buildMessages(messages),
+            max_tokens: 4096,
+            temperature: 0.7,
+            stream: true,
+        });
+
+        let fullText = '';
+        for await (const chunk of stream) {
+            const token = chunk.choices[0]?.delta?.content ?? '';
+            if (token) {
+                onChunk(token);
+                fullText += token;
+            }
+        }
+        return fullText;
     }
 }
