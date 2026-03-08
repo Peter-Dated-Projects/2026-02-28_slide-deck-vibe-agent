@@ -49,6 +49,41 @@ function generateId() {
   return Math.random().toString(36).slice(2, 10);
 }
 
+function parseStreamSnapshot(snapshot: string) {
+  const thinkStartIndex = snapshot.indexOf("<think>");
+
+  if (thinkStartIndex === -1) {
+    const stripped = snapshot.trim();
+    const prefixes = ["<think", "<thin", "<thi", "<th", "<t", "<"];
+    const isPrefix = prefixes.includes(stripped) || !stripped;
+
+    // If it's the very beginning of the response and looks like it *might* be <think>
+    if (isPrefix && snapshot.length < 8) {
+      return { isThinking: true, thinkingContent: snapshot, content: "" };
+    }
+
+    return { isThinking: false, thinkingContent: "", content: snapshot };
+  }
+
+  const thinkEndIndex = snapshot.indexOf("</think>", thinkStartIndex);
+
+  if (thinkEndIndex === -1) {
+    const contentBefore = snapshot.slice(0, thinkStartIndex);
+    const reasoningText = snapshot.slice(thinkStartIndex + 7).trimStart();
+    return { isThinking: true, thinkingContent: reasoningText, content: contentBefore };
+  } else {
+    // Thinking complete
+    const contentBefore = snapshot.slice(0, thinkStartIndex);
+    const reasoningText = snapshot.slice(thinkStartIndex + 7, thinkEndIndex).trim();
+    const contentAfter = snapshot.slice(thinkEndIndex + 8).trimStart();
+    return {
+      isThinking: false,
+      thinkingContent: reasoningText,
+      content: contentBefore + contentAfter,
+    };
+  }
+}
+
 // ─────────────────────────────────────────────────────
 // ChatPage
 // ─────────────────────────────────────────────────────
@@ -282,8 +317,32 @@ const ChatPage: React.FC = () => {
       let buffer = "";
       let accumulatedText = "";
       let pendingText = ""; // tokens waiting to be flushed to React state
-      let firstToken = true;
       let doneConvId = conversationId ?? null;
+      let lockedThinkingTime: number | undefined;
+
+      const attemptUpdateState = (snapshot: string) => {
+        const parsed = parseStreamSnapshot(snapshot);
+        if (!parsed.isThinking && lockedThinkingTime === undefined) {
+          lockedThinkingTime = Math.floor((Date.now() - thinkingStartedAt) / 1000);
+        }
+
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantId
+              ? {
+                  ...m,
+                  content: parsed.content,
+                  isThinking: parsed.isThinking,
+                  thinkingContent: parsed.thinkingContent || undefined,
+                  thinkingTime:
+                    lockedThinkingTime !== undefined
+                      ? lockedThinkingTime
+                      : Math.floor((Date.now() - thinkingStartedAt) / 1000),
+                }
+              : m,
+          ),
+        );
+      };
 
       // Flush pending tokens to React state at most every 50ms — prevents
       // per-token re-renders from making the textarea feel laggy while typing.
@@ -291,10 +350,7 @@ const ChatPage: React.FC = () => {
         if (!pendingText) return;
         const snapshot = accumulatedText;
         pendingText = "";
-        if (firstToken) return; // not yet shown — handled separately below
-        setMessages((prev) =>
-          prev.map((m) => (m.id === assistantId ? { ...m, content: snapshot } : m)),
-        );
+        attemptUpdateState(snapshot);
       }, 50);
 
       try {
@@ -319,25 +375,6 @@ const ChatPage: React.FC = () => {
             if (eventName === "token") {
               accumulatedText += data.token;
               pendingText += data.token;
-
-              // Dismiss thinking block immediately on the very first token
-              if (firstToken) {
-                firstToken = false;
-                const thinkingElapsed = Math.floor((Date.now() - thinkingStartedAt) / 1000);
-                setMessages((prev) =>
-                  prev.map((m) =>
-                    m.id === assistantId
-                      ? {
-                          ...m,
-                          isThinking: false,
-                          thinkingTime: thinkingElapsed,
-                          content: accumulatedText,
-                        }
-                      : m,
-                  ),
-                );
-                pendingText = "";
-              }
             } else if (eventName === "done") {
               doneConvId = data.conversationId;
               break outer;
@@ -349,9 +386,7 @@ const ChatPage: React.FC = () => {
       } finally {
         clearInterval(flushInterval);
         // Final flush — ensure the complete text is committed
-        setMessages((prev) =>
-          prev.map((m) => (m.id === assistantId ? { ...m, content: accumulatedText } : m)),
-        );
+        attemptUpdateState(accumulatedText);
       }
 
       // Navigate to conversation URL on first message

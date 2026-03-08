@@ -104,7 +104,7 @@ const ThinkingBlock: React.FC<ThinkingBlockProps> = ({
         <div
           className={cn(
             "mt-1.5 ml-2 pl-3 border-l-2 text-[10px] leading-relaxed whitespace-pre-wrap text-muted-foreground",
-            "transition-all duration-200",
+            "transition-all duration-200 overflow-y-auto custom-scrollbar max-h-[160px]", // ~10 lines of text
             isThinking ? "border-primary/40" : "border-border",
           )}
         >
