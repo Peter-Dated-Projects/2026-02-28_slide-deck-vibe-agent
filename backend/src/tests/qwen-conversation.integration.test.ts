@@ -5,6 +5,7 @@
  * Requires QWEN_API_KEY in .env.test.
  */
 
+import { describe, expect, beforeAll, it } from "bun:test";
 import '../config';
 import { QwenProvider } from '../infrastructure/providers/llm/QwenProvider';
 import type { IDatabaseService } from '../core/interfaces/IDatabaseService';
@@ -19,7 +20,10 @@ const USER_MESSAGES = [
     "What slide topics would you suggest for the deck?"
 ];
 
-describe('Qwen LLM - Conversation', () => {
+// Check if the user ran 'bun test integration'
+const isIntegrationRun = process.argv.join(' ').includes('integration');
+
+describe.skipIf(!isIntegrationRun)('Qwen LLM - Conversation', () => {
     let provider: QwenProvider;
 
     beforeAll(() => {
