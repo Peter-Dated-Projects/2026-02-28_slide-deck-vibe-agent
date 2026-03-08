@@ -67,10 +67,22 @@ app.post('/api/chat', requireAuth, async (req: AuthRequest, res: express.Respons
             [currentConvId]
         );
         
-        let messagesContext: any[] = historyResult.rows.map((row: any) => ({
-            role: row.role as string,
-            content: (row.content as any).text || row.content // Handle both string and complex block structures
-        }));
+        let messagesContext: any[] = historyResult.rows.map((row: any) => {
+            const raw = row.content;
+            let text: string;
+            if (typeof raw === 'string') {
+                text = raw;
+            } else if (raw?.text) {
+                // user messages: { text: "..." }
+                text = raw.text;
+            } else if (Array.isArray(raw)) {
+                // assistant messages: [{ type: 'text', text: '...' }]
+                text = raw.filter((b: any) => b.type === 'text').map((b: any) => b.text).join('\n');
+            } else {
+                text = JSON.stringify(raw);
+            }
+            return { role: row.role as string, content: text };
+        });
 
         // Call Agent
         let agentResponse = await chatWithAgent(currentConvId, messagesContext);
