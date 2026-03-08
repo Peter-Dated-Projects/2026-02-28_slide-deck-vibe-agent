@@ -234,10 +234,10 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
     <div className={cn("flex w-full", isUser ? "justify-end" : "justify-start")}>
       <div
         className={cn(
-          "max-w-[85%] rounded-2xl px-4 py-2.5 mt-2 transition-all duration-200",
+          "max-w-[85%] rounded-[8px] px-4 py-2.5 mt-2 transition-all duration-200",
           isUser
-            ? "bg-primary text-primary-foreground rounded-tr-sm shadow-sm"
-            : "bg-card text-foreground rounded-tl-sm border border-border",
+            ? "bg-primary text-primary-foreground rounded-tr-[2px] shadow-sm"
+            : "bg-card text-foreground rounded-tl-[2px] border border-border",
         )}
       >
         {/* Thinking block — only for assistant messages */}
