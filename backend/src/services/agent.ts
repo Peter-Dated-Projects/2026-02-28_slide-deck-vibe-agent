@@ -7,7 +7,7 @@ export const chatWithAgent = async (conversationId: string, messages: any[]) => 
 export const chatWithAgentStream = async (
     conversationId: string,
     messages: any[],
-    onChunk: (token: string) => void
+    onEvent: (event: string, data: any) => void
 ): Promise<string> => {
     if (!llmService.chatWithAgentStream) {
         // Fallback: non-streaming, emit full text as one chunk
@@ -16,8 +16,8 @@ export const chatWithAgentStream = async (
             .filter((b: any) => b.type === 'text')
             .map((b: any) => b.text)
             .join('\n');
-        onChunk(text);
+        onEvent('token', { token: text });
         return text;
     }
-    return await llmService.chatWithAgentStream(conversationId, messages, onChunk);
+    return await llmService.chatWithAgentStream(conversationId, messages, onEvent);
 };

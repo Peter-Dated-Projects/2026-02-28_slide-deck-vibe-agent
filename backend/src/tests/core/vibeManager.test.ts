@@ -2,10 +2,25 @@ import { expect, test, describe, beforeAll, afterAll } from "bun:test";
 import { VibeManager } from "../../core/vibeManager";
 import * as fs from "fs/promises";
 import * as path from "path";
+import type { IStorageService } from "../../core/interfaces/IStorageService";
 
 const FIXTURE_DIR = path.join(__dirname, "fixtures");
 const TEST_TEMPLATE_PATH = path.join(FIXTURE_DIR, "template.test.html");
 const ORIGINAL_TEMPLATE_PATH = path.join(__dirname, "../../core/template.html");
+
+class MockStorageService implements IStorageService {
+    async uploadFile(key: string, body: string | Buffer, contentType: string): Promise<any> {
+        await fs.writeFile(key, body as string, { encoding: 'utf-8' });
+    }
+    async getFileUrl(key: string, expiresIn?: number): Promise<string> {
+        return "";
+    }
+    async getFileContent(key: string): Promise<string> {
+        return await fs.readFile(key, { encoding: 'utf-8' });
+    }
+}
+
+const mockStorage = new MockStorageService();
 
 describe("VibeManager", () => {
   beforeAll(async () => {
@@ -30,7 +45,7 @@ describe("VibeManager", () => {
   });
 
   test("should extract the existing theme", async () => {
-    const manager = await VibeManager.create(TEST_TEMPLATE_PATH);
+    const manager = await VibeManager.create(TEST_TEMPLATE_PATH, mockStorage);
     const theme = manager.getTheme();
     
     expect(theme).toContain("--vibe-primary: #3b82f6;");
@@ -38,7 +53,7 @@ describe("VibeManager", () => {
   });
 
   test("should overwrite the theme", async () => {
-    const manager = await VibeManager.create(TEST_TEMPLATE_PATH);
+    const manager = await VibeManager.create(TEST_TEMPLATE_PATH, mockStorage);
     const newTheme = `
         :root {
             --vibe-primary: #ff4500;
@@ -52,14 +67,14 @@ describe("VibeManager", () => {
     await manager.setTheme(newTheme);
 
     // Verify in a fresh instance to ensure it saved to disk
-    const freshManager = await VibeManager.create(TEST_TEMPLATE_PATH);
+    const freshManager = await VibeManager.create(TEST_TEMPLATE_PATH, mockStorage);
     const savedTheme = freshManager.getTheme();
     expect(savedTheme).toContain("--vibe-primary: #ff4500;");
     expect(savedTheme).toContain("--vibe-bg: #1a1a1a;");
   });
 
   test("should overwrite an existing slide", async () => {
-    const manager = await VibeManager.create(TEST_TEMPLATE_PATH);
+    const manager = await VibeManager.create(TEST_TEMPLATE_PATH, mockStorage);
     const slide1Html = `
       <section class="slide">
           <div class="slide-aspect-ratio-box">
@@ -69,13 +84,13 @@ describe("VibeManager", () => {
     `;
     await manager.setSlide(1, slide1Html);
 
-    const freshManager = await VibeManager.create(TEST_TEMPLATE_PATH);
+    const freshManager = await VibeManager.create(TEST_TEMPLATE_PATH, mockStorage);
     const savedSlide = freshManager.getSlide(1);
     expect(savedSlide).toContain("<h1>Modified Slide 1</h1>");
   });
 
   test("should append a new slide sequentially", async () => {
-    const manager = await VibeManager.create(TEST_TEMPLATE_PATH);
+    const manager = await VibeManager.create(TEST_TEMPLATE_PATH, mockStorage);
     const newSlideHtml = `
       <section class="slide">
           <div class="slide-aspect-ratio-box">
@@ -85,20 +100,20 @@ describe("VibeManager", () => {
     `;
     await manager.addSlide(newSlideHtml);
 
-    const freshManager = await VibeManager.create(TEST_TEMPLATE_PATH);
+    const freshManager = await VibeManager.create(TEST_TEMPLATE_PATH, mockStorage);
     const savedSlide = freshManager.getSlide(2);
     expect(savedSlide).toContain("<h1>Injected Slide 2</h1>");
   });
 
   test("should delete a slide", async () => {
-    const manager = await VibeManager.create(TEST_TEMPLATE_PATH);
+    const manager = await VibeManager.create(TEST_TEMPLATE_PATH, mockStorage);
     
     // Slide 2 exists from the previous test
     expect(manager.getSlide(2)).not.toBeNull();
     
     await manager.deleteSlide(2);
 
-    const freshManager = await VibeManager.create(TEST_TEMPLATE_PATH);
+    const freshManager = await VibeManager.create(TEST_TEMPLATE_PATH, mockStorage);
     expect(freshManager.getSlide(2)).toBeNull();
   });
 });

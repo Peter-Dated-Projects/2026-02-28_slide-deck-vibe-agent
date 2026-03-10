@@ -50,38 +50,17 @@ function generateId() {
 }
 
 function parseStreamSnapshot(snapshot: string) {
-  const thinkStartIndex = snapshot.indexOf("<think>");
+  // We now let react-markdown and rehype-raw handle all `<think>` tags natively inside the DOM!
+  // We only need to check if a thought block is currently active to feed the `isThinking` React state.
+  const openCount = (snapshot.match(/<think>/g) || []).length;
+  const closeCount = (snapshot.match(/<\/think>/g) || []).length;
+  const isThinking = openCount > closeCount;
 
-  if (thinkStartIndex === -1) {
-    const stripped = snapshot.trim();
-    const prefixes = ["<think", "<thin", "<thi", "<th", "<t", "<"];
-    const isPrefix = prefixes.includes(stripped) || !stripped;
-
-    // If it's the very beginning of the response and looks like it *might* be <think>
-    if (isPrefix && snapshot.length < 8) {
-      return { isThinking: true, thinkingContent: snapshot, content: "" };
-    }
-
-    return { isThinking: false, thinkingContent: "", content: snapshot };
-  }
-
-  const thinkEndIndex = snapshot.indexOf("</think>", thinkStartIndex);
-
-  if (thinkEndIndex === -1) {
-    const contentBefore = snapshot.slice(0, thinkStartIndex);
-    const reasoningText = snapshot.slice(thinkStartIndex + 7).trimStart();
-    return { isThinking: true, thinkingContent: reasoningText, content: contentBefore };
-  } else {
-    // Thinking complete
-    const contentBefore = snapshot.slice(0, thinkStartIndex);
-    const reasoningText = snapshot.slice(thinkStartIndex + 7, thinkEndIndex).trim();
-    const contentAfter = snapshot.slice(thinkEndIndex + 8).trimStart();
-    return {
-      isThinking: false,
-      thinkingContent: reasoningText,
-      content: contentBefore + contentAfter,
-    };
-  }
+  return { 
+    isThinking, 
+    thinkingContent: "", // Left blank since the markdown loop handles the DOM rendering
+    content: snapshot 
+  };
 }
 
 // ─────────────────────────────────────────────────────
@@ -320,6 +299,8 @@ const ChatPage: React.FC = () => {
       let doneConvId = conversationId ?? null;
       let lockedThinkingTime: number | undefined;
 
+      let toolCallsState: any[] = []; // Local accumulator for stream updates
+
       const attemptUpdateState = (snapshot: string) => {
         const parsed = parseStreamSnapshot(snapshot);
         if (!parsed.isThinking && lockedThinkingTime === undefined) {
@@ -338,6 +319,7 @@ const ChatPage: React.FC = () => {
                     lockedThinkingTime !== undefined
                       ? lockedThinkingTime
                       : Math.floor((Date.now() - thinkingStartedAt) / 1000),
+                  toolCalls: toolCallsState.length > 0 ? [...toolCallsState] : undefined,
                 }
               : m,
           ),
@@ -375,6 +357,26 @@ const ChatPage: React.FC = () => {
             if (eventName === "token") {
               accumulatedText += data.token;
               pendingText += data.token;
+            } else if (eventName === "tool_call") {
+              // Register that a tool is starting
+              toolCallsState.push({
+                 id: data.name + '_' + Date.now(),
+                 name: data.name,
+                 args: data.args,
+                 status: 'pending'
+              });
+              attemptUpdateState(accumulatedText);
+            } else if (eventName === "tool_result") {
+              // Update status of the last tool with the same name to success/error
+              for (let i = toolCallsState.length - 1; i >= 0; i--) {
+                  if (toolCallsState[i].name === data.name && toolCallsState[i].status === 'pending') {
+                      // If the result payload contains an explicit error boundary or the DB responds with an Error
+                      const isError = typeof data.result === 'string' && data.result.toLowerCase().includes('error');
+                      toolCallsState[i].status = isError ? 'error' : 'success';
+                      break;
+                  }
+              }
+              attemptUpdateState(accumulatedText);
             } else if (eventName === "done") {
               doneConvId = data.conversationId;
               break outer;

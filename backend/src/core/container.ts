@@ -40,7 +40,7 @@ export const storageService: IStorageService = isLocal
 export const llmService: ILLMService = isLocal
     ? new OllamaProvider(
         process.env.OLLAMA_BASE_URL || 'http://localhost:11434',
-        process.env.OLLAMA_MODEL_KEY || 'llama3.2',
+        process.env.OLLAMA_MODEL_KEY || 'qwen3.5:9b',
         dbService,
         storageService
     )

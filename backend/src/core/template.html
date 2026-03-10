@@ -14,7 +14,7 @@
             --vibe-scale: 1; /* Managed by JS */
         }
 
-        <!-- VIBE_THEME_START -->
+        /* <!-- VIBE_THEME_START --> */
         :root {
             --vibe-primary: #3b82f6;
             --vibe-secondary: #8b5cf6;
@@ -23,7 +23,7 @@
             --vibe-accent: #10b981;
             --vibe-font: 'Inter', system-ui, sans-serif;
         }
-        <!-- VIBE_THEME_END -->
+        /* <!-- VIBE_THEME_END --> */
 
         /* --- TRANSITIONS --- */
         .slide-container {
@@ -122,6 +122,53 @@
     <script>
         const container = document.getElementById('vibe-deck');
         
+        function sortSlides() {
+            if (!container) return;
+            const html = document.documentElement.innerHTML;
+            const metaMatch = new RegExp('<!-- VIBE_META_START -->\\\\s*({[\\\\s\\\\S]*?})\\\\s*<!-- VIBE_META_END -->').exec(html);
+            if (!metaMatch) return;
+            
+            try {
+                const meta = JSON.parse(metaMatch[1]);
+                const idToNodes = {};
+                let currentId = null;
+                let currentNodes = [];
+                
+                for (let i = 0; i < container.childNodes.length; i++) {
+                    const node = container.childNodes[i];
+                    if (node.nodeType === Node.COMMENT_NODE) {
+                        const startMatch = node.nodeValue.match(/VIBE_SLIDE_(\d+)_START/);
+                        const endMatch = node.nodeValue.match(/VIBE_SLIDE_(\d+)_END/);
+                        if (startMatch) {
+                            currentId = parseInt(startMatch[1]);
+                            currentNodes = [node];
+                        } else if (endMatch) {
+                            currentNodes.push(node);
+                            idToNodes[parseInt(endMatch[1])] = currentNodes;
+                            currentId = null;
+                            currentNodes = [];
+                        } else if (currentId !== null) {
+                            currentNodes.push(node);
+                        }
+                    } else if (currentId !== null) {
+                        currentNodes.push(node);
+                    }
+                }
+                
+                const containerEndComment = Array.from(container.childNodes).find(n => n.nodeType === Node.COMMENT_NODE && n.nodeValue.includes('VIBE_SLIDES_CONTAINER_END'));
+                
+                meta.slideOrder.forEach(id => {
+                    const nodes = idToNodes[id];
+                    if (nodes) {
+                        nodes.forEach(n => container.insertBefore(n, containerEndComment));
+                    }
+                });
+            } catch (e) {
+                console.error("Vibe Sort Error:", e);
+            }
+        }
+        sortSlides();
+
         function updateScale() {
             const scale = Math.min(window.innerWidth / 1920, window.innerHeight / 1080);
             document.documentElement.style.setProperty('--vibe-scale', scale);

@@ -3,6 +3,6 @@ export interface ILLMService {
     chatWithAgentStream?(
         conversationId: string,
         messages: any[],
-        onChunk: (token: string) => void
+        onEvent: (event: string, data: any) => void
     ): Promise<string>;
 }

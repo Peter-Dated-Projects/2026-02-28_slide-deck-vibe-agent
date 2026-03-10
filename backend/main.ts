@@ -166,9 +166,9 @@ app.post('/api/chat/stream', requireAuth, async (req: AuthRequest, res: express.
             return { role: row.role as string, content: text };
         });
 
-        // Stream tokens to client
-        const fullText = await chatWithAgentStream(currentConvId, messagesContext, (token) => {
-            send('token', JSON.stringify({ token }));
+        // Stream tokens and events to client
+        const fullText = await chatWithAgentStream(currentConvId, messagesContext, (event, data) => {
+            send(event, JSON.stringify(data));
         });
 
         // Persist full response

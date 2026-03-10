@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight, Brain } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
+import rehypeRaw from "rehype-raw";
 // Import a highlight.js theme (GitHub Dark — works well on both light and dark UI)
 import "highlight.js/styles/github-dark-dimmed.css";
 
@@ -21,7 +22,15 @@ export interface ChatMessageData {
   /** Epoch ms when thinking started. Used to compute elapsed time. */
   thinkingStartedAt?: number;
   /** Final elapsed seconds, set once thinking is done */
+  /** Final elapsed seconds, set once thinking is done */
   thinkingTime?: number;
+  /** List of tool calls made during this message */
+  toolCalls?: {
+    id: string;
+    name: string;
+    args?: any;
+    status: 'pending' | 'success' | 'error';
+  }[];
 }
 
 // ─────────────────────────────────────────────────────
@@ -38,7 +47,7 @@ function cn(...classes: (string | undefined | null | false)[]) {
 
 interface ThinkingBlockProps {
   isThinking: boolean;
-  thinkingContent?: string;
+  thinkingContent?: React.ReactNode;
   thinkingStartedAt?: number;
   thinkingTime?: number;
 }
@@ -69,10 +78,15 @@ const ThinkingBlock: React.FC<ThinkingBlockProps> = ({
     };
   }, [isThinking, thinkingStartedAt, thinkingTime]);
 
-  const label = isThinking ? `Agent thinking for ${elapsed}s…` : `Agent thought for ${elapsed}s`;
+  let label = "Agent thought";
+  if (isThinking) {
+      label = `Agent thinking${elapsed > 0 ? ` for ${elapsed}s…` : '…'}`;
+  } else if (elapsed > 0) {
+      label = `Agent thought for ${elapsed}s`;
+  }
 
   return (
-    <div className="mb-3">
+    <div className="mb-3 mt-2">
       {/* Toggle row */}
       <button
         onClick={() => setExpanded((v) => !v)}
@@ -109,12 +123,80 @@ const ThinkingBlock: React.FC<ThinkingBlockProps> = ({
           )}
         >
           {thinkingContent ? (
-            <span>{thinkingContent}</span>
+            <div className="prose prose-invert prose-sm max-w-none text-muted-foreground *:[font-size:10px] [&>p]:leading-relaxed">
+              {thinkingContent}
+            </div>
           ) : (
             <span className="italic opacity-60">
               {isThinking ? "Thinking…" : "No thinking content available."}
             </span>
           )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────────────
+// ToolActionBlock sub-component
+// ─────────────────────────────────────────────────────
+
+import { Wrench, CheckCircle2, Loader2, AlertCircle } from "lucide-react";
+
+interface ToolActionBlockProps {
+  tool: {
+    id: string;
+    name: string;
+    args?: any;
+    status: 'pending' | 'success' | 'error';
+  };
+}
+
+const ToolActionBlock: React.FC<ToolActionBlockProps> = ({ tool }) => {
+  const [expanded, setExpanded] = useState(false);
+
+  // Format arguments beautifully if they exist
+  let argPreview = "";
+  if (tool.args) {
+    try {
+      const keys = Object.keys(tool.args);
+      if (keys.length > 0) {
+          argPreview = " · " + keys.map(k => {
+             const val = String(tool.args[k]);
+             return `${k}: ${val.length > 15 ? val.substring(0, 15) + '...' : val}`;
+          }).join(', ');
+      }
+    } catch (e) {}
+  }
+
+  return (
+    <div className="mb-3">
+      <button
+        onClick={() => setExpanded((v) => !v)}
+        className={cn(
+          "flex items-center gap-2 text-[10px] font-medium px-2.5 py-1.5 rounded-lg transition-all duration-200 group w-full",
+          "border text-muted-foreground hover:text-foreground bg-muted/30 hover:bg-muted/60"
+        )}
+      >
+        {tool.status === 'pending' && <Loader2 className="w-3 h-3 text-primary animate-spin" />}
+        {tool.status === 'success' && <CheckCircle2 className="w-3 h-3 text-emerald-500" />}
+        {tool.status === 'error' && <AlertCircle className="w-3 h-3 text-red-500" />}
+        
+        <span className="flex-1 text-left">
+           Using <span className="font-semibold text-foreground/80">{tool.name}</span>
+           <span className="opacity-70 font-mono text-[9px]">{argPreview}</span>
+        </span>
+        
+        {expanded ? (
+          <ChevronDown className="w-2.5 h-2.5 flex-shrink-0 text-muted-foreground" />
+        ) : (
+          <ChevronRight className="w-2.5 h-2.5 flex-shrink-0 text-muted-foreground" />
+        )}
+      </button>
+
+      {expanded && tool.args && (
+        <div className="mt-1.5 ml-2 pl-3 border-l-2 border-border text-[9px] font-mono text-muted-foreground overflow-x-auto bg-muted/20 py-1.5 rounded-r">
+          <pre>{JSON.stringify(tool.args, null, 2)}</pre>
         </div>
       )}
     </div>
@@ -203,6 +285,10 @@ const mdComponents = {
   td: ({ node: _n, children }: any) => (
     <td className="border border-border px-2 py-1 text-muted-foreground">{children}</td>
   ),
+  think: ({ node: _n, children }: any) => {
+    // We treat inline <think> tags as non-active (completed) thoughts so they don't pulse endlessly
+    return <ThinkingBlock isThinking={false} thinkingContent={children} />;
+  },
 };
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
@@ -210,7 +296,7 @@ const MarkdownContent: React.FC<{ content: string }> = ({ content }) => (
   <div className="chat-markdown">
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
-      rehypePlugins={[rehypeHighlight]}
+      rehypePlugins={[rehypeRaw, rehypeHighlight]}
       components={mdComponents}
     >
       {content}
@@ -241,15 +327,11 @@ export const ChatMessage: React.FC<ChatMessageProps> = React.memo(({ message }) 
             : "bg-card text-foreground rounded-tl-[2px] border border-border",
         )}
       >
-        {/* Thinking block — only for assistant messages */}
-        {!isUser && hasThinking && (
-          <ThinkingBlock
-            isThinking={!!message.isThinking}
-            thinkingContent={message.thinkingContent}
-            thinkingStartedAt={message.thinkingStartedAt}
-            thinkingTime={message.thinkingTime}
-          />
-        )}
+
+        {/* Tool Action Blocks */}
+        {!isUser && message.toolCalls && message.toolCalls.map((tool, idx) => (
+          <ToolActionBlock key={tool.id || idx} tool={tool} />
+        ))}
 
         {/* Message content */}
         {message.content && (
