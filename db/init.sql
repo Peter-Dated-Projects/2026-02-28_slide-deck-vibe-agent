@@ -48,8 +48,11 @@ CREATE TABLE conversations (
 CREATE TABLE messages (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
-    role VARCHAR(50) NOT NULL CHECK (role IN ('user', 'assistant', 'system')),
+    role VARCHAR(50) NOT NULL CHECK (role IN ('user', 'assistant', 'system', 'tool')),
     content JSONB NOT NULL,
+    tool_calls JSONB,
+    tool_call_id TEXT,
+    tool_results JSONB,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
