@@ -123,12 +123,12 @@ const ThinkingBlock: React.FC<ThinkingBlockProps> = ({
       : `Agent thought`;
 
   return (
-    <div className="mb-3">
+    <div className="mb-3 w-full">
       {/* Toggle row */}
       <button
         onClick={() => setExpanded((v) => !v)}
         className={cn(
-          "flex items-center gap-2 text-[10px] font-medium px-2.5 py-1 rounded-lg transition-all duration-200 group",
+          "flex items-center gap-2 text-[10px] font-medium px-2.5 py-1 rounded-lg transition-all duration-200 group w-full",
           "border text-muted-foreground hover:text-foreground",
           isThinking
             ? "border-primary/30 bg-primary/5 hover:bg-primary/10"
@@ -204,11 +204,11 @@ const ToolBlock: React.FC<ToolBlockProps> = ({ toolCalls, toolResults }) => {
   if (!toolCalls || toolCalls.length === 0) return null;
 
   return (
-    <div className="mb-3">
+    <div className="mb-3 w-full">
       <button
         onClick={() => setExpanded((v) => !v)}
         className={cn(
-          "flex items-center gap-2 text-[10px] font-medium px-2.5 py-1 rounded-lg transition-all duration-200 group w-fit",
+          "flex items-center gap-2 text-[10px] font-medium px-2.5 py-1 rounded-lg transition-all duration-200 group w-full",
           "border border-blue-400/30 bg-blue-400/5 hover:bg-blue-400/10 text-muted-foreground hover:text-foreground",
         )}
       >
