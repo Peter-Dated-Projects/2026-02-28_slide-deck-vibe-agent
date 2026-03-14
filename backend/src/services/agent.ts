@@ -31,7 +31,7 @@ export const chatWithAgent = async (conversationId: string, messages: any[]) => 
 
     let currentMessages = [...messages];
     let turnCount = 0;
-    const maxTurns = 5;
+    const maxTurns = 50;
 
     try {
         while (turnCount < maxTurns) {
@@ -114,7 +114,7 @@ export const chatWithAgentStream = async (
 
         let currentMessages = [...messages];
         let turnCount = 0;
-        const maxTurns = 5;
+        const maxTurns = 50;
 
         while (turnCount < maxTurns) {
             turnCount++;
