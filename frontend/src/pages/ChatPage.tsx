@@ -326,7 +326,10 @@ const ChatPage: React.FC = () => {
       let doneConvId = conversationId ?? null;
       let lockedThinkingTime: number | undefined;
 
-      const attemptUpdateState = (snapshot: string) => {
+      let toolCallsCache: any[] = [];
+      let toolResultsCache: any[] = [];
+
+      const attemptUpdateState = (snapshot: string, tCalls?: any[], tResults?: any[]) => {
         const parsed = parseStreamSnapshot(snapshot);
         if (!parsed.isThinking && lockedThinkingTime === undefined) {
           lockedThinkingTime = Math.floor((Date.now() - thinkingStartedAt) / 1000);
@@ -344,6 +347,8 @@ const ChatPage: React.FC = () => {
                     lockedThinkingTime !== undefined
                       ? lockedThinkingTime
                       : Math.floor((Date.now() - thinkingStartedAt) / 1000),
+                  toolCalls: tCalls || m.toolCalls,
+                  toolResults: tResults || m.toolResults,
                 }
               : m,
           ),
@@ -353,10 +358,10 @@ const ChatPage: React.FC = () => {
       // Flush pending tokens to React state at most every 50ms — prevents
       // per-token re-renders from making the textarea feel laggy while typing.
       const flushInterval = setInterval(() => {
-        if (!pendingText) return;
+        if (!pendingText && toolCallsCache.length === 0 && toolResultsCache.length === 0) return;
         const snapshot = accumulatedText;
         pendingText = "";
-        attemptUpdateState(snapshot);
+        attemptUpdateState(snapshot, toolCallsCache.length > 0 ? [...toolCallsCache] : undefined, toolResultsCache.length > 0 ? [...toolResultsCache] : undefined);
       }, 50);
 
       try {
@@ -379,8 +384,31 @@ const ChatPage: React.FC = () => {
             const data = JSON.parse(dataMatch[1]);
 
             if (eventName === "token") {
-              accumulatedText += data.token;
-              pendingText += data.token;
+              const tokenStr = data.token;
+              
+              // Handle special tool tokens
+              if (tokenStr.startsWith('[TOOL_CALLS]') && tokenStr.endsWith('[/TOOL_CALLS]')) {
+                  try {
+                      const jsonStr = tokenStr.substring(12, tokenStr.length - 13);
+                      const parsed = JSON.parse(jsonStr);
+                      if (parsed.tool_calls) {
+                          // merge arrays or replace
+                          toolCallsCache = [...toolCallsCache, ...parsed.tool_calls];
+                      }
+                  } catch(e) {}
+              } else if (tokenStr.trim().startsWith('[TOOL_RESULT]') && tokenStr.trim().endsWith('[/TOOL_RESULT]')) {
+                  try {
+                      const cleanToken = tokenStr.trim();
+                      const jsonStr = cleanToken.substring(13, cleanToken.length - 14);
+                      const parsed = JSON.parse(jsonStr);
+                      if (parsed.id) {
+                          toolResultsCache = [...toolResultsCache, parsed];
+                      }
+                  } catch(e) {}
+              } else {
+                  accumulatedText += tokenStr;
+                  pendingText += tokenStr;
+              }
             } else if (eventName === "done") {
               doneConvId = data.conversationId;
               break outer;
@@ -392,7 +420,7 @@ const ChatPage: React.FC = () => {
       } finally {
         clearInterval(flushInterval);
         // Final flush — ensure the complete text is committed
-        attemptUpdateState(accumulatedText);
+        attemptUpdateState(accumulatedText, toolCallsCache, toolResultsCache);
       }
 
       // Navigate to conversation URL on first message

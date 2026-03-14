@@ -35,7 +35,7 @@ export class VibeManager {
     getTheme(): string {
         const pattern = /<!-- VIBE_THEME_START -->\s*(.*?)\s*<!-- VIBE_THEME_END -->/s;
         const match = pattern.exec(this.content);
-        return match ? match[1].trim() : "";
+        return match && match[1] ? match[1].trim() : "";
     }
 
     /**
@@ -57,7 +57,7 @@ export class VibeManager {
     getSlide(index: number): string | null {
         const pattern = new RegExp(`<!-- VIBE_SLIDE_${index}_START -->\\s*(.*?)\\s*<!-- VIBE_SLIDE_${index}_END -->`, 's');
         const match = pattern.exec(this.content);
-        return match ? match[1].trim() : null;
+        return match && match[1] ? match[1].trim() : null;
     }
 
     /**
@@ -80,7 +80,7 @@ export class VibeManager {
         const indices: number[] = [];
         
         while ((match = pattern.exec(this.content)) !== null) {
-            indices.push(parseInt(match[1], 10));
+            if (match[1]) indices.push(parseInt(match[1], 10));
         }
         
         const nextIndex = indices.length > 0 ? Math.max(...indices) + 1 : 1;
@@ -97,6 +97,43 @@ export class VibeManager {
     async deleteSlide(index: number): Promise<void> {
         const pattern = new RegExp(`\\s*<!-- VIBE_SLIDE_${index}_START -->.*?<!-- VIBE_SLIDE_${index}_END -->`, 's');
         this.content = this.content.replace(pattern, "");
+        await this.save();
+    }
+
+    /**
+     * Gets the total number of slides currently in the deck.
+     */
+    getSlideCount(): number {
+        const pattern = /<!-- VIBE_SLIDE_(\d+)_START -->/g;
+        let match;
+        const indices: number[] = [];
+        
+        while ((match = pattern.exec(this.content)) !== null) {
+            if (match[1]) indices.push(parseInt(match[1], 10));
+        }
+        
+        return indices.length;
+    }
+
+    // --- SCRIPT METHODS ---
+
+    /**
+     * Extracts the JavaScript block.
+     */
+    getScript(): string {
+        const pattern = /<!-- VIBE_SCRIPT_START -->\s*(.*?)\s*<!-- VIBE_SCRIPT_END -->/s;
+        const match = pattern.exec(this.content);
+        return match && match[1] ? match[1].trim() : "";
+    }
+
+    /**
+     * Overwrites the JavaScript block.
+     * @param newJs The new JavaScript string to insert.
+     */
+    async setScript(newJs: string): Promise<void> {
+        const pattern = /(<!-- VIBE_SCRIPT_START -->).*?(<!-- VIBE_SCRIPT_END -->)/s;
+        const replacement = `$1\n        ${newJs.trim()}\n        $2`;
+        this.content = this.content.replace(pattern, replacement);
         await this.save();
     }
 }

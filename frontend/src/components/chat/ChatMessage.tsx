@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from "react";
-import { ChevronDown, ChevronRight, Brain } from "lucide-react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
+import { ChevronDown, ChevronRight, Brain, Copy, Check } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
@@ -21,7 +21,12 @@ export interface ChatMessageData {
   /** Epoch ms when thinking started. Used to compute elapsed time. */
   thinkingStartedAt?: number;
   /** Final elapsed seconds, set once thinking is done */
+  /** Final elapsed seconds, set once thinking is done */
   thinkingTime?: number;
+  /** Array of tool calls made by the agent */
+  toolCalls?: any[];
+  /** Array of tool results corresponding to tool calls */
+  toolResults?: any[];
 }
 
 // ─────────────────────────────────────────────────────
@@ -115,6 +120,62 @@ const ThinkingBlock: React.FC<ThinkingBlockProps> = ({
               {isThinking ? "Thinking…" : "No thinking content available."}
             </span>
           )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────────────
+// ToolBlock sub-component
+// ─────────────────────────────────────────────────────
+
+interface ToolBlockProps {
+  toolCalls: any[];
+  toolResults?: any[];
+}
+
+const ToolBlock: React.FC<ToolBlockProps> = ({ toolCalls, toolResults }) => {
+  const [expanded, setExpanded] = useState(false);
+
+  if (!toolCalls || toolCalls.length === 0) return null;
+
+  return (
+    <div className="mb-3">
+      <button
+        onClick={() => setExpanded((v) => !v)}
+        className={cn(
+          "flex items-center gap-2 text-[10px] font-medium px-2.5 py-1 rounded-lg transition-all duration-200 group w-full",
+          "border border-green-500/30 bg-green-500/5 hover:bg-green-500/10 text-muted-foreground hover:text-foreground",
+        )}
+      >
+        <div className="w-3 h-3 flex-shrink-0 flex items-center justify-center rounded bg-green-500/20 text-green-500">
+          <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+             <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path>
+          </svg>
+        </div>
+        <span className="flex-1 text-left">
+           Used {toolCalls.length} step{toolCalls.length > 1 ? 's' : ''} {toolResults && toolResults.length === toolCalls.length ? '(Complete)' : '(Running…)'}
+        </span>
+        {expanded ? (
+          <ChevronDown className="w-2.5 h-2.5 flex-shrink-0 text-muted-foreground" />
+        ) : (
+          <ChevronRight className="w-2.5 h-2.5 flex-shrink-0 text-muted-foreground" />
+        )}
+      </button>
+
+      {expanded && (
+        <div className="mt-1.5 ml-2 pl-3 border-l-2 border-green-500/40 text-[10px] leading-relaxed text-muted-foreground transition-all duration-200 space-y-2">
+           {toolCalls.map((tc, idx) => {
+               const res = toolResults?.find(r => r.id === tc.id);
+               return (
+                   <div key={idx} className="bg-background/50 rounded p-2 font-mono text-[9px] overflow-x-auto">
+                       <div className="text-green-400 font-semibold mb-1">▶ {tc.function?.name}</div>
+                       <div className="opacity-80 break-all">{tc.function?.arguments}</div>
+                       {res && <div className="mt-1 flex items-center gap-1 text-green-500"><div className="w-1.5 h-1.5 rounded-full bg-green-500"/> Completed</div>}
+                   </div>
+               )
+           })}
         </div>
       )}
     </div>
@@ -230,24 +291,86 @@ export const ChatMessage: React.FC<ChatMessageProps> = React.memo(({ message }) 
   const isUser = message.role === "user";
   const hasThinking = message.thinkingStartedAt !== undefined || message.thinkingTime !== undefined;
 
+  // Context menu state (assistant only)
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const [copied, setCopied] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  const handleContextMenu = useCallback(
+    (e: React.MouseEvent) => {
+      if (isUser) return;
+      e.preventDefault();
+      setMenu({ x: e.clientX, y: e.clientY });
+    },
+    [isUser],
+  );
+
+  const handleCopy = useCallback(() => {
+    navigator.clipboard.writeText(message.content).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+    setMenu(null);
+  }, [message.content]);
+
+  // Dismiss on outside click or Escape
+  useEffect(() => {
+    if (!menu) return;
+    const onPointerDown = (e: PointerEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenu(null);
+      }
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMenu(null);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [menu]);
+
   return (
     <div className={cn("flex w-full", isUser ? "justify-end" : "justify-start")}>
+      {/* Context menu portal */}
+      {menu && (
+        <div
+          ref={menuRef}
+          style={{ position: "fixed", top: menu.y, left: menu.x, zIndex: 9999 }}
+          className="min-w-[130px] rounded-lg border border-border bg-popover shadow-lg py-1 text-[12px]"
+        >
+          <button
+            onClick={handleCopy}
+            className="flex w-full items-center gap-2 px-3 py-1.5 hover:bg-muted/60 transition-colors text-foreground"
+          >
+            {copied ? (
+              <Check className="w-3.5 h-3.5 text-green-500" />
+            ) : (
+              <Copy className="w-3.5 h-3.5 text-muted-foreground" />
+            )}
+            {copied ? "Copied!" : "Copy"}
+          </button>
+        </div>
+      )}
+
       <div
+        onContextMenu={handleContextMenu}
         className={cn(
           isUser ? "max-w-[70%]" : "w-full",
           "rounded-[8px] px-4 py-2.5 mt-2 transition-all duration-200",
           isUser
             ? "bg-primary text-primary-foreground rounded-tr-[2px] shadow-sm"
             : "bg-card text-foreground rounded-tl-[2px] border border-border",
+          !isUser && "cursor-context-menu",
         )}
       >
-        {/* Thinking block — only for assistant messages */}
-        {!isUser && hasThinking && (
-          <ThinkingBlock
-            isThinking={!!message.isThinking}
-            thinkingContent={message.thinkingContent}
-            thinkingStartedAt={message.thinkingStartedAt}
-            thinkingTime={message.thinkingTime}
+        {/* Tool block — only for assistant messages */}
+        {!isUser && message.toolCalls && message.toolCalls.length > 0 && (
+          <ToolBlock
+             toolCalls={message.toolCalls}
+             toolResults={message.toolResults}
           />
         )}
 

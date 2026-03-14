@@ -81,14 +81,19 @@ app.post('/api/chat', requireAuth, async (req: AuthRequest, res: express.Respons
             } else {
                 text = JSON.stringify(raw);
             }
-            return { role: row.role as string, content: text };
+            
+            const msg: any = { role: row.role as string, content: text };
+            if (row.tool_calls) msg.tool_calls = row.tool_calls;
+            if (row.tool_call_id) msg.tool_call_id = row.tool_call_id;
+            
+            return msg;
         });
 
         // Call Agent
         let agentResponse = await chatWithAgent(currentConvId, messagesContext);
         
         // Save Final Assistant Response
-        if (agentResponse.content.length > 0) {
+        if (agentResponse.content && agentResponse.content.length > 0) {
              await db.query(
                 'INSERT INTO messages (conversation_id, role, content) VALUES ($1, $2, $3)',
                 [currentConvId, 'assistant', JSON.stringify(agentResponse.content)]
@@ -163,7 +168,11 @@ app.post('/api/chat/stream', requireAuth, async (req: AuthRequest, res: express.
             } else {
                 text = JSON.stringify(raw);
             }
-            return { role: row.role as string, content: text };
+            const msg: any = { role: row.role as string, content: text };
+            if (row.tool_calls) msg.tool_calls = row.tool_calls;
+            if (row.tool_call_id) msg.tool_call_id = row.tool_call_id;
+            
+            return msg;
         });
 
         // Stream tokens to client
@@ -172,7 +181,7 @@ app.post('/api/chat/stream', requireAuth, async (req: AuthRequest, res: express.
         });
 
         // Persist full response
-        if (fullText) {
+        if (fullText && fullText !== "I've hit the maximum number of tool execution steps.") {
             await db.query(
                 'INSERT INTO messages (conversation_id, role, content) VALUES ($1, $2, $3)',
                 [currentConvId, 'assistant', JSON.stringify([{ type: 'text', text: fullText }])]
