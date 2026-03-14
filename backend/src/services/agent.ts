@@ -4,7 +4,7 @@ import { VibeManager } from '../core/vibeManager';
 import { getTools, executeTool } from '../core/tools';
 
 export const chatWithAgent = async (conversationId: string, messages: any[]) => {
-    const templatePath = path.resolve(process.cwd(), '../frontend/public/default.html');
+    const templatePath = path.resolve(__dirname, '../../../frontend/public/default.html');
     const vibeManager = await VibeManager.create(templatePath);
     const { tools, systemInstruction } = await getTools(vibeManager);
 
@@ -61,7 +61,7 @@ export const chatWithAgentStream = async (
     messages: any[],
     onChunk: (token: string) => void
 ): Promise<string> => {
-    const templatePath = path.resolve(process.cwd(), '../frontend/public/default.html');
+    const templatePath = path.resolve(__dirname, '../../../frontend/public/default.html');
     const vibeManager = await VibeManager.create(templatePath);
     const { tools, systemInstruction } = await getTools(vibeManager);
 

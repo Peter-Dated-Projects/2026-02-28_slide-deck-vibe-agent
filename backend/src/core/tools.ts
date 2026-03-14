@@ -1,5 +1,6 @@
 import OpenAI from 'openai';
 import { VibeManager } from './vibeManager';
+import * as crypto from 'crypto';
 
 /**
  * Returns the tool definitions along with the current slide count instruction
@@ -35,10 +36,35 @@ export const getTools = async (vibeManager: VibeManager): Promise<{ tools: OpenA
                     properties: {}
                 }
             }
+        },
+        {
+            type: 'function',
+            function: {
+                name: 'write_slide',
+                description: `Overwrite the HTML for a specific slide index. You MUST provide the content hash obtained from a recent read_slide call to successfully update the slide.`,
+                parameters: {
+                    type: 'object',
+                    properties: {
+                        index: {
+                            type: 'number',
+                            description: `The 1-based index of the slide to write (1-${slideCount})`
+                        },
+                        newHtml: {
+                            type: 'string',
+                            description: `The new HTML content for the slide`
+                        },
+                        hash: {
+                            type: 'string',
+                            description: `The content hash of the slide obtained from a recent read_slide call`
+                        }
+                    },
+                    required: ['index', 'newHtml', 'hash']
+                }
+            }
         }
     ];
 
-    const systemInstruction = `You have access to ${slideCount} slides in the current presentation. Use the read_slide and read_theme tools to inspect the presentation when the user asks questions about it or before making modifications.`;
+    const systemInstruction = `You have access to ${slideCount} slides in the current presentation. Use the read_slide and read_theme tools to inspect the presentation when the user asks questions about it or before making modifications. To modify a slide, you MUST first read it using read_slide to obtain its content hash, then pass that hash to the write_slide tool.`;
 
     return { tools, systemInstruction };
 };
@@ -56,7 +82,28 @@ export const executeTool = async (vibeManager: VibeManager, name: string, args: 
             if (!slideHtml) {
                 return JSON.stringify({ error: `Slide ${index} not found` });
             }
-            return slideHtml;
+            const hash = crypto.createHash('sha256').update(slideHtml).digest('hex');
+            return JSON.stringify({ html: slideHtml, hash });
+        }
+        
+        if (name === 'write_slide') {
+            const index = Number(args.index);
+            if (isNaN(index)) return JSON.stringify({ error: 'Invalid slide index type' });
+            if (!args.newHtml) return JSON.stringify({ error: 'Missing newHtml' });
+            if (!args.hash) return JSON.stringify({ error: 'Missing hash. You must read the slide first to get the content hash.' });
+            
+            const currentHtml = vibeManager.getSlide(index);
+            if (!currentHtml) {
+                return JSON.stringify({ error: `Slide ${index} not found` });
+            }
+            
+            const currentHash = crypto.createHash('sha256').update(currentHtml).digest('hex');
+            if (currentHash !== args.hash) {
+                return JSON.stringify({ error: 'Hash mismatch. The slide has been modified since you last read it, or you provided an incorrect hash. Please call read_slide again to get the latest hash.' });
+            }
+            
+            await vibeManager.setSlide(index, args.newHtml);
+            return JSON.stringify({ success: true, message: `Successfully updated slide ${index}` });
         }
         
         if (name === 'read_theme') {
