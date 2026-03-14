@@ -121,6 +121,7 @@
 
     <script>
         const container = document.getElementById('vibe-deck');
+        const slides = Array.from(container.querySelectorAll('.slide'));
         
         function updateScale() {
             const scale = Math.min(window.innerWidth / 1920, window.innerHeight / 1080);
@@ -130,8 +131,19 @@
         function nextSlide() { container.scrollBy({ top: window.innerHeight, behavior: 'smooth' }); }
         function prevSlide() { container.scrollBy({ top: -window.innerHeight, behavior: 'smooth' }); }
 
+        function onSlideClick(event) {
+            const clickedSlide = event.target.closest('.slide');
+            if (!clickedSlide || !container.contains(clickedSlide)) return;
+
+            const currentIndex = slides.indexOf(clickedSlide);
+            if (currentIndex === -1 || currentIndex >= slides.length - 1) return;
+
+            slides[currentIndex + 1].scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+
         window.addEventListener('resize', updateScale);
         window.addEventListener('load', updateScale);
+        container.addEventListener('click', onSlideClick);
         window.addEventListener('keydown', (e) => {
             if (e.key === 'ArrowDown') nextSlide();
             if (e.key === 'ArrowUp') prevSlide();
