@@ -496,20 +496,24 @@ export const ChatMessage: React.FC<ChatMessageProps> = React.memo(({ message }) 
                   }
 
                   let thinkIdx = 0;
-                  return blocks.map((block, idx) => {
+                  const renderedElements: React.ReactNode[] = [];
+                  
+                  for (let i = 0; i < blocks.length; i++) {
+                    const block = blocks[i];
+                    
                     if (block.type === "think") {
                       // If the block itself has timers from the new DB schema, use them directly
                       const timer = block.startTime
                         ? { startTime: block.startTime, endTime: block.endTime }
                         : message.thinkTimers?.[thinkIdx];
 
-                      const isLastThinkBlock = idx === blocks.length - 1;
+                      const isLastThinkBlock = i === blocks.length - 1;
                       const currentlyThinking =
                         isLastThinkBlock && message.isThinking && !timer?.endTime;
 
-                      const result = (
+                      renderedElements.push(
                         <ThinkingBlock
-                          key={idx}
+                          key={`think-${i}`}
                           isThinking={!!currentlyThinking}
                           thinkingContent={block.content || block.text} // Support 'text' key from new schema
                           startTime={timer?.startTime}
@@ -519,17 +523,43 @@ export const ChatMessage: React.FC<ChatMessageProps> = React.memo(({ message }) 
                         />
                       );
                       thinkIdx++;
-                      return result;
+                    } 
+                    else if (block.type === "tool_call" || block.type === "tool_result") {
+                      // Coalesce adjacent tool_calls and tool_results
+                      const groupToolCalls = [];
+                      const groupToolResults = [];
+                      let j = i;
+                      
+                      while (j < blocks.length && (blocks[j].type === "tool_call" || blocks[j].type === "tool_result")) {
+                         if (blocks[j].type === "tool_call") {
+                             groupToolCalls.push(blocks[j].tool_call);
+                         } else {
+                             groupToolResults.push({ id: blocks[j].id, result: blocks[j].result });
+                         }
+                         j++;
+                      }
+                      
+                      if (groupToolCalls.length > 0) {
+                          renderedElements.push(
+                              <ToolBlock 
+                                  key={`toolgroup-${i}`} 
+                                  toolCalls={groupToolCalls} 
+                                  toolResults={groupToolResults.length > 0 ? groupToolResults : undefined} 
+                              />
+                          );
+                      }
+                      
+                      // Skip the loop forward by the coalesced amount
+                      i = j - 1; 
+                    } 
+                    else {
+                      renderedElements.push(
+                          <MarkdownContent key={`text-${i}`} content={block.content || block.text || ""} />
+                      );
                     }
-                    if (block.type === "tool_call") {
-                      return <ToolBlock key={`tool-${idx}`} toolCalls={[block.tool_call]} />;
-                    }
-                    if (block.type === "tool_result") {
-                      // We can silently ignore raw tool results or render them
-                      return null;
-                    }
-                    return <MarkdownContent key={`text-${idx}`} content={block.content || block.text || ""} />;
-                  });
+                  }
+                  
+                  return renderedElements;
                 })()}
               </div>
             )}

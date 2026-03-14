@@ -189,6 +189,7 @@ app.post('/api/chat/stream', requireAuth, async (req: AuthRequest, res: express.
 
         const streamedToolCalls: any[] = [];
         const streamedToolResults: any[] = [];
+        const contentBlocks: any[] = [];
         let accumulatedText = "";
         const thinkTimers: { startTime: number; endTime?: number }[] = [];
 
@@ -200,6 +201,7 @@ app.post('/api/chat/stream', requireAuth, async (req: AuthRequest, res: express.
                     const parsed = JSON.parse(jsonStr);
                     if (Array.isArray(parsed.tool_calls)) {
                         streamedToolCalls.push(...parsed.tool_calls);
+                        parsed.tool_calls.forEach((tc: any) => contentBlocks.push({ type: 'tool_call', tool_call: tc }));
                     }
                 } catch {
                     // Keep streaming even if one metadata chunk is malformed.
@@ -212,22 +214,72 @@ app.post('/api/chat/stream', requireAuth, async (req: AuthRequest, res: express.
                         const parsed = JSON.parse(jsonStr);
                         if (parsed?.id) {
                             streamedToolResults.push(parsed);
+                            contentBlocks.push({ type: 'tool_result', id: parsed.id, result: parsed.result });
                         }
                     } catch {
                         // Keep streaming even if one metadata chunk is malformed.
                     }
                 } else {
+                    // It's a text token. Coalesce into the latest text block or think block
                     accumulatedText += token;
-                    const thinkStarts = accumulatedText.split("<think>").length - 1;
-                    const thinkEnds = accumulatedText.split("</think>").length - 1;
-
-                    while (thinkTimers.length < thinkStarts) {
-                        thinkTimers.push({ startTime: Date.now() });
-                    }
-                    for (let i = 0; i < thinkEnds; i++) {
-                        const timer = thinkTimers[i];
-                        if (timer && !timer.endTime) {
-                            timer.endTime = Date.now();
+                    
+                    // We can either try to build the blocks live during streaming, or just parse accumulatedText 
+                    // at the end, BUT if we parse accumulatedText at the end, we lose the chronological interleaving 
+                    // with tool calls. So we should build the text blocks live.
+                    
+                    const lastBlock = contentBlocks[contentBlocks.length - 1];
+                    const isThinking = accumulatedText.lastIndexOf("<think>") > accumulatedText.lastIndexOf("</think>");
+                    
+                    if (isThinking) {
+                        // Currently inside a thinking block
+                        if (lastBlock?.type === "think") {
+                            lastBlock.text += token;
+                        } else {
+                            // Strip <think> from the new block's text since we just entered it
+                            const cleanText = token.replace("<think>", "").replace("</think>", "");
+                            const newThinkTimer = { startTime: Date.now() };
+                            thinkTimers.push(newThinkTimer);
+                            contentBlocks.push({ type: "think", text: cleanText, startTime: newThinkTimer.startTime });
+                        }
+                    } else {
+                        // Currently inside normal text
+                        // Check if we just exited a think block
+                        if (lastBlock?.type === "think" && token.includes("</think>")) {
+                            // Close the think block timers
+                            const timer = thinkTimers[thinkTimers.length - 1];
+                            if (timer && !timer.endTime) timer.endTime = Date.now();
+                            lastBlock.endTime = timer?.endTime;
+                            
+                            // Any text after </think> goes into a new text block
+                            const afterThink = token.substring(token.indexOf("</think>") + 8);
+                            if (afterThink) {
+                                contentBlocks.push({ type: "text", text: afterThink });
+                            }
+                        } else if (lastBlock?.type === "text") {
+                            lastBlock.text += token;
+                        } else {
+                            // Wait, what if `<think>` is in this token but we didn't end up `isThinking` because `</think>` is also in it?
+                            // This means a think block started and ended in the exact same token chunk.
+                            if (token.includes("<think>") && token.includes("</think>")) {
+                                const beforeText = token.substring(0, token.indexOf("<think>"));
+                                const thinkText = token.substring(token.indexOf("<think>") + 7, token.indexOf("</think>"));
+                                const afterText = token.substring(token.indexOf("</think>") + 8);
+                                
+                                if (beforeText) {
+                                    if (lastBlock?.type === "text") lastBlock.text += beforeText;
+                                    else contentBlocks.push({ type: "text", text: beforeText });
+                                }
+                                
+                                const timer = { startTime: Date.now(), endTime: Date.now() };
+                                thinkTimers.push(timer);
+                                contentBlocks.push({ type: "think", text: thinkText, startTime: timer.startTime, endTime: timer.endTime });
+                                
+                                if (afterText) {
+                                    contentBlocks.push({ type: "text", text: afterText });
+                                }
+                            } else {
+                                contentBlocks.push({ type: "text", text: token });
+                            }
                         }
                     }
                 }
@@ -237,45 +289,7 @@ app.post('/api/chat/stream', requireAuth, async (req: AuthRequest, res: express.
 
         // Persist full response and tool metadata
         if (fullText || streamedToolCalls.length > 0 || streamedToolResults.length > 0) {
-            const contentBlocks: any[] = [];
-            let remaining = accumulatedText;
-            let thinkIdx = 0;
-            
-            while (remaining) {
-                const startIdx = remaining.indexOf("<think>");
-                if (startIdx === -1) {
-                    if (remaining.trim()) contentBlocks.push({ type: "text", text: remaining });
-                    break;
-                }
-                if (startIdx > 0) {
-                    const textBefore = remaining.slice(0, startIdx);
-                    if (textBefore.trim()) contentBlocks.push({ type: "text", text: textBefore });
-                }
-                const endIdx = remaining.indexOf("</think>", startIdx);
-                if (endIdx === -1) {
-                    const timer = thinkTimers[thinkIdx];
-                    contentBlocks.push({ 
-                        type: "think", 
-                        text: remaining.slice(startIdx + 7),
-                        startTime: timer?.startTime,
-                        endTime: timer?.endTime
-                    });
-                    break;
-                } else {
-                    const timer = thinkTimers[thinkIdx];
-                    contentBlocks.push({ 
-                        type: "think", 
-                        text: remaining.slice(startIdx + 7, endIdx).trim(),
-                        startTime: timer?.startTime,
-                        endTime: timer?.endTime
-                    });
-                    remaining = remaining.slice(endIdx + 8);
-                    thinkIdx++;
-                }
-            }
-
-            streamedToolCalls.forEach(tc => contentBlocks.push({ type: 'tool_call', tool_call: tc }));
-            streamedToolResults.forEach(tr => contentBlocks.push({ type: 'tool_result', id: tr.id, result: tr.result }));
+            // contentBlocks is already fully interleaved and chronologically ordered from the stream loop above!
 
             await db.query(
                 'INSERT INTO messages (conversation_id, role, content, tool_calls, tool_results) VALUES ($1, $2, $3, $4, $5)',
