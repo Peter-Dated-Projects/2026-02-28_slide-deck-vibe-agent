@@ -514,8 +514,8 @@ app.get('/api/presentation/:conversationId', requireAuth, async (req: AuthReques
              return;
          }
 
-         const slidesResult = await db.query('SELECT minio_object_key, theme_data FROM slides WHERE conversation_id = $1 ORDER BY created_at ASC', [conversationId]);
          const { html, cacheHit } = await loadDeckHtmlForConversation(conversationId);
+         const slidesResult = await db.query('SELECT minio_object_key, theme_data FROM slides WHERE conversation_id = $1 ORDER BY created_at ASC', [conversationId]);
          
          res.json({
              slides: slidesResult.rows,
@@ -523,6 +523,7 @@ app.get('/api/presentation/:conversationId', requireAuth, async (req: AuthReques
              cacheHit
          });
      } catch (error) {
+         console.error('Error fetching presentation:', error);
          res.status(500).json({ error: 'Error fetching presentation' });
      }
 });

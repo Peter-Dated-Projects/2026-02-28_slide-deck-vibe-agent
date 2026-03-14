@@ -60,18 +60,17 @@ describe("VibeManager", () => {
 
   test("should overwrite an existing slide", async () => {
     const manager = await VibeManager.create(TEST_TEMPLATE_PATH);
-    const slide1Html = `
-      <section class="slide">
-          <div class="slide-aspect-ratio-box">
-              <h1>Modified Slide 1</h1>
-          </div>
-      </section>
+    const slide1InnerHtml = `
+      <div class="slide-aspect-ratio-box">
+          <h1>Modified Slide 1</h1>
+      </div>
     `;
-    await manager.setSlide(1, slide1Html);
+    await manager.setSlide(1, slide1InnerHtml);
 
     const freshManager = await VibeManager.create(TEST_TEMPLATE_PATH);
     const savedSlide = freshManager.getSlide(1);
     expect(savedSlide).toContain("<h1>Modified Slide 1</h1>");
+    expect(savedSlide).not.toContain("<section");
   });
 
   test("should append a new slide sequentially", async () => {
@@ -88,6 +87,7 @@ describe("VibeManager", () => {
     const freshManager = await VibeManager.create(TEST_TEMPLATE_PATH);
     const savedSlide = freshManager.getSlide(2);
     expect(savedSlide).toContain("<h1>Injected Slide 2</h1>");
+    expect(savedSlide).not.toContain("<section");
   });
 
   test("should delete a slide", async () => {

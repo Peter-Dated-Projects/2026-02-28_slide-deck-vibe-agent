@@ -320,6 +320,12 @@ const ChatPage: React.FC = () => {
 
       let toolCallsCache: any[] = [];
       let toolResultsCache: any[] = [];
+      const requestPresentationRefresh = () => {
+        const targetConversationId = doneConvId ?? conversationId;
+        if (targetConversationId) {
+          fetchPresentation(targetConversationId);
+        }
+      };
 
       const attemptUpdateState = () => {
         // Deep copy the blocks because they might still mutate
@@ -403,6 +409,8 @@ const ChatPage: React.FC = () => {
                     });
                   }
                 } catch (e) {}
+              } else if (tokenStr === "[PRESENTATION_UPDATED]") {
+                requestPresentationRefresh();
               } else {
                 accumulatedText += tokenStr;
 

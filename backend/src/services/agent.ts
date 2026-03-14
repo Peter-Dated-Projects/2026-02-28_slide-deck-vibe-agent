@@ -164,12 +164,14 @@ export const chatWithAgentStream = async (
                      }
                  }
                  const output = await executeTool(vibeManager, name, args);
+                 let shouldRefreshPresentation = false;
 
                  if (name === 'write_slide') {
                      try {
                          const parsed = JSON.parse(output);
                          if (parsed?.success) {
                              await persist();
+                             shouldRefreshPresentation = true;
                          }
                      } catch {
                          // keep going even if tool output is non-JSON
@@ -184,6 +186,10 @@ export const chatWithAgentStream = async (
                  
                  // Optionally stream back the tool result so the UI knows it finished
                  onChunk(`\n[TOOL_RESULT]${JSON.stringify({ id: tc.id, result: output })}[/TOOL_RESULT]\n`);
+                 if (shouldRefreshPresentation) {
+                     // Signal the frontend to refetch the presentation endpoint (which hydrates from Redis cache first).
+                     onChunk('[PRESENTATION_UPDATED]');
+                 }
              }
              // Loop again to give LLM the results
         } else {

@@ -10,7 +10,7 @@ describe('Core Tools - read/write slide OCC', () => {
     let tempFilePath: string;
     let vibeManager: VibeManager;
 
-    const initialSlideHtml = '<section><h1>Original Title</h1></section>';
+    const initialSlideInnerHtml = '<h1>Original Title</h1>';
 
     const fixtureHtml = `<!doctype html>
 <html>
@@ -25,7 +25,7 @@ describe('Core Tools - read/write slide OCC', () => {
     <div>
         <!-- VIBE_SLIDES_CONTAINER_START -->
         <!-- VIBE_SLIDE_1_START -->
-        ${initialSlideHtml}
+        <section class="slide">${initialSlideInnerHtml}</section>
         <!-- VIBE_SLIDE_1_END -->
         <!-- VIBE_SLIDES_CONTAINER_END -->
     </div>
@@ -47,10 +47,10 @@ describe('Core Tools - read/write slide OCC', () => {
         const result = await executeTool(vibeManager, 'read_slide', { index: 1 });
         const parsed = JSON.parse(result);
 
-        const expectedHash = crypto.createHash('sha256').update(initialSlideHtml).digest('hex');
+        const expectedHash = crypto.createHash('sha256').update(initialSlideInnerHtml).digest('hex');
 
         expect(parsed).toEqual({
-            html: initialSlideHtml,
+            html: initialSlideInnerHtml,
             hash: expectedHash
         });
     });
@@ -59,10 +59,10 @@ describe('Core Tools - read/write slide OCC', () => {
         const readResult = await executeTool(vibeManager, 'read_slide', { index: 1 });
         const { hash } = JSON.parse(readResult);
 
-        const updatedHtml = '<section><h1>Updated Title</h1></section>';
+        const updatedInnerHtml = '<h1>Updated Title</h1>';
         const writeResult = await executeTool(vibeManager, 'write_slide', {
             index: 1,
-            newHtml: updatedHtml,
+            newHtml: updatedInnerHtml,
             hash
         });
 
@@ -73,13 +73,13 @@ describe('Core Tools - read/write slide OCC', () => {
         });
 
         const currentSlide = vibeManager.getSlide(1);
-        expect(currentSlide).toBe(updatedHtml);
+        expect(currentSlide).toBe(updatedInnerHtml);
     });
 
     it('write_slide fails with an incorrect hash and asks to re-read', async () => {
         const writeResult = await executeTool(vibeManager, 'write_slide', {
             index: 1,
-            newHtml: '<section><h1>Should Not Apply</h1></section>',
+            newHtml: '<h1>Should Not Apply</h1>',
             hash: 'incorrect-hash'
         });
 
@@ -88,13 +88,13 @@ describe('Core Tools - read/write slide OCC', () => {
         expect(parsed.error).toContain('Please call read_slide again');
 
         const currentSlide = vibeManager.getSlide(1);
-        expect(currentSlide).toBe(initialSlideHtml);
+        expect(currentSlide).toBe(initialSlideInnerHtml);
     });
 
     it('write_slide fails when hash is missing and asks to read first', async () => {
         const writeResult = await executeTool(vibeManager, 'write_slide', {
             index: 1,
-            newHtml: '<section><h1>Should Not Apply</h1></section>'
+            newHtml: '<h1>Should Not Apply</h1>'
         });
 
         const parsed = JSON.parse(writeResult);
@@ -102,7 +102,7 @@ describe('Core Tools - read/write slide OCC', () => {
         expect(parsed.error).toContain('read the slide first');
 
         const currentSlide = vibeManager.getSlide(1);
-        expect(currentSlide).toBe(initialSlideHtml);
+        expect(currentSlide).toBe(initialSlideInnerHtml);
     });
 
     it('getTools advertises write_slide hash requirements', async () => {
@@ -125,6 +125,9 @@ describe('Core Tools - read/write slide OCC', () => {
         const requiredParams = params.required;
         expect(requiredParams).toEqual(['index', 'newHtml', 'hash']);
         expect(writeSlideTool.function.description).toContain('MUST provide the content hash');
+        expect(writeSlideTool.function.description).toContain('inside <section class=\"slide\">');
         expect(systemInstruction).toContain('MUST first read it using read_slide');
+        expect(systemInstruction).toContain('only return/modify the content inside each <section class="slide">');
+        expect(systemInstruction).toContain('shared across the entire slide deck');
     });
 });
