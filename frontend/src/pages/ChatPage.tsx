@@ -16,6 +16,7 @@ import {
   Home,
   Pencil,
 } from "lucide-react";
+import { usePersistentWidth } from "../hooks/usePersistentWidth";
 
 // ─────────────────────────────────────────────────────
 // Utilities
@@ -101,7 +102,12 @@ const ChatPage: React.FC = () => {
   const [currentSlideIndex, setCurrentSlideIndex] = useState(0);
   const [showSettings, setShowSettings] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
-  const [sidebarWidth, setSidebarWidth] = useState(380);
+  const [sidebarWidth, setSidebarWidth] = usePersistentWidth({
+    storageKey: "vibe-agent.chat-sidebar-width",
+    defaultWidth: 380,
+    minWidth: 350,
+    maxWidth: 550,
+  });
   const [isResizingState, setIsResizingState] = useState(false);
   const [deckTitle, setDeckTitle] = useState("New Presentation");
   const [isTitleFocused, setIsTitleFocused] = useState(false);
