@@ -13,7 +13,7 @@ export const getTools = async (vibeManager: VibeManager): Promise<{ tools: OpenA
             type: 'function',
             function: {
                 name: 'read_slide',
-                description: `Extract HTML for a specific slide index. There are currently ${slideCount} slides available (1-indexed).`,
+                description: `Extract only the inner HTML content for a specific slide index. This returns content inside <section class=\"slide\"> and does not include the section wrapper itself. There are currently ${slideCount} slides available (1-indexed).`,
                 parameters: {
                     type: 'object',
                     properties: {
@@ -30,7 +30,7 @@ export const getTools = async (vibeManager: VibeManager): Promise<{ tools: OpenA
             type: 'function',
             function: {
                 name: 'read_theme',
-                description: 'Extract the CSS variables block containing the theme information.',
+                description: 'Extract the deck-wide CSS variables block containing theme information shared across the entire slide deck.',
                 parameters: {
                     type: 'object',
                     properties: {}
@@ -41,7 +41,7 @@ export const getTools = async (vibeManager: VibeManager): Promise<{ tools: OpenA
             type: 'function',
             function: {
                 name: 'write_slide',
-                description: `Overwrite the HTML for a specific slide index. You MUST provide the content hash obtained from a recent read_slide call to successfully update the slide.`,
+                description: `Overwrite only the inner HTML content of a specific slide index. This modifies only the content inside <section class=\"slide\"> and does not replace the section wrapper itself. You MUST provide the content hash obtained from a recent read_slide call to successfully update the slide.`,
                 parameters: {
                     type: 'object',
                     properties: {
@@ -64,7 +64,7 @@ export const getTools = async (vibeManager: VibeManager): Promise<{ tools: OpenA
         }
     ];
 
-    const systemInstruction = `You have access to ${slideCount} slides in the current presentation. Use the read_slide and read_theme tools to inspect the presentation when the user asks questions about it or before making modifications. To modify a slide, you MUST first read it using read_slide to obtain its content hash, then pass that hash to the write_slide tool.`;
+    const systemInstruction = `You have access to ${slideCount} slides in the current presentation. The read_slide and write_slide tools only return/modify the content inside each <section class="slide"> (the section wrapper itself is preserved). The read_theme tool returns deck-wide theme CSS shared across the entire slide deck. Use read_slide and read_theme to inspect before modifications. To modify a slide, you MUST first read it using read_slide to obtain its content hash, then pass that hash to write_slide.`;
 
     return { tools, systemInstruction };
 };

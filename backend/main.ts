@@ -7,6 +7,7 @@ import * as projectController from './src/controllers/project';
 import { requireAuth, type AuthRequest } from './src/middleware/auth';
 import { dbService as db } from './src/core/container';
 import { chatWithAgent, chatWithAgentStream } from './src/services/agent';
+import { loadDeckHtmlForConversation } from './src/services/projectDeck';
 import { config } from './src/config';
 
 const app = express();
@@ -514,9 +515,12 @@ app.get('/api/presentation/:conversationId', requireAuth, async (req: AuthReques
          }
 
          const slidesResult = await db.query('SELECT minio_object_key, theme_data FROM slides WHERE conversation_id = $1 ORDER BY created_at ASC', [conversationId]);
+         const { html, cacheHit } = await loadDeckHtmlForConversation(conversationId);
          
          res.json({
-             slides: slidesResult.rows
+             slides: slidesResult.rows,
+             html,
+             cacheHit
          });
      } catch (error) {
          res.status(500).json({ error: 'Error fetching presentation' });

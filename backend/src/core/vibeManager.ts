@@ -52,21 +52,37 @@ export class VibeManager {
     // --- SLIDE METHODS ---
 
     /**
-     * Extracts HTML for a specific slide index (1-based).
+     * Extracts inner HTML content for a specific slide index (1-based).
+     * Returns only the content inside <section class="slide">, not the section wrapper itself.
      */
     getSlide(index: number): string | null {
         const pattern = new RegExp(`<!-- VIBE_SLIDE_${index}_START -->\\s*(.*?)\\s*<!-- VIBE_SLIDE_${index}_END -->`, 's');
         const match = pattern.exec(this.content);
-        return match && match[1] ? match[1].trim() : null;
+        if (!match || !match[1]) return null;
+
+        const sectionPattern = /<section\b[^>]*\bclass\s*=\s*["'][^"']*\bslide\b[^"']*["'][^>]*>([\s\S]*?)<\/section>/i;
+        const sectionMatch = sectionPattern.exec(match[1]);
+        return sectionMatch && sectionMatch[1] ? sectionMatch[1].trim() : null;
     }
 
     /**
-     * Overwrites a specific slide by index.
+     * Overwrites the inner HTML content of a specific slide by index.
+     * Only content inside <section class="slide"> is replaced.
      */
     async setSlide(index: number, newHtml: string): Promise<void> {
-        const pattern = new RegExp(`(<!-- VIBE_SLIDE_${index}_START -->).*?(<!-- VIBE_SLIDE_${index}_END -->)`, 's');
-        const replacement = `$1\n        ${newHtml.trim()}\n        $2`;
-        this.content = this.content.replace(pattern, replacement);
+        const pattern = new RegExp(`(<!-- VIBE_SLIDE_${index}_START -->\\s*)([\\s\\S]*?)(\\s*<!-- VIBE_SLIDE_${index}_END -->)`, 's');
+        const match = pattern.exec(this.content);
+        if (!match || !match[2]) {
+            throw new Error(`Slide ${index} not found`);
+        }
+
+        const sectionPattern = /(<section\b[^>]*\bclass\s*=\s*["'][^"']*\bslide\b[^"']*["'][^>]*>)([\s\S]*?)(<\/section>)/i;
+        if (!sectionPattern.test(match[2])) {
+            throw new Error(`Slide ${index} does not contain a valid <section class=\"slide\"> block`);
+        }
+
+        const updatedSlideBlock = match[2].replace(sectionPattern, `$1\n${newHtml.trim()}\n$3`);
+        this.content = this.content.replace(pattern, `$1${updatedSlideBlock}$3`);
         await this.save();
     }
 

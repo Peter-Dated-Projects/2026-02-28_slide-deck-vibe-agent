@@ -1,5 +1,6 @@
 import type { Request, Response } from 'express';
-import { dbService as db, storageService } from '../core/container';
+import { dbService as db } from '../core/container';
+import { ensureDeckExistsForConversation } from '../services/projectDeck';
 
 export const getProjects = async (req: Request, res: Response): Promise<void> => {
     try {
@@ -74,28 +75,10 @@ export const createProject = async (req: Request, res: Response): Promise<void> 
         const conversation = convResult.rows[0];
         const projectId = conversation.id;
 
-        // 2. Upload skeleton HTML file to S3
-        const s3Key = `users/${userId}/${projectId}.html`;
-        const skeletonHtml = `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>${defaultTitle}</title>
-</head>
-<body>
-</body>
-</html>`;
+                // 2. Ensure the project deck is seeded from frontend/public/default.html in S3 and cached.
+                await ensureDeckExistsForConversation(projectId);
 
-        await storageService.uploadFile(s3Key, skeletonHtml, 'text/html');
-
-        // 3. Create a slide record linking the conversation to the S3 file
-        await db.query(
-            'INSERT INTO slides (conversation_id, minio_object_key) VALUES ($1, $2)',
-            [projectId, s3Key]
-        );
-
-        // 4. Return the new project in the same shape as getProjects
+                // 3. Return the new project in the same shape as getProjects
         res.status(201).json({
             project: {
                 id: projectId,

@@ -37,6 +37,21 @@ services:
       timeout: 20s
       retries: 3
 
+  redis:
+    image: redis:7-alpine
+    container_name: vibe_redis
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
 volumes:
   postgres_data:
   minio_data:
+  redis_data:

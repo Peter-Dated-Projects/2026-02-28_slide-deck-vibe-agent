@@ -223,12 +223,8 @@ const ChatPage: React.FC = () => {
           minio_object_key: s.minio_object_key,
           theme_data: s.theme_data,
         }));
-        // TODO: replace with real S3 content once /api/storage is wired up.
-        // For now, load the default placeholder HTML from public/default.html.
-        const defaultHtmlRes = await fetch("/default.html").catch(() => null);
-        const defaultHtml = defaultHtmlRes?.ok ? await defaultHtmlRes.text() : "";
-
-        setSlides(formattedSlides.map((slide) => ({ ...slide, rawHtml: defaultHtml })));
+        const presentationHtml = typeof res.data.html === "string" ? res.data.html : "";
+        setSlides(formattedSlides.map((slide) => ({ ...slide, rawHtml: presentationHtml })));
       }
     } catch (error) {
       console.error("Failed to fetch presentation:", error);
@@ -329,11 +325,12 @@ const ChatPage: React.FC = () => {
         // Deep copy the blocks because they might still mutate
         const snapshotBlocks = JSON.parse(JSON.stringify(contentBlocks));
         const snapshotTimers = JSON.parse(JSON.stringify(thinkTimers));
-        
-        const isThinkingActive = contentBlocks.length > 0 && 
-                                 contentBlocks[contentBlocks.length - 1].type === "think" && 
-                                 !contentBlocks[contentBlocks.length - 1].endTime;
-                                 
+
+        const isThinkingActive =
+          contentBlocks.length > 0 &&
+          contentBlocks[contentBlocks.length - 1].type === "think" &&
+          !contentBlocks[contentBlocks.length - 1].endTime;
+
         setMessages((prev) =>
           prev.map((m) =>
             m.id === assistantId
@@ -384,7 +381,9 @@ const ChatPage: React.FC = () => {
                   const parsed = JSON.parse(jsonStr);
                   if (parsed.tool_calls) {
                     toolCallsCache.push(...parsed.tool_calls);
-                    parsed.tool_calls.forEach((tc: any) => contentBlocks.push({ type: 'tool_call', tool_call: tc }));
+                    parsed.tool_calls.forEach((tc: any) =>
+                      contentBlocks.push({ type: "tool_call", tool_call: tc }),
+                    );
                   }
                 } catch (e) {}
               } else if (
@@ -397,73 +396,79 @@ const ChatPage: React.FC = () => {
                   const parsed = JSON.parse(jsonStr);
                   if (parsed.id) {
                     toolResultsCache.push(parsed);
-                    contentBlocks.push({ type: 'tool_result', id: parsed.id, result: parsed.result });
+                    contentBlocks.push({
+                      type: "tool_result",
+                      id: parsed.id,
+                      result: parsed.result,
+                    });
                   }
                 } catch (e) {}
               } else {
                 accumulatedText += tokenStr;
-                
+
                 const numThinkTags = accumulatedText.split("<think>").length - 1;
                 while (thinkTimers.length < Math.max(1, numThinkTags)) {
-                    thinkTimers.push({ startTime: Date.now() });
+                  thinkTimers.push({ startTime: Date.now() });
                 }
-                
+
                 const newTextThinkBlocks: any[] = [];
                 let remaining = accumulatedText;
                 let thinkIdx = 0;
-                
+
                 while (remaining) {
-                    const startIdx = remaining.indexOf("<think>");
-                    if (startIdx === -1) {
-                        if (remaining.trim()) newTextThinkBlocks.push({ type: "text", text: remaining });
-                        break;
+                  const startIdx = remaining.indexOf("<think>");
+                  if (startIdx === -1) {
+                    if (remaining.trim())
+                      newTextThinkBlocks.push({ type: "text", text: remaining });
+                    break;
+                  }
+                  if (startIdx > 0) {
+                    const textBefore = remaining.slice(0, startIdx);
+                    if (textBefore.trim())
+                      newTextThinkBlocks.push({ type: "text", text: textBefore });
+                  }
+
+                  const endIdx = remaining.indexOf("</think>", startIdx);
+                  if (endIdx === -1) {
+                    const timer = thinkTimers[thinkIdx];
+                    newTextThinkBlocks.push({
+                      type: "think",
+                      text: remaining.slice(startIdx + 7).trim(),
+                      startTime: timer?.startTime,
+                      endTime: timer?.endTime,
+                    });
+                    break;
+                  } else {
+                    const timer = thinkTimers[thinkIdx];
+                    if (timer && !timer.endTime) {
+                      timer.endTime = Date.now();
                     }
-                    if (startIdx > 0) {
-                        const textBefore = remaining.slice(0, startIdx);
-                        if (textBefore.trim()) newTextThinkBlocks.push({ type: "text", text: textBefore });
-                    }
-                    
-                    const endIdx = remaining.indexOf("</think>", startIdx);
-                    if (endIdx === -1) {
-                        const timer = thinkTimers[thinkIdx];
-                        newTextThinkBlocks.push({ 
-                            type: "think", 
-                            text: remaining.slice(startIdx + 7).trim(),
-                            startTime: timer?.startTime,
-                            endTime: timer?.endTime
-                        });
-                        break;
-                    } else {
-                        const timer = thinkTimers[thinkIdx];
-                        if (timer && !timer.endTime) {
-                            timer.endTime = Date.now();
-                        }
-                        newTextThinkBlocks.push({ 
-                            type: "think", 
-                            text: remaining.slice(startIdx + 7, endIdx).trim(),
-                            startTime: timer?.startTime,
-                            endTime: timer?.endTime
-                        });
-                        remaining = remaining.slice(endIdx + 8);
-                        thinkIdx++;
-                    }
+                    newTextThinkBlocks.push({
+                      type: "think",
+                      text: remaining.slice(startIdx + 7, endIdx).trim(),
+                      startTime: timer?.startTime,
+                      endTime: timer?.endTime,
+                    });
+                    remaining = remaining.slice(endIdx + 8);
+                    thinkIdx++;
+                  }
                 }
-                
+
                 let textThinkCursor = 0;
                 const reconstructedBlocks: any[] = [];
                 for (let b of contentBlocks) {
-                    if (b.type === 'tool_call' || b.type === 'tool_result') {
-                        reconstructedBlocks.push(b);
-                    } else {
-                        if (textThinkCursor < newTextThinkBlocks.length) {
-                            reconstructedBlocks.push(newTextThinkBlocks[textThinkCursor]);
-                            textThinkCursor++;
-                        }
+                  if (b.type === "tool_call" || b.type === "tool_result") {
+                    reconstructedBlocks.push(b);
+                  } else {
+                    if (textThinkCursor < newTextThinkBlocks.length) {
+                      reconstructedBlocks.push(newTextThinkBlocks[textThinkCursor]);
+                      textThinkCursor++;
                     }
+                  }
                 }
                 while (textThinkCursor < newTextThinkBlocks.length) {
-                    reconstructedBlocks.push(newTextThinkBlocks[textThinkCursor]);
-                    textThinkCursor++;
+                  reconstructedBlocks.push(newTextThinkBlocks[textThinkCursor]);
+                  textThinkCursor++;
                 }
                 contentBlocks = reconstructedBlocks;
               }
