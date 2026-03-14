@@ -37,6 +37,32 @@ function cn(...classes: (string | undefined | null | false)[]) {
   return classes.filter(Boolean).join(" ");
 }
 
+function parseContentBlocks(content: string) {
+  const blocks: { type: "text" | "think"; content: string }[] = [];
+  let remaining = content;
+
+  while (remaining) {
+    const startIdx = remaining.indexOf("<think>");
+    if (startIdx === -1) {
+      if (remaining.trim()) blocks.push({ type: "text", content: remaining });
+      break;
+    }
+    if (startIdx > 0) {
+      const textBefore = remaining.slice(0, startIdx);
+      if (textBefore.trim()) blocks.push({ type: "text", content: textBefore });
+    }
+    const endIdx = remaining.indexOf("</think>", startIdx);
+    if (endIdx === -1) {
+      blocks.push({ type: "think", content: remaining.slice(startIdx + 7) });
+      break;
+    } else {
+      blocks.push({ type: "think", content: remaining.slice(startIdx + 7, endIdx).trim() });
+      remaining = remaining.slice(endIdx + 8);
+    }
+  }
+  return blocks;
+}
+
 // ─────────────────────────────────────────────────────
 // ThinkingBlock sub-component
 // ─────────────────────────────────────────────────────
@@ -74,7 +100,9 @@ const ThinkingBlock: React.FC<ThinkingBlockProps> = ({
     };
   }, [isThinking, thinkingStartedAt, thinkingTime]);
 
-  const label = isThinking ? `Agent thinking for ${elapsed}s…` : `Agent thought for ${elapsed}s`;
+  const label = isThinking 
+    ? `Agent thinking for ${elapsed}s…` 
+    : (elapsed > 0 ? `Agent thought for ${elapsed}s` : `Agent thought`);
 
   return (
     <div className="mb-3">
@@ -381,8 +409,30 @@ export const ChatMessage: React.FC<ChatMessageProps> = React.memo(({ message }) 
               // User messages: preserve line breaks, no markdown
               <p className="text-[12px] leading-relaxed whitespace-pre-wrap">{message.content}</p>
             ) : (
-              // Assistant messages: full markdown rendering
-              <MarkdownContent content={message.content} />
+              // Assistant messages: parse and handle think blocks + markdown
+              <div className="space-y-3 w-full">
+                {(() => {
+                  const blocks = parseContentBlocks(message.content);
+                  return blocks.map((block, idx) => {
+                    if (block.type === "think") {
+                      const isLastThinkBlock = idx === blocks.length - 1;
+                      const currentlyThinking = isLastThinkBlock && message.isThinking;
+                      return (
+                        <ThinkingBlock
+                          key={idx}
+                          isThinking={!!currentlyThinking}
+                          thinkingContent={block.content}
+                          thinkingStartedAt={message.thinkingStartedAt}
+                          // Pass global time limit so closed blocks don't freeze at 0s, 
+                          // or undefined if we are currently active so we can tick.
+                          thinkingTime={currentlyThinking ? undefined : message.thinkingTime}
+                        />
+                      );
+                    }
+                    return <MarkdownContent key={`text-${idx}`} content={block.content} />;
+                  });
+                })()}
+              </div>
             )}
           </>
         )}

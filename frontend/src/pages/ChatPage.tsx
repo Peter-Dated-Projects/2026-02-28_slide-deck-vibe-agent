@@ -51,38 +51,21 @@ function generateId() {
 }
 
 function parseStreamSnapshot(snapshot: string) {
-  const thinkStartIndex = snapshot.indexOf("<think>");
+  const thinkStarts = snapshot.split("<think>").length - 1;
+  const thinkEnds = snapshot.split("</think>").length - 1;
+  let isThinking = thinkStarts > thinkEnds;
 
-  if (thinkStartIndex === -1) {
+  if (!isThinking && thinkStarts === thinkEnds) {
     const stripped = snapshot.trim();
     const prefixes = ["<think", "<thin", "<thi", "<th", "<t", "<"];
-    const isPrefix = prefixes.includes(stripped) || !stripped;
-
-    // If it's the very beginning of the response and looks like it *might* be <think>
-    if (isPrefix && snapshot.length < 8) {
-      return { isThinking: true, thinkingContent: snapshot, content: "" };
+    if (prefixes.includes(stripped) || !stripped) {
+      if (snapshot.length < 8) {
+        isThinking = true;
+      }
     }
-
-    return { isThinking: false, thinkingContent: "", content: snapshot };
   }
 
-  const thinkEndIndex = snapshot.indexOf("</think>", thinkStartIndex);
-
-  if (thinkEndIndex === -1) {
-    const contentBefore = snapshot.slice(0, thinkStartIndex);
-    const reasoningText = snapshot.slice(thinkStartIndex + 7).trimStart();
-    return { isThinking: true, thinkingContent: reasoningText, content: contentBefore };
-  } else {
-    // Thinking complete
-    const contentBefore = snapshot.slice(0, thinkStartIndex);
-    const reasoningText = snapshot.slice(thinkStartIndex + 7, thinkEndIndex).trim();
-    const contentAfter = snapshot.slice(thinkEndIndex + 8).trimStart();
-    return {
-      isThinking: false,
-      thinkingContent: reasoningText,
-      content: contentBefore + contentAfter,
-    };
-  }
+  return { isThinking, thinkingContent: "", content: snapshot };
 }
 
 // ─────────────────────────────────────────────────────
@@ -331,8 +314,10 @@ const ChatPage: React.FC = () => {
 
       const attemptUpdateState = (snapshot: string, tCalls?: any[], tResults?: any[]) => {
         const parsed = parseStreamSnapshot(snapshot);
-        if (!parsed.isThinking && lockedThinkingTime === undefined) {
+        if (!parsed.isThinking) {
           lockedThinkingTime = Math.floor((Date.now() - thinkingStartedAt) / 1000);
+        } else {
+          lockedThinkingTime = undefined;
         }
 
         setMessages((prev) =>
