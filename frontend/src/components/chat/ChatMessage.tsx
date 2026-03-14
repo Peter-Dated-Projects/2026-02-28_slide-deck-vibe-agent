@@ -21,8 +21,9 @@ export interface ChatMessageData {
   /** Epoch ms when thinking started. Used to compute elapsed time. */
   thinkingStartedAt?: number;
   /** Final elapsed seconds, set once thinking is done */
-  /** Final elapsed seconds, set once thinking is done */
   thinkingTime?: number;
+  /** Timers for individual think blocks */
+  thinkTimers?: { startTime: number; endTime?: number }[];
   /** Array of tool calls made by the agent */
   toolCalls?: any[];
   /** Array of tool results corresponding to tool calls */
@@ -71,7 +72,9 @@ interface ThinkingBlockProps {
   isThinking: boolean;
   thinkingContent?: string;
   thinkingStartedAt?: number;
-  thinkingTime?: number;
+  thinkingTime?: number; // legacy Support
+  startTime?: number;
+  endTime?: number;
 }
 
 const ThinkingBlock: React.FC<ThinkingBlockProps> = ({
@@ -79,26 +82,39 @@ const ThinkingBlock: React.FC<ThinkingBlockProps> = ({
   thinkingContent,
   thinkingStartedAt,
   thinkingTime,
+  startTime,
+  endTime,
 }) => {
   const [expanded, setExpanded] = useState(false);
-  const [elapsed, setElapsed] = useState(thinkingTime ?? 0);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Live timer while still thinking
-  useEffect(() => {
-    if (isThinking && thinkingStartedAt) {
-      intervalRef.current = setInterval(() => {
-        setElapsed(Math.floor((Date.now() - thinkingStartedAt) / 1000));
-      }, 500);
-    } else {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-      // Snap to the final recorded time if available
-      if (thinkingTime !== undefined) setElapsed(thinkingTime);
+  const calculateElapsed = useCallback(() => {
+    // New behavior:
+    if (startTime) {
+      if (endTime) return Math.floor((endTime - startTime) / 1000);
+      if (isThinking) return Math.floor((Date.now() - startTime) / 1000);
+      return Math.floor((Date.now() - startTime) / 1000); // Fallback if isThinking is false but no endTime
     }
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-    };
-  }, [isThinking, thinkingStartedAt, thinkingTime]);
+    // Legacy behavior:
+    if (thinkingTime !== undefined) return thinkingTime;
+    if (thinkingStartedAt) {
+       if (isThinking) return Math.floor((Date.now() - thinkingStartedAt) / 1000);
+       return 0; // Just in case
+    }
+    return 0;
+  }, [startTime, endTime, isThinking, thinkingTime, thinkingStartedAt]);
+
+  const [elapsed, setElapsed] = useState(calculateElapsed());
+
+  useEffect(() => {
+    if (isThinking && (startTime || thinkingStartedAt) && !endTime && thinkingTime === undefined) {
+      const id = setInterval(() => {
+        setElapsed(calculateElapsed());
+      }, 500);
+      return () => clearInterval(id);
+    } else {
+      setElapsed(calculateElapsed());
+    }
+  }, [isThinking, startTime, endTime, thinkingStartedAt, thinkingTime, calculateElapsed]);
 
   const label = isThinking 
     ? `Agent thinking for ${elapsed}s…` 
@@ -413,21 +429,38 @@ export const ChatMessage: React.FC<ChatMessageProps> = React.memo(({ message }) 
               <div className="space-y-3 w-full">
                 {(() => {
                   const blocks = parseContentBlocks(message.content);
+                  
+                  // Empty stream edge case support
+                  if (blocks.length === 0 && message.isThinking) {
+                     return (
+                        <ThinkingBlock
+                          key="initial"
+                          isThinking={true}
+                          startTime={message.thinkTimers?.[0]?.startTime || message.thinkingStartedAt}
+                        />
+                     );
+                  }
+
+                  let thinkIdx = 0;
                   return blocks.map((block, idx) => {
                     if (block.type === "think") {
+                      const timer = message.thinkTimers?.[thinkIdx];
                       const isLastThinkBlock = idx === blocks.length - 1;
-                      const currentlyThinking = isLastThinkBlock && message.isThinking;
-                      return (
+                      const currentlyThinking = isLastThinkBlock && message.isThinking && !timer?.endTime;
+                      
+                      const result = (
                         <ThinkingBlock
                           key={idx}
                           isThinking={!!currentlyThinking}
                           thinkingContent={block.content}
+                          startTime={timer?.startTime}
+                          endTime={timer?.endTime}
                           thinkingStartedAt={message.thinkingStartedAt}
-                          // Pass global time limit so closed blocks don't freeze at 0s, 
-                          // or undefined if we are currently active so we can tick.
                           thinkingTime={currentlyThinking ? undefined : message.thinkingTime}
                         />
                       );
+                      thinkIdx++;
+                      return result;
                     }
                     return <MarkdownContent key={`text-${idx}`} content={block.content} />;
                   });

@@ -307,17 +307,24 @@ const ChatPage: React.FC = () => {
       let accumulatedText = "";
       let pendingText = ""; // tokens waiting to be flushed to React state
       let doneConvId = conversationId ?? null;
-      let lockedThinkingTime: number | undefined;
+      let thinkTimers: { startTime: number; endTime?: number }[] = [{ startTime: thinkingStartedAt }];
 
       let toolCallsCache: any[] = [];
       let toolResultsCache: any[] = [];
 
       const attemptUpdateState = (snapshot: string, tCalls?: any[], tResults?: any[]) => {
         const parsed = parseStreamSnapshot(snapshot);
-        if (!parsed.isThinking) {
-          lockedThinkingTime = Math.floor((Date.now() - thinkingStartedAt) / 1000);
-        } else {
-          lockedThinkingTime = undefined;
+        
+        const thinkStarts = snapshot.split("<think>").length - 1;
+        const thinkEnds = snapshot.split("</think>").length - 1;
+
+        while (thinkTimers.length < thinkStarts) {
+            thinkTimers.push({ startTime: Date.now() });
+        }
+        for (let i = 0; i < thinkEnds; i++) {
+            if (thinkTimers[i] && !thinkTimers[i].endTime) {
+                thinkTimers[i].endTime = Date.now();
+            }
         }
 
         setMessages((prev) =>
@@ -327,11 +334,7 @@ const ChatPage: React.FC = () => {
                   ...m,
                   content: parsed.content,
                   isThinking: parsed.isThinking,
-                  thinkingContent: parsed.thinkingContent || undefined,
-                  thinkingTime:
-                    lockedThinkingTime !== undefined
-                      ? lockedThinkingTime
-                      : Math.floor((Date.now() - thinkingStartedAt) / 1000),
+                  thinkTimers: [...thinkTimers],
                   toolCalls: tCalls || m.toolCalls,
                   toolResults: tResults || m.toolResults,
                 }
