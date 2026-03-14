@@ -136,7 +136,7 @@ export const chatWithAgentStream = async (
                  });
                  
                  // Optionally stream back the tool result so the UI knows it finished
-                 onChunk(`\n[TOOL_RESULT]${JSON.stringify({ id: tc.id, result: "Success" })}[/TOOL_RESULT]\n`);
+                 onChunk(`\n[TOOL_RESULT]${JSON.stringify({ id: tc.id, result: output })}[/TOOL_RESULT]\n`);
              }
              // Loop again to give LLM the results
         } else {

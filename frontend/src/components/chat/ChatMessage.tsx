@@ -13,7 +13,7 @@ import "highlight.js/styles/github-dark-dimmed.css";
 export interface ChatMessageData {
   id: string;
   role: "user" | "assistant";
-  content: string;
+  content: string | any[];
   /** If true, the assistant is still in a thinking state (timer runs live) */
   isThinking?: boolean;
   /** Textual content shown when the thinking block is expanded */
@@ -97,8 +97,8 @@ const ThinkingBlock: React.FC<ThinkingBlockProps> = ({
     // Legacy behavior:
     if (thinkingTime !== undefined) return thinkingTime;
     if (thinkingStartedAt) {
-       if (isThinking) return Math.floor((Date.now() - thinkingStartedAt) / 1000);
-       return 0; // Just in case
+      if (isThinking) return Math.floor((Date.now() - thinkingStartedAt) / 1000);
+      return 0; // Just in case
     }
     return 0;
   }, [startTime, endTime, isThinking, thinkingTime, thinkingStartedAt]);
@@ -116,9 +116,11 @@ const ThinkingBlock: React.FC<ThinkingBlockProps> = ({
     }
   }, [isThinking, startTime, endTime, thinkingStartedAt, thinkingTime, calculateElapsed]);
 
-  const label = isThinking 
-    ? `Agent thinking for ${elapsed}s…` 
-    : (elapsed > 0 ? `Agent thought for ${elapsed}s` : `Agent thought`);
+  const label = isThinking
+    ? `Agent thinking for ${elapsed}s…`
+    : elapsed > 0
+      ? `Agent thought for ${elapsed}s`
+      : `Agent thought`;
 
   return (
     <div className="mb-3">
@@ -182,6 +184,23 @@ interface ToolBlockProps {
 const ToolBlock: React.FC<ToolBlockProps> = ({ toolCalls, toolResults }) => {
   const [expanded, setExpanded] = useState(false);
 
+  const formatValue = (value: unknown) => {
+    if (value === undefined || value === null) return "(none)";
+    if (typeof value === "string") {
+      try {
+        const parsed = JSON.parse(value);
+        return JSON.stringify(parsed, null, 2);
+      } catch {
+        return value;
+      }
+    }
+    try {
+      return JSON.stringify(value, null, 2);
+    } catch {
+      return String(value);
+    }
+  };
+
   if (!toolCalls || toolCalls.length === 0) return null;
 
   return (
@@ -194,12 +213,22 @@ const ToolBlock: React.FC<ToolBlockProps> = ({ toolCalls, toolResults }) => {
         )}
       >
         <div className="w-3 h-3 flex-shrink-0 flex items-center justify-center rounded bg-green-500/20 text-green-500">
-          <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-             <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path>
+          <svg
+            width="8"
+            height="8"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="3"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path>
           </svg>
         </div>
         <span className="flex-1 text-left">
-           Used {toolCalls.length} step{toolCalls.length > 1 ? 's' : ''} {toolResults && toolResults.length === toolCalls.length ? '(Complete)' : '(Running…)'}
+          Used {toolCalls.length} step{toolCalls.length > 1 ? "s" : ""}{" "}
+          {toolResults && toolResults.length === toolCalls.length ? "(Complete)" : "(Running…)"}
         </span>
         {expanded ? (
           <ChevronDown className="w-2.5 h-2.5 flex-shrink-0 text-muted-foreground" />
@@ -210,16 +239,36 @@ const ToolBlock: React.FC<ToolBlockProps> = ({ toolCalls, toolResults }) => {
 
       {expanded && (
         <div className="mt-1.5 ml-2 pl-3 border-l-2 border-green-500/40 text-[10px] leading-relaxed text-muted-foreground transition-all duration-200 space-y-2">
-           {toolCalls.map((tc, idx) => {
-               const res = toolResults?.find(r => r.id === tc.id);
-               return (
-                   <div key={idx} className="bg-background/50 rounded p-2 font-mono text-[9px] overflow-x-auto">
-                       <div className="text-green-400 font-semibold mb-1">▶ {tc.function?.name}</div>
-                       <div className="opacity-80 break-all">{tc.function?.arguments}</div>
-                       {res && <div className="mt-1 flex items-center gap-1 text-green-500"><div className="w-1.5 h-1.5 rounded-full bg-green-500"/> Completed</div>}
-                   </div>
-               )
-           })}
+          {toolCalls.map((tc, idx) => {
+            const res = toolResults?.find((r) => r.id === tc.id);
+            const args = formatValue(tc.function?.arguments);
+            const result = formatValue(res?.result);
+            return (
+              <div
+                key={idx}
+                className="bg-background/50 rounded p-2 font-mono text-[9px] overflow-x-auto"
+              >
+                <div className="text-green-400 font-semibold mb-1">▶ {tc.function?.name}</div>
+                <div className="mb-1 text-muted-foreground/80">Arguments</div>
+                <pre className="opacity-90 whitespace-pre-wrap break-words">{args}</pre>
+                {res ? (
+                  <>
+                    <div className="mt-2 mb-1 text-muted-foreground/80">Result</div>
+                    <pre className="text-green-500/90 whitespace-pre-wrap break-words">
+                      {result}
+                    </pre>
+                    <div className="mt-1 flex items-center gap-1 text-green-500">
+                      <div className="w-1.5 h-1.5 rounded-full bg-green-500" /> Completed
+                    </div>
+                  </>
+                ) : (
+                  <div className="mt-1 flex items-center gap-1 text-amber-400">
+                    <div className="w-1.5 h-1.5 rounded-full bg-amber-400" /> Running…
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
@@ -350,7 +399,10 @@ export const ChatMessage: React.FC<ChatMessageProps> = React.memo(({ message }) 
   );
 
   const handleCopy = useCallback(() => {
-    navigator.clipboard.writeText(message.content).then(() => {
+    const textToCopy = typeof message.content === "string"
+      ? message.content
+      : message.content.map(b => b.text || b.content || JSON.stringify(b)).join("\n");
+    navigator.clipboard.writeText(textToCopy).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     });
@@ -412,10 +464,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = React.memo(({ message }) 
       >
         {/* Tool block — only for assistant messages */}
         {!isUser && message.toolCalls && message.toolCalls.length > 0 && (
-          <ToolBlock
-             toolCalls={message.toolCalls}
-             toolResults={message.toolResults}
-          />
+          <ToolBlock toolCalls={message.toolCalls} toolResults={message.toolResults} />
         )}
 
         {/* Message content */}
@@ -428,31 +477,41 @@ export const ChatMessage: React.FC<ChatMessageProps> = React.memo(({ message }) 
               // Assistant messages: parse and handle think blocks + markdown
               <div className="space-y-3 w-full">
                 {(() => {
-                  const blocks = parseContentBlocks(message.content);
-                  
+                  let blocks: any[] = [];
+                  if (typeof message.content === "string") {
+                    blocks = parseContentBlocks(message.content);
+                  } else if (Array.isArray(message.content)) {
+                    blocks = message.content;
+                  }
+
                   // Empty stream edge case support
                   if (blocks.length === 0 && message.isThinking) {
-                     return (
-                        <ThinkingBlock
-                          key="initial"
-                          isThinking={true}
-                          startTime={message.thinkTimers?.[0]?.startTime || message.thinkingStartedAt}
-                        />
-                     );
+                    return (
+                      <ThinkingBlock
+                        key="initial"
+                        isThinking={true}
+                        startTime={message.thinkTimers?.[0]?.startTime || message.thinkingStartedAt}
+                      />
+                    );
                   }
 
                   let thinkIdx = 0;
                   return blocks.map((block, idx) => {
                     if (block.type === "think") {
-                      const timer = message.thinkTimers?.[thinkIdx];
+                      // If the block itself has timers from the new DB schema, use them directly
+                      const timer = block.startTime
+                        ? { startTime: block.startTime, endTime: block.endTime }
+                        : message.thinkTimers?.[thinkIdx];
+
                       const isLastThinkBlock = idx === blocks.length - 1;
-                      const currentlyThinking = isLastThinkBlock && message.isThinking && !timer?.endTime;
-                      
+                      const currentlyThinking =
+                        isLastThinkBlock && message.isThinking && !timer?.endTime;
+
                       const result = (
                         <ThinkingBlock
                           key={idx}
                           isThinking={!!currentlyThinking}
-                          thinkingContent={block.content}
+                          thinkingContent={block.content || block.text} // Support 'text' key from new schema
                           startTime={timer?.startTime}
                           endTime={timer?.endTime}
                           thinkingStartedAt={message.thinkingStartedAt}
@@ -462,7 +521,14 @@ export const ChatMessage: React.FC<ChatMessageProps> = React.memo(({ message }) 
                       thinkIdx++;
                       return result;
                     }
-                    return <MarkdownContent key={`text-${idx}`} content={block.content} />;
+                    if (block.type === "tool_call") {
+                      return <ToolBlock key={`tool-${idx}`} toolCalls={[block.tool_call]} />;
+                    }
+                    if (block.type === "tool_result") {
+                      // We can silently ignore raw tool results or render them
+                      return null;
+                    }
+                    return <MarkdownContent key={`text-${idx}`} content={block.content || block.text || ""} />;
                   });
                 })()}
               </div>

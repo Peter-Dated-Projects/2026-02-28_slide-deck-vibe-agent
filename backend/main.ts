@@ -63,7 +63,7 @@ app.post('/api/chat', requireAuth, async (req: AuthRequest, res: express.Respons
 
         // Fetch conversation history
         const historyResult = await db.query(
-            'SELECT role, content FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC',
+            'SELECT role, content, tool_calls, tool_call_id, tool_results FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC',
             [currentConvId]
         );
         
@@ -76,8 +76,12 @@ app.post('/api/chat', requireAuth, async (req: AuthRequest, res: express.Respons
                 // user messages: { text: "..." }
                 text = raw.text;
             } else if (Array.isArray(raw)) {
-                // assistant messages: [{ type: 'text', text: '...' }]
-                text = raw.filter((b: any) => b.type === 'text').map((b: any) => b.text).join('\n');
+                // assistant messages blocks
+                text = raw.map((b: any) => {
+                    if (b.type === 'text') return b.text || b.content || "";
+                    if (b.type === 'think') return `<think>\n${b.text || b.content || ""}\n</think>`;
+                    return "";
+                }).filter(Boolean).join('\n');
             } else {
                 text = JSON.stringify(raw);
             }
@@ -85,6 +89,8 @@ app.post('/api/chat', requireAuth, async (req: AuthRequest, res: express.Respons
             const msg: any = { role: row.role as string, content: text };
             if (row.tool_calls) msg.tool_calls = row.tool_calls;
             if (row.tool_call_id) msg.tool_call_id = row.tool_call_id;
+            if (row.tool_results) msg.tool_results = row.tool_results;
+            if (raw?.thinkTimers) msg.thinkTimers = raw.thinkTimers;
             
             return msg;
         });
@@ -152,7 +158,7 @@ app.post('/api/chat/stream', requireAuth, async (req: AuthRequest, res: express.
 
         // Fetch conversation history
         const historyResult = await db.query(
-            'SELECT role, content FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC',
+            'SELECT role, content, tool_calls, tool_call_id, tool_results FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC',
             [currentConvId]
         );
 
@@ -164,27 +170,122 @@ app.post('/api/chat/stream', requireAuth, async (req: AuthRequest, res: express.
             } else if (raw?.text) {
                 text = raw.text;
             } else if (Array.isArray(raw)) {
-                text = raw.filter((b: any) => b.type === 'text').map((b: any) => b.text).join('\n');
+                text = raw.map((b: any) => {
+                    if (b.type === 'text') return b.text || b.content || "";
+                    if (b.type === 'think') return `<think>\n${b.text || b.content || ""}\n</think>`;
+                    return "";
+                }).filter(Boolean).join('\n');
             } else {
                 text = JSON.stringify(raw);
             }
             const msg: any = { role: row.role as string, content: text };
             if (row.tool_calls) msg.tool_calls = row.tool_calls;
             if (row.tool_call_id) msg.tool_call_id = row.tool_call_id;
+            if (row.tool_results) msg.tool_results = row.tool_results;
+            if (raw?.thinkTimers) msg.thinkTimers = raw.thinkTimers;
             
             return msg;
         });
 
+        const streamedToolCalls: any[] = [];
+        const streamedToolResults: any[] = [];
+        let accumulatedText = "";
+        const thinkTimers: { startTime: number; endTime?: number }[] = [];
+
         // Stream tokens to client
         const fullText = await chatWithAgentStream(currentConvId, messagesContext, (token) => {
+            if (token.startsWith('[TOOL_CALLS]') && token.endsWith('[/TOOL_CALLS]')) {
+                try {
+                    const jsonStr = token.substring(12, token.length - 13);
+                    const parsed = JSON.parse(jsonStr);
+                    if (Array.isArray(parsed.tool_calls)) {
+                        streamedToolCalls.push(...parsed.tool_calls);
+                    }
+                } catch {
+                    // Keep streaming even if one metadata chunk is malformed.
+                }
+            } else {
+                const cleanToken = token.trim();
+                if (cleanToken.startsWith('[TOOL_RESULT]') && cleanToken.endsWith('[/TOOL_RESULT]')) {
+                    try {
+                        const jsonStr = cleanToken.substring(13, cleanToken.length - 14);
+                        const parsed = JSON.parse(jsonStr);
+                        if (parsed?.id) {
+                            streamedToolResults.push(parsed);
+                        }
+                    } catch {
+                        // Keep streaming even if one metadata chunk is malformed.
+                    }
+                } else {
+                    accumulatedText += token;
+                    const thinkStarts = accumulatedText.split("<think>").length - 1;
+                    const thinkEnds = accumulatedText.split("</think>").length - 1;
+
+                    while (thinkTimers.length < thinkStarts) {
+                        thinkTimers.push({ startTime: Date.now() });
+                    }
+                    for (let i = 0; i < thinkEnds; i++) {
+                        const timer = thinkTimers[i];
+                        if (timer && !timer.endTime) {
+                            timer.endTime = Date.now();
+                        }
+                    }
+                }
+            }
             send('token', JSON.stringify({ token }));
         });
 
-        // Persist full response
-        if (fullText && fullText !== "I've hit the maximum number of tool execution steps.") {
+        // Persist full response and tool metadata
+        if (fullText || streamedToolCalls.length > 0 || streamedToolResults.length > 0) {
+            const contentBlocks: any[] = [];
+            let remaining = accumulatedText;
+            let thinkIdx = 0;
+            
+            while (remaining) {
+                const startIdx = remaining.indexOf("<think>");
+                if (startIdx === -1) {
+                    if (remaining.trim()) contentBlocks.push({ type: "text", text: remaining });
+                    break;
+                }
+                if (startIdx > 0) {
+                    const textBefore = remaining.slice(0, startIdx);
+                    if (textBefore.trim()) contentBlocks.push({ type: "text", text: textBefore });
+                }
+                const endIdx = remaining.indexOf("</think>", startIdx);
+                if (endIdx === -1) {
+                    const timer = thinkTimers[thinkIdx];
+                    contentBlocks.push({ 
+                        type: "think", 
+                        text: remaining.slice(startIdx + 7),
+                        startTime: timer?.startTime,
+                        endTime: timer?.endTime
+                    });
+                    break;
+                } else {
+                    const timer = thinkTimers[thinkIdx];
+                    contentBlocks.push({ 
+                        type: "think", 
+                        text: remaining.slice(startIdx + 7, endIdx).trim(),
+                        startTime: timer?.startTime,
+                        endTime: timer?.endTime
+                    });
+                    remaining = remaining.slice(endIdx + 8);
+                    thinkIdx++;
+                }
+            }
+
+            streamedToolCalls.forEach(tc => contentBlocks.push({ type: 'tool_call', tool_call: tc }));
+            streamedToolResults.forEach(tr => contentBlocks.push({ type: 'tool_result', id: tr.id, result: tr.result }));
+
             await db.query(
-                'INSERT INTO messages (conversation_id, role, content) VALUES ($1, $2, $3)',
-                [currentConvId, 'assistant', JSON.stringify([{ type: 'text', text: fullText }])]
+                'INSERT INTO messages (conversation_id, role, content, tool_calls, tool_results) VALUES ($1, $2, $3, $4, $5)',
+                [
+                    currentConvId,
+                    'assistant',
+                    JSON.stringify(contentBlocks),
+                    streamedToolCalls.length > 0 ? JSON.stringify(streamedToolCalls) : null,
+                    streamedToolResults.length > 0 ? JSON.stringify(streamedToolResults) : null,
+                ]
             );
         }
 
@@ -215,30 +316,34 @@ app.get('/api/conversations/:conversationId/messages', requireAuth, async (req: 
         }
 
         const messagesResult = await db.query(
-            'SELECT id, role, content, created_at FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC',
+            'SELECT id, role, content, tool_calls, tool_results, created_at FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC',
             [conversationId]
         );
 
         const messages = messagesResult.rows.map((row: any) => {
-            // content is stored as JSONB — extract text from the stored shape
+            // content is stored as JSONB
             const rawContent = row.content;
-            let text = '';
+            let displayContent: any;
+            
             if (typeof rawContent === 'string') {
-                text = rawContent;
+                displayContent = rawContent;
             } else if (rawContent?.text) {
                 // user messages: { text: "..." }
-                text = rawContent.text;
+                displayContent = rawContent.text;
             } else if (Array.isArray(rawContent)) {
-                // assistant messages: [{ type: 'text', text: '...' }]
-                text = rawContent
-                    .filter((b: any) => b.type === 'text')
-                    .map((b: any) => b.text)
-                    .join('\n');
+                // assistant messages: array of blocks natively injected to frontend
+                displayContent = rawContent; 
+            } else {
+                displayContent = "";
             }
+
             return {
                 id: row.id,
                 role: row.role,
-                content: text,
+                content: displayContent,
+                toolCalls: row.tool_calls ?? undefined,
+                toolResults: row.tool_results ?? undefined,
+                thinkTimers: rawContent?.thinkTimers, // Backward compatibility
                 createdAt: row.created_at,
             };
         });

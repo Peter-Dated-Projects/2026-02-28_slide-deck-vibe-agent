@@ -165,10 +165,20 @@ const ChatPage: React.FC = () => {
     ])
       .then(([msgRes]) => {
         const hydratedMessages: ChatMessageData[] = (msgRes.data.messages ?? []).map(
-          (m: { id: string; role: "user" | "assistant"; content: string }) => ({
+          (m: {
+            id: string;
+            role: "user" | "assistant";
+            content: string;
+            thinkTimers?: { startTime: number; endTime?: number }[];
+            toolCalls?: any[];
+            toolResults?: any[];
+          }) => ({
             id: m.id,
             role: m.role,
             content: m.content,
+            thinkTimers: m.thinkTimers,
+            toolCalls: m.toolCalls,
+            toolResults: m.toolResults,
           }),
         );
         setMessages(hydratedMessages);
@@ -307,24 +317,26 @@ const ChatPage: React.FC = () => {
       let accumulatedText = "";
       let pendingText = ""; // tokens waiting to be flushed to React state
       let doneConvId = conversationId ?? null;
-      let thinkTimers: { startTime: number; endTime?: number }[] = [{ startTime: thinkingStartedAt }];
+      let thinkTimers: { startTime: number; endTime?: number }[] = [
+        { startTime: thinkingStartedAt },
+      ];
 
       let toolCallsCache: any[] = [];
       let toolResultsCache: any[] = [];
 
       const attemptUpdateState = (snapshot: string, tCalls?: any[], tResults?: any[]) => {
         const parsed = parseStreamSnapshot(snapshot);
-        
+
         const thinkStarts = snapshot.split("<think>").length - 1;
         const thinkEnds = snapshot.split("</think>").length - 1;
 
         while (thinkTimers.length < thinkStarts) {
-            thinkTimers.push({ startTime: Date.now() });
+          thinkTimers.push({ startTime: Date.now() });
         }
         for (let i = 0; i < thinkEnds; i++) {
-            if (thinkTimers[i] && !thinkTimers[i].endTime) {
-                thinkTimers[i].endTime = Date.now();
-            }
+          if (thinkTimers[i] && !thinkTimers[i].endTime) {
+            thinkTimers[i].endTime = Date.now();
+          }
         }
 
         setMessages((prev) =>
@@ -349,7 +361,11 @@ const ChatPage: React.FC = () => {
         if (!pendingText && toolCallsCache.length === 0 && toolResultsCache.length === 0) return;
         const snapshot = accumulatedText;
         pendingText = "";
-        attemptUpdateState(snapshot, toolCallsCache.length > 0 ? [...toolCallsCache] : undefined, toolResultsCache.length > 0 ? [...toolResultsCache] : undefined);
+        attemptUpdateState(
+          snapshot,
+          toolCallsCache.length > 0 ? [...toolCallsCache] : undefined,
+          toolResultsCache.length > 0 ? [...toolResultsCache] : undefined,
+        );
       }, 50);
 
       try {
@@ -373,29 +389,32 @@ const ChatPage: React.FC = () => {
 
             if (eventName === "token") {
               const tokenStr = data.token;
-              
+
               // Handle special tool tokens
-              if (tokenStr.startsWith('[TOOL_CALLS]') && tokenStr.endsWith('[/TOOL_CALLS]')) {
-                  try {
-                      const jsonStr = tokenStr.substring(12, tokenStr.length - 13);
-                      const parsed = JSON.parse(jsonStr);
-                      if (parsed.tool_calls) {
-                          // merge arrays or replace
-                          toolCallsCache = [...toolCallsCache, ...parsed.tool_calls];
-                      }
-                  } catch(e) {}
-              } else if (tokenStr.trim().startsWith('[TOOL_RESULT]') && tokenStr.trim().endsWith('[/TOOL_RESULT]')) {
-                  try {
-                      const cleanToken = tokenStr.trim();
-                      const jsonStr = cleanToken.substring(13, cleanToken.length - 14);
-                      const parsed = JSON.parse(jsonStr);
-                      if (parsed.id) {
-                          toolResultsCache = [...toolResultsCache, parsed];
-                      }
-                  } catch(e) {}
+              if (tokenStr.startsWith("[TOOL_CALLS]") && tokenStr.endsWith("[/TOOL_CALLS]")) {
+                try {
+                  const jsonStr = tokenStr.substring(12, tokenStr.length - 13);
+                  const parsed = JSON.parse(jsonStr);
+                  if (parsed.tool_calls) {
+                    // merge arrays or replace
+                    toolCallsCache = [...toolCallsCache, ...parsed.tool_calls];
+                  }
+                } catch (e) {}
+              } else if (
+                tokenStr.trim().startsWith("[TOOL_RESULT]") &&
+                tokenStr.trim().endsWith("[/TOOL_RESULT]")
+              ) {
+                try {
+                  const cleanToken = tokenStr.trim();
+                  const jsonStr = cleanToken.substring(13, cleanToken.length - 14);
+                  const parsed = JSON.parse(jsonStr);
+                  if (parsed.id) {
+                    toolResultsCache = [...toolResultsCache, parsed];
+                  }
+                } catch (e) {}
               } else {
-                  accumulatedText += tokenStr;
-                  pendingText += tokenStr;
+                accumulatedText += tokenStr;
+                pendingText += tokenStr;
               }
             } else if (eventName === "done") {
               doneConvId = data.conversationId;
