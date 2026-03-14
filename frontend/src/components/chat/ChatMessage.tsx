@@ -208,11 +208,11 @@ const ToolBlock: React.FC<ToolBlockProps> = ({ toolCalls, toolResults }) => {
       <button
         onClick={() => setExpanded((v) => !v)}
         className={cn(
-          "flex items-center gap-2 text-[10px] font-medium px-2.5 py-1 rounded-lg transition-all duration-200 group w-full",
-          "border border-green-500/30 bg-green-500/5 hover:bg-green-500/10 text-muted-foreground hover:text-foreground",
+          "flex items-center gap-2 text-[10px] font-medium px-2.5 py-1 rounded-lg transition-all duration-200 group w-fit",
+          "border border-blue-400/30 bg-blue-400/5 hover:bg-blue-400/10 text-muted-foreground hover:text-foreground",
         )}
       >
-        <div className="w-3 h-3 flex-shrink-0 flex items-center justify-center rounded bg-green-500/20 text-green-500">
+        <div className="w-3 h-3 flex-shrink-0 flex items-center justify-center rounded bg-blue-400/20 text-blue-400">
           <svg
             width="8"
             height="8"
@@ -226,9 +226,10 @@ const ToolBlock: React.FC<ToolBlockProps> = ({ toolCalls, toolResults }) => {
             <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path>
           </svg>
         </div>
-        <span className="flex-1 text-left">
-          Used {toolCalls.length} step{toolCalls.length > 1 ? "s" : ""}{" "}
-          {toolResults && toolResults.length === toolCalls.length ? "(Complete)" : "(Running…)"}
+        <span className="flex-1 text-left overflow-hidden text-ellipsis whitespace-nowrap">
+          {toolCalls.length === 1
+            ? `Agent ran: ${toolCalls[0].function?.name || "tool"}`
+            : "Agent ran multiple tools..."}
         </span>
         {expanded ? (
           <ChevronDown className="w-2.5 h-2.5 flex-shrink-0 text-muted-foreground" />
@@ -238,32 +239,24 @@ const ToolBlock: React.FC<ToolBlockProps> = ({ toolCalls, toolResults }) => {
       </button>
 
       {expanded && (
-        <div className="mt-1.5 ml-2 pl-3 border-l-2 border-green-500/40 text-[10px] leading-relaxed text-muted-foreground transition-all duration-200 space-y-2">
+        <div className="mt-1.5 ml-2 pl-3 border-l-2 border-blue-400/40 text-[10px] leading-relaxed text-muted-foreground transition-all duration-200 space-y-2">
           {toolCalls.map((tc, idx) => {
             const res = toolResults?.find((r) => r.id === tc.id);
-            const args = formatValue(tc.function?.arguments);
             const result = formatValue(res?.result);
             return (
               <div
                 key={idx}
                 className="bg-background/50 rounded p-2 font-mono text-[9px] overflow-x-auto"
               >
-                <div className="text-green-400 font-semibold mb-1">▶ {tc.function?.name}</div>
-                <div className="mb-1 text-muted-foreground/80">Arguments</div>
-                <pre className="opacity-90 whitespace-pre-wrap break-words">{args}</pre>
-                {res ? (
-                  <>
-                    <div className="mt-2 mb-1 text-muted-foreground/80">Result</div>
-                    <pre className="text-green-500/90 whitespace-pre-wrap break-words">
-                      {result}
-                    </pre>
-                    <div className="mt-1 flex items-center gap-1 text-green-500">
-                      <div className="w-1.5 h-1.5 rounded-full bg-green-500" /> Completed
-                    </div>
-                  </>
-                ) : (
-                  <div className="mt-1 flex items-center gap-1 text-amber-400">
-                    <div className="w-1.5 h-1.5 rounded-full bg-amber-400" /> Running…
+                <div>
+                  <span className="text-blue-400 font-semibold">{tc.function.name}</span>
+                </div>
+                {res && (
+                  <div className="mt-1 flex flex-col pt-1 border-t border-border">
+                    <span className="text-muted-foreground mb-1 uppercase text-[8px] tracking-wider">
+                      Result
+                    </span>
+                    <pre className="text-[10px] text-foreground font-mono">{result}</pre>
                   </div>
                 )}
               </div>
@@ -462,8 +455,8 @@ export const ChatMessage: React.FC<ChatMessageProps> = React.memo(({ message }) 
           !isUser && "cursor-context-menu",
         )}
       >
-        {/* Tool block — only for assistant messages */}
-        {!isUser && message.toolCalls && message.toolCalls.length > 0 && (
+        {/* Legacy Tool block — only for older assistant messages where content is a string */}
+        {!isUser && typeof message.content === 'string' && message.toolCalls && message.toolCalls.length > 0 && (
           <ToolBlock toolCalls={message.toolCalls} toolResults={message.toolResults} />
         )}
 
@@ -485,39 +478,56 @@ export const ChatMessage: React.FC<ChatMessageProps> = React.memo(({ message }) 
                   }
 
                   // Empty stream edge case support
-                  if (blocks.length === 0 && message.isThinking) {
-                    return (
+                  if (blocks.length === 0) {
+                    const elements = [];
+                    elements.push(
                       <ThinkingBlock
                         key="initial"
-                        isThinking={true}
+                        isThinking={message.isThinking !== false}
                         startTime={message.thinkTimers?.[0]?.startTime || message.thinkingStartedAt}
+                        endTime={message.isThinking === false ? (message.thinkTimers?.[0]?.startTime || message.thinkingStartedAt) : undefined}
                       />
                     );
+                    return elements;
                   }
 
                   let thinkIdx = 0;
                   const renderedElements: React.ReactNode[] = [];
+                  
+                  if (blocks[0].type !== "think") {
+                      renderedElements.push(
+                        <ThinkingBlock
+                          key="fake-initial-think"
+                          isThinking={false}
+                          startTime={message.thinkingStartedAt}
+                          endTime={message.thinkingStartedAt}
+                        />
+                      );
+                  }
                   
                   for (let i = 0; i < blocks.length; i++) {
                     const block = blocks[i];
                     
                     if (block.type === "think") {
                       // If the block itself has timers from the new DB schema, use them directly
-                      const timer = block.startTime
-                        ? { startTime: block.startTime, endTime: block.endTime }
-                        : message.thinkTimers?.[thinkIdx];
+                      let timerStartTime = block.startTime || message.thinkTimers?.[thinkIdx]?.startTime;
+                      let timerEndTime = block.endTime || message.thinkTimers?.[thinkIdx]?.endTime;
+
+                      if (i === 0 && message.thinkingStartedAt) {
+                          timerStartTime = message.thinkingStartedAt;
+                      }
 
                       const isLastThinkBlock = i === blocks.length - 1;
                       const currentlyThinking =
-                        isLastThinkBlock && message.isThinking && !timer?.endTime;
+                        isLastThinkBlock && message.isThinking && !timerEndTime;
 
                       renderedElements.push(
                         <ThinkingBlock
                           key={`think-${i}`}
                           isThinking={!!currentlyThinking}
                           thinkingContent={block.content || block.text} // Support 'text' key from new schema
-                          startTime={timer?.startTime}
-                          endTime={timer?.endTime}
+                          startTime={timerStartTime}
+                          endTime={timerEndTime}
                           thinkingStartedAt={message.thinkingStartedAt}
                           thinkingTime={currentlyThinking ? undefined : message.thinkingTime}
                         />

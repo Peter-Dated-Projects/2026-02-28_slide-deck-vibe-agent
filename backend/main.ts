@@ -189,7 +189,7 @@ app.post('/api/chat/stream', requireAuth, async (req: AuthRequest, res: express.
 
         const streamedToolCalls: any[] = [];
         const streamedToolResults: any[] = [];
-        const contentBlocks: any[] = [];
+        let contentBlocks: any[] = [];
         let accumulatedText = "";
         const thinkTimers: { startTime: number; endTime?: number }[] = [];
 
@@ -223,73 +223,172 @@ app.post('/api/chat/stream', requireAuth, async (req: AuthRequest, res: express.
                     // It's a text token. Coalesce into the latest text block or think block
                     accumulatedText += token;
                     
-                    // We can either try to build the blocks live during streaming, or just parse accumulatedText 
-                    // at the end, BUT if we parse accumulatedText at the end, we lose the chronological interleaving 
-                    // with tool calls. So we should build the text blocks live.
+                    // The simplest and most robust chronological interleave parser is string-splitting `accumulatedText` in its entirety,
+                    // but we must preserve the `tool_call` and `tool_result` blocks that were interleaved.
+                    // To do this, we can maintain an array of ONLY the `text` and `think` blocks, and re-generate it fully from `accumulatedText` every tick!
                     
-                    const lastBlock = contentBlocks[contentBlocks.length - 1];
-                    const isThinking = accumulatedText.lastIndexOf("<think>") > accumulatedText.lastIndexOf("</think>");
+                    const newTextThinkBlocks: any[] = [];
+                    let remaining = accumulatedText;
+                    let thinkIdx = 0;
                     
-                    if (isThinking) {
-                        // Currently inside a thinking block
-                        if (lastBlock?.type === "think") {
-                            lastBlock.text += token;
+                    while (remaining) {
+                        const startIdx = remaining.indexOf("<think>");
+                        if (startIdx === -1) {
+                            if (remaining.trim()) newTextThinkBlocks.push({ type: "text", text: remaining });
+                            break;
+                        }
+                        if (startIdx > 0) {
+                            const textBefore = remaining.slice(0, startIdx);
+                            if (textBefore.trim()) newTextThinkBlocks.push({ type: "text", text: textBefore });
+                        }
+                        
+                        // We are now at a `<think>` tag. Check if there's a closing tag.
+                        const endIdx = remaining.indexOf("</think>", startIdx);
+                        if (endIdx === -1) {
+                            // Unclosed think block (streaming in progress)
+                            const timer = thinkTimers[thinkIdx];
+                            newTextThinkBlocks.push({ 
+                                type: "think", 
+                                text: remaining.slice(startIdx + 7).trim(),
+                                startTime: timer?.startTime,
+                                endTime: timer?.endTime
+                            });
+                            break;
                         } else {
-                            // Strip <think> from the new block's text since we just entered it
-                            const cleanText = token.replace("<think>", "").replace("</think>", "");
+                            // Closed think block
+                            const timer = thinkTimers[thinkIdx];
+                            newTextThinkBlocks.push({ 
+                                type: "think", 
+                                text: remaining.slice(startIdx + 7, endIdx).trim(),
+                                startTime: timer?.startTime,
+                                endTime: timer?.endTime ? Math.max(timer.startTime, timer.endTime) : Date.now()
+                            });
+                            remaining = remaining.slice(endIdx + 8);
+                            thinkIdx++;
+                        }
+                    }
+                    
+                    // We successfully parsed `newTextThinkBlocks` from `accumulatedText`.
+                    // But `contentBlocks` already has elements in it! Some of those might be `tool_call` or `tool_result`!
+                    // What do we do? We REPLACE all `text` and `think` blocks in `contentBlocks` with our newly parsed `newTextThinkBlocks`, keeping `tool_` blocks where they were.
+                    
+                    let textThinkCursor = 0;
+                    const reconstructedBlocks: any[] = [];
+                    
+                    // To do this chronologically: We stream out `contentBlocks`.
+                    for (let b of contentBlocks) {
+                        if (b.type === 'tool_call' || b.type === 'tool_result') {
+                            reconstructedBlocks.push(b);
+                        } else {
+                            // It was a text/think block. We replace it with the next fresh one.
+                            if (textThinkCursor < newTextThinkBlocks.length) {
+                                reconstructedBlocks.push(newTextThinkBlocks[textThinkCursor]);
+                                textThinkCursor++;
+                            }
+                        }
+                    }
+                    // What if there's leftover new text/think blocks that we just parsed (e.g. streaming new text after a tool)?
+                    while (textThinkCursor < newTextThinkBlocks.length) {
+                        reconstructedBlocks.push(newTextThinkBlocks[textThinkCursor]);
+                        textThinkCursor++;
+                    }
+                    
+                    contentBlocks = reconstructedBlocks;
+                }
+                    const lastBlock = contentBlocks[contentBlocks.length - 1];
+                    const isThinkingNow = accumulatedText.lastIndexOf("<think>") > accumulatedText.lastIndexOf("</think>");
+                    
+                    if (isThinkingNow) {
+                        // We are in a thinking state.
+                        if (lastBlock?.type === "think") {
+                            // Append token delta directly. But strip `<think>` if it was just emitted.
+                            lastBlock.text += token.replace("<think>", "");
+                        } else {
+                            // We just started thinking!
+                            const textBefore = token.split("<think>")[0];
+                            if (textBefore) {
+                                if (lastBlock?.type === "text") lastBlock.text += textBefore;
+                                else contentBlocks.push({ type: "text", text: textBefore });
+                            }
+                            
                             const newThinkTimer = { startTime: Date.now() };
                             thinkTimers.push(newThinkTimer);
-                            contentBlocks.push({ type: "think", text: cleanText, startTime: newThinkTimer.startTime });
+                            contentBlocks.push({ 
+                                type: "think", 
+                                text: token.split("<think>")[1] || "", 
+                                startTime: newThinkTimer.startTime 
+                            });
                         }
                     } else {
-                        // Currently inside normal text
-                        // Check if we just exited a think block
-                        if (lastBlock?.type === "think" && token.includes("</think>")) {
-                            // Close the think block timers
+                        // We are in a text state.
+                        if (lastBlock?.type === "think") {
+                            // We were thinking, but now we're not. This means a `</think>` tag just closed.
+                            const thinkParts = token.split("</think>");
+                            lastBlock.text += thinkParts[0];
+                            
                             const timer = thinkTimers[thinkTimers.length - 1];
                             if (timer && !timer.endTime) timer.endTime = Date.now();
                             lastBlock.endTime = timer?.endTime;
                             
-                            // Any text after </think> goes into a new text block
-                            const afterThink = token.substring(token.indexOf("</think>") + 8);
-                            if (afterThink) {
-                                contentBlocks.push({ type: "text", text: afterThink });
+                            if (thinkParts[1]) {
+                                contentBlocks.push({ type: "text", text: thinkParts[1] });
                             }
-                        } else if (lastBlock?.type === "text") {
-                            lastBlock.text += token;
                         } else {
-                            // Wait, what if `<think>` is in this token but we didn't end up `isThinking` because `</think>` is also in it?
-                            // This means a think block started and ended in the exact same token chunk.
-                            if (token.includes("<think>") && token.includes("</think>")) {
-                                const beforeText = token.substring(0, token.indexOf("<think>"));
-                                const thinkText = token.substring(token.indexOf("<think>") + 7, token.indexOf("</think>"));
-                                const afterText = token.substring(token.indexOf("</think>") + 8);
-                                
-                                if (beforeText) {
-                                    if (lastBlock?.type === "text") lastBlock.text += beforeText;
-                                    else contentBlocks.push({ type: "text", text: beforeText });
-                                }
-                                
-                                const timer = { startTime: Date.now(), endTime: Date.now() };
-                                thinkTimers.push(timer);
-                                contentBlocks.push({ type: "think", text: thinkText, startTime: timer.startTime, endTime: timer.endTime });
-                                
-                                if (afterText) {
-                                    contentBlocks.push({ type: "text", text: afterText });
+                            // Normal text delta
+                            if (lastBlock?.type === "text") {
+                                // Wait! What if `<think>...!</think>` both opened and closed entirely within this exact `token`!
+                                if (token.includes("<think>") && token.includes("</think>")) {
+                                   const parts = token.split("<think>");
+                                   lastBlock.text += parts[0];
+                                   
+                                   const subParts = parts[1].split("</think>");
+                                   const timer = { startTime: Date.now(), endTime: Date.now() };
+                                   thinkTimers.push(timer);
+                                   contentBlocks.push({ type: "think", text: subParts[0], startTime: timer.startTime, endTime: timer.endTime });
+                                   
+                                   if (subParts[1]) {
+                                       contentBlocks.push({ type: "text", text: subParts[1] });
+                                   }
+                                } else {
+                                    lastBlock.text += token;
                                 }
                             } else {
-                                contentBlocks.push({ type: "text", text: token });
+                                // First text block or trailing text after a tool call
+                                if (token.includes("<think>") && token.includes("</think>")) {
+                                   const parts = token.split("<think>");
+                                   if (parts[0]) contentBlocks.push({ type: "text", text: parts[0] });
+                                   
+                                   const subParts = parts[1].split("</think>");
+                                   const timer = { startTime: Date.now(), endTime: Date.now() };
+                                   thinkTimers.push(timer);
+                                   contentBlocks.push({ type: "think", text: subParts[0], startTime: timer.startTime, endTime: timer.endTime });
+                                   
+                                   if (subParts[1]) {
+                                       contentBlocks.push({ type: "text", text: subParts[1] });
+                                   }
+                                } else {
+                                    contentBlocks.push({ type: "text", text: token });
+                                }
                             }
                         }
                     }
-                }
             }
             send('token', JSON.stringify({ token }));
         });
 
         // Persist full response and tool metadata
         if (fullText || streamedToolCalls.length > 0 || streamedToolResults.length > 0) {
-            // contentBlocks is already fully interleaved and chronologically ordered from the stream loop above!
+            
+            // To guarantee perfect DB storage, we will re-parse the final `accumulatedText` one last time,
+            // meticulously interleaving the stored tool calls. 
+            // Wait, we lost the tool call chronological positions if we don't save them.
+            // But `contentBlocks` already HAS the chronological positions from the stream!
+            // Let's just clean up any hanging trailing blocks.
+            
+            // Re-parse the entire sequence based on the finalized `contentBlocks`.
+            // The issue is `parseContentBlocks` logic on the frontend handles full strings perfectly.
+            // Let's run a robust parser over the final `accumulatedText` here, 
+            // and simply insert the `streamedToolCalls` and `streamedToolResults` at the correct indexes (which `contentBlocks` knows).
 
             await db.query(
                 'INSERT INTO messages (conversation_id, role, content, tool_calls, tool_results) VALUES ($1, $2, $3, $4, $5)',

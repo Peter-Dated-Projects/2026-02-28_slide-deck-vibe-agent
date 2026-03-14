@@ -285,7 +285,7 @@ const ChatPage: React.FC = () => {
       {
         id: assistantId,
         role: "assistant",
-        content: "",
+        content: [], // Feed an empty array so ChatMessage natively hits the `blocks.length === 0` branch and renders an immediate thinking block.
         isThinking: true,
         thinkingStartedAt,
         thinkingContent: "",
@@ -314,8 +314,9 @@ const ChatPage: React.FC = () => {
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
+      let contentBlocks: any[] = [];
       let accumulatedText = "";
-      let pendingText = ""; // tokens waiting to be flushed to React state
+      let pendingTokens = false;
       let doneConvId = conversationId ?? null;
       let thinkTimers: { startTime: number; endTime?: number }[] = [
         { startTime: thinkingStartedAt },
@@ -324,48 +325,36 @@ const ChatPage: React.FC = () => {
       let toolCallsCache: any[] = [];
       let toolResultsCache: any[] = [];
 
-      const attemptUpdateState = (snapshot: string, tCalls?: any[], tResults?: any[]) => {
-        const parsed = parseStreamSnapshot(snapshot);
-
-        const thinkStarts = snapshot.split("<think>").length - 1;
-        const thinkEnds = snapshot.split("</think>").length - 1;
-
-        while (thinkTimers.length < thinkStarts) {
-          thinkTimers.push({ startTime: Date.now() });
-        }
-        for (let i = 0; i < thinkEnds; i++) {
-          if (thinkTimers[i] && !thinkTimers[i].endTime) {
-            thinkTimers[i].endTime = Date.now();
-          }
-        }
-
+      const attemptUpdateState = () => {
+        // Deep copy the blocks because they might still mutate
+        const snapshotBlocks = JSON.parse(JSON.stringify(contentBlocks));
+        const snapshotTimers = JSON.parse(JSON.stringify(thinkTimers));
+        
+        const isThinkingActive = contentBlocks.length > 0 && 
+                                 contentBlocks[contentBlocks.length - 1].type === "think" && 
+                                 !contentBlocks[contentBlocks.length - 1].endTime;
+                                 
         setMessages((prev) =>
           prev.map((m) =>
             m.id === assistantId
               ? {
                   ...m,
-                  content: parsed.content,
-                  isThinking: parsed.isThinking,
-                  thinkTimers: [...thinkTimers],
-                  toolCalls: tCalls || m.toolCalls,
-                  toolResults: tResults || m.toolResults,
+                  content: snapshotBlocks.length > 0 ? snapshotBlocks : [],
+                  isThinking: isThinkingActive,
+                  thinkTimers: snapshotTimers,
+                  toolCalls: toolCallsCache.length > 0 ? [...toolCallsCache] : m.toolCalls,
+                  toolResults: toolResultsCache.length > 0 ? [...toolResultsCache] : m.toolResults,
                 }
               : m,
           ),
         );
       };
 
-      // Flush pending tokens to React state at most every 50ms — prevents
-      // per-token re-renders from making the textarea feel laggy while typing.
+      // Flush pending tokens to React state at most every 50ms
       const flushInterval = setInterval(() => {
-        if (!pendingText && toolCallsCache.length === 0 && toolResultsCache.length === 0) return;
-        const snapshot = accumulatedText;
-        pendingText = "";
-        attemptUpdateState(
-          snapshot,
-          toolCallsCache.length > 0 ? [...toolCallsCache] : undefined,
-          toolResultsCache.length > 0 ? [...toolResultsCache] : undefined,
-        );
+        if (!pendingTokens) return;
+        pendingTokens = false;
+        attemptUpdateState();
       }, 50);
 
       try {
@@ -374,8 +363,6 @@ const ChatPage: React.FC = () => {
           if (done) break;
 
           buffer += decoder.decode(value, { stream: true });
-
-          // SSE format: "event: <name>\ndata: <json>\n\n"
           const parts = buffer.split("\n\n");
           buffer = parts.pop() ?? "";
 
@@ -389,15 +376,15 @@ const ChatPage: React.FC = () => {
 
             if (eventName === "token") {
               const tokenStr = data.token;
+              pendingTokens = true;
 
-              // Handle special tool tokens
               if (tokenStr.startsWith("[TOOL_CALLS]") && tokenStr.endsWith("[/TOOL_CALLS]")) {
                 try {
                   const jsonStr = tokenStr.substring(12, tokenStr.length - 13);
                   const parsed = JSON.parse(jsonStr);
                   if (parsed.tool_calls) {
-                    // merge arrays or replace
-                    toolCallsCache = [...toolCallsCache, ...parsed.tool_calls];
+                    toolCallsCache.push(...parsed.tool_calls);
+                    parsed.tool_calls.forEach((tc: any) => contentBlocks.push({ type: 'tool_call', tool_call: tc }));
                   }
                 } catch (e) {}
               } else if (
@@ -409,12 +396,76 @@ const ChatPage: React.FC = () => {
                   const jsonStr = cleanToken.substring(13, cleanToken.length - 14);
                   const parsed = JSON.parse(jsonStr);
                   if (parsed.id) {
-                    toolResultsCache = [...toolResultsCache, parsed];
+                    toolResultsCache.push(parsed);
+                    contentBlocks.push({ type: 'tool_result', id: parsed.id, result: parsed.result });
                   }
                 } catch (e) {}
               } else {
                 accumulatedText += tokenStr;
-                pendingText += tokenStr;
+                
+                const numThinkTags = accumulatedText.split("<think>").length - 1;
+                while (thinkTimers.length < Math.max(1, numThinkTags)) {
+                    thinkTimers.push({ startTime: Date.now() });
+                }
+                
+                const newTextThinkBlocks: any[] = [];
+                let remaining = accumulatedText;
+                let thinkIdx = 0;
+                
+                while (remaining) {
+                    const startIdx = remaining.indexOf("<think>");
+                    if (startIdx === -1) {
+                        if (remaining.trim()) newTextThinkBlocks.push({ type: "text", text: remaining });
+                        break;
+                    }
+                    if (startIdx > 0) {
+                        const textBefore = remaining.slice(0, startIdx);
+                        if (textBefore.trim()) newTextThinkBlocks.push({ type: "text", text: textBefore });
+                    }
+                    
+                    const endIdx = remaining.indexOf("</think>", startIdx);
+                    if (endIdx === -1) {
+                        const timer = thinkTimers[thinkIdx];
+                        newTextThinkBlocks.push({ 
+                            type: "think", 
+                            text: remaining.slice(startIdx + 7).trim(),
+                            startTime: timer?.startTime,
+                            endTime: timer?.endTime
+                        });
+                        break;
+                    } else {
+                        const timer = thinkTimers[thinkIdx];
+                        if (timer && !timer.endTime) {
+                            timer.endTime = Date.now();
+                        }
+                        newTextThinkBlocks.push({ 
+                            type: "think", 
+                            text: remaining.slice(startIdx + 7, endIdx).trim(),
+                            startTime: timer?.startTime,
+                            endTime: timer?.endTime
+                        });
+                        remaining = remaining.slice(endIdx + 8);
+                        thinkIdx++;
+                    }
+                }
+                
+                let textThinkCursor = 0;
+                const reconstructedBlocks: any[] = [];
+                for (let b of contentBlocks) {
+                    if (b.type === 'tool_call' || b.type === 'tool_result') {
+                        reconstructedBlocks.push(b);
+                    } else {
+                        if (textThinkCursor < newTextThinkBlocks.length) {
+                            reconstructedBlocks.push(newTextThinkBlocks[textThinkCursor]);
+                            textThinkCursor++;
+                        }
+                    }
+                }
+                while (textThinkCursor < newTextThinkBlocks.length) {
+                    reconstructedBlocks.push(newTextThinkBlocks[textThinkCursor]);
+                    textThinkCursor++;
+                }
+                contentBlocks = reconstructedBlocks;
               }
             } else if (eventName === "done") {
               doneConvId = data.conversationId;
@@ -426,8 +477,7 @@ const ChatPage: React.FC = () => {
         }
       } finally {
         clearInterval(flushInterval);
-        // Final flush — ensure the complete text is committed
-        attemptUpdateState(accumulatedText, toolCallsCache, toolResultsCache);
+        attemptUpdateState();
       }
 
       // Navigate to conversation URL on first message
