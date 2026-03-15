@@ -1,11 +1,34 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, {
+  useState,
+  useEffect,
+  useRef,
+  useCallback,
+  useMemo,
+  useSyncExternalStore,
+} from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import api, { getAccessToken } from "../api";
 import { SlideRenderer, type SlideData } from "../components/SlideRenderer";
 import { ChatMessage, type ChatMessageData } from "../components/chat/ChatMessage";
-import { Send, Loader2, Presentation, Trash2, CreditCard, X, Home, Pencil, Plus } from "lucide-react";
+import {
+  Send,
+  Loader2,
+  Presentation,
+  Trash2,
+  CreditCard,
+  X,
+  Home,
+  Pencil,
+  Plus,
+  ChevronLeft,
+} from "lucide-react";
 import { usePersistentWidth } from "../hooks/usePersistentWidth";
+import {
+  getConversationActivitySnapshot,
+  subscribeConversationActivity,
+  trackConversationRequest,
+} from "../lib/conversationActivity";
 
 // ─────────────────────────────────────────────────────
 // Utilities
@@ -39,6 +62,10 @@ function generateId() {
   return Math.random().toString(36).slice(2, 10);
 }
 
+function getConversationRequestKey(conversationId?: string, projectId?: string | null) {
+  return conversationId ?? `draft:${projectId ?? "global"}`;
+}
+
 function parseStreamSnapshot(snapshot: string) {
   const thinkStarts = snapshot.split("<think>").length - 1;
   const thinkEnds = snapshot.split("</think>").length - 1;
@@ -57,6 +84,76 @@ function parseStreamSnapshot(snapshot: string) {
   return { isThinking, thinkingContent: "", content: snapshot };
 }
 
+interface ConversationHistoryEntry {
+  id: string;
+  projectId: string | null;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+const relativeTimeFormatter = new Intl.RelativeTimeFormat(undefined, {
+  numeric: "auto",
+});
+
+function sortConversationHistory(entries: ConversationHistoryEntry[]) {
+  return [...entries].sort(
+    (left, right) =>
+      new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime() ||
+      new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime(),
+  );
+}
+
+function upsertConversationHistory(
+  entries: ConversationHistoryEntry[],
+  nextEntry: ConversationHistoryEntry,
+) {
+  const normalizedEntry = {
+    ...nextEntry,
+    title: nextEntry.title.trim() || "Untitled",
+  };
+
+  return sortConversationHistory([
+    normalizedEntry,
+    ...entries.filter((entry) => entry.id !== normalizedEntry.id),
+  ]);
+}
+
+function formatLastEdited(dateString: string) {
+  const timestamp = new Date(dateString).getTime();
+
+  if (Number.isNaN(timestamp)) {
+    return "recently edited";
+  }
+
+  const diffMs = timestamp - Date.now();
+  const diffSeconds = Math.round(diffMs / 1000);
+  const absoluteSeconds = Math.abs(diffSeconds);
+
+  if (absoluteSeconds < 45) {
+    return "just now";
+  }
+
+  const units: Array<[Intl.RelativeTimeFormatUnit, number]> = [
+    ["year", 60 * 60 * 24 * 365],
+    ["month", 60 * 60 * 24 * 30],
+    ["week", 60 * 60 * 24 * 7],
+    ["day", 60 * 60 * 24],
+    ["hour", 60 * 60],
+    ["minute", 60],
+  ];
+
+  for (const [unit, secondsPerUnit] of units) {
+    if (absoluteSeconds >= secondsPerUnit) {
+      return relativeTimeFormatter
+        .format(Math.round(diffSeconds / secondsPerUnit), unit)
+        .toLowerCase();
+    }
+  }
+
+  return relativeTimeFormatter.format(diffSeconds, "second").toLowerCase();
+}
+
 // ─────────────────────────────────────────────────────
 // ChatPage
 // ─────────────────────────────────────────────────────
@@ -64,13 +161,12 @@ function parseStreamSnapshot(snapshot: string) {
 const ChatPage: React.FC = () => {
   const { conversationId } = useParams<{ conversationId?: string }>();
   const [searchParams] = useSearchParams();
-  const projectId = searchParams.get('projectId');
+  const projectId = searchParams.get("projectId");
   const navigate = useNavigate();
   const { user, logout } = useAuth();
 
   const [messages, setMessages] = useState<ChatMessageData[]>([]);
   const [input, setInput] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [slides, setSlides] = useState<SlideData[]>([]);
   const [currentSlideIndex] = useState(0);
@@ -83,8 +179,11 @@ const ChatPage: React.FC = () => {
     maxWidth: 550,
   });
   const [isResizingState, setIsResizingState] = useState(false);
-  const [deckTitle, setDeckTitle] = useState("New Presentation");
+  const [deckTitle, setDeckTitle] = useState("New Chat");
   const [isTitleFocused, setIsTitleFocused] = useState(false);
+  const [conversationHistory, setConversationHistory] = useState<ConversationHistoryEntry[]>([]);
+  const [isConversationHistoryLoading, setIsConversationHistoryLoading] = useState(true);
+  const [isConversationHistoryOpen, setIsConversationHistoryOpen] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -93,6 +192,44 @@ const ChatPage: React.FC = () => {
   const startX = useRef(0);
   const startWidth = useRef(0);
   const userScrolledUp = useRef(false);
+  const liveConversationMessagesRef = useRef<Record<string, ChatMessageData[]>>({});
+  const conversationActivity = useSyncExternalStore(
+    subscribeConversationActivity,
+    getConversationActivitySnapshot,
+    getConversationActivitySnapshot,
+  );
+  const currentConversationKey = getConversationRequestKey(conversationId, projectId);
+  const currentConversationKeyRef = useRef(currentConversationKey);
+  useEffect(() => {
+    currentConversationKeyRef.current = currentConversationKey;
+  }, [currentConversationKey]);
+  const isCurrentConversationBusy = Boolean(conversationActivity[currentConversationKey]);
+
+  const loadConversationHistory = useCallback(async () => {
+    setIsConversationHistoryLoading(true);
+    try {
+      const response = await api.get("/conversations", {
+        params: projectId ? { projectId } : undefined,
+      });
+      setConversationHistory(sortConversationHistory(response.data.conversations ?? []));
+    } catch (error) {
+      console.error("Failed to load conversations:", error);
+    } finally {
+      setIsConversationHistoryLoading(false);
+    }
+  }, [projectId]);
+
+  const visibleConversationHistory = useMemo(() => {
+    if (!projectId) {
+      return conversationHistory;
+    }
+
+    return conversationHistory.filter((entry) => entry.projectId === projectId);
+  }, [conversationHistory, projectId]);
+
+  useEffect(() => {
+    void loadConversationHistory();
+  }, [loadConversationHistory]);
 
   const handleResizeMouseDown = (e: React.MouseEvent) => {
     isResizing.current = true;
@@ -149,6 +286,13 @@ const ChatPage: React.FC = () => {
   useEffect(() => {
     if (!conversationId) return;
 
+    const liveMessages = liveConversationMessagesRef.current[conversationId];
+    if (liveMessages && getConversationActivitySnapshot()[conversationId]) {
+      setMessages(liveMessages);
+      setHistoryLoading(false);
+      return;
+    }
+
     setHistoryLoading(true);
     Promise.all([
       api.get(`/conversations/${conversationId}/messages`),
@@ -173,6 +317,7 @@ const ChatPage: React.FC = () => {
           }),
         );
         setMessages(hydratedMessages);
+        liveConversationMessagesRef.current[conversationId] = hydratedMessages;
         if (msgRes.data.title) setDeckTitle(msgRes.data.title);
         // Always start at the bottom when opening a conversation
         userScrolledUp.current = false;
@@ -194,6 +339,19 @@ const ChatPage: React.FC = () => {
     const timer = setTimeout(() => {
       api
         .patch(`/conversations/${conversationId}/title`, { title: deckTitle.trim() })
+        .then(() => {
+          setConversationHistory((prev) =>
+            upsertConversationHistory(prev, {
+              id: conversationId,
+              projectId: projectId ?? null,
+              title: deckTitle.trim(),
+              createdAt:
+                prev.find((entry) => entry.id === conversationId)?.createdAt ??
+                new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            }),
+          );
+        })
         .catch((err) => console.error("Failed to save title:", err));
     }, 600);
     return () => clearTimeout(timer);
@@ -238,7 +396,7 @@ const ChatPage: React.FC = () => {
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      if (!isLoading && input.trim()) {
+      if (!isCurrentConversationBusy && input.trim()) {
         submitMessage();
       }
     }
@@ -249,12 +407,43 @@ const ChatPage: React.FC = () => {
   // ─────────────────────────────────────────────────────
   const submitMessage = async () => {
     const userText = input.trim();
-    if (!userText || isLoading) return;
+    if (!userText || isCurrentConversationBusy) return;
 
     setInput("");
     if (textareaRef.current) textareaRef.current.style.height = "auto";
     userScrolledUp.current = false; // snap back to bottom for new message
-    setIsLoading(true);
+
+    let requestConversationKey = currentConversationKey;
+    let stopTrackingConversation: (() => void) | null = null;
+
+    const setMessagesForConversationKey = (
+      key: string,
+      updater: ChatMessageData[] | ((previous: ChatMessageData[]) => ChatMessageData[]),
+    ) => {
+      const previous =
+        liveConversationMessagesRef.current[key] ??
+        (currentConversationKeyRef.current === key ? messages : []);
+      const next = typeof updater === "function" ? updater(previous) : updater;
+      liveConversationMessagesRef.current[key] = next;
+
+      if (currentConversationKeyRef.current === key) {
+        setMessages(next);
+      }
+
+      return next;
+    };
+
+    const switchConversationTracking = (nextKey: string) => {
+      if (requestConversationKey === nextKey && stopTrackingConversation) {
+        return;
+      }
+
+      stopTrackingConversation?.();
+      requestConversationKey = nextKey;
+      stopTrackingConversation = trackConversationRequest(nextKey);
+    };
+
+    switchConversationTracking(requestConversationKey);
 
     // 1. Append user message immediately
     const userMsg: ChatMessageData = {
@@ -262,12 +451,12 @@ const ChatPage: React.FC = () => {
       role: "user",
       content: userText,
     };
-    setMessages((prev) => [...prev, userMsg]);
+    setMessagesForConversationKey(requestConversationKey, (prev) => [...prev, userMsg]);
 
     // 2. Insert thinking placeholder
     const assistantId = generateId();
     const thinkingStartedAt = Date.now();
-    setMessages((prev) => [
+    setMessagesForConversationKey(requestConversationKey, (prev) => [
       ...prev,
       {
         id: assistantId,
@@ -279,7 +468,71 @@ const ChatPage: React.FC = () => {
       },
     ]);
 
+    let doneConvId = conversationId ?? null;
+    let resolvedConversationId = conversationId ?? null;
+
+    const startConversationTracking = (
+      nextConversationId: string,
+      nextProjectId?: string | null,
+      nextTitle?: string,
+    ) => {
+      const shouldUpdateHistory = !nextConversationId.startsWith("draft:");
+
+      if (stopTrackingConversation && resolvedConversationId === nextConversationId) {
+        if (shouldUpdateHistory) {
+          setConversationHistory((prev) =>
+            upsertConversationHistory(prev, {
+              id: nextConversationId,
+              projectId: nextProjectId ?? projectId ?? null,
+              title:
+                nextTitle?.trim() ||
+                prev.find((entry) => entry.id === nextConversationId)?.title ||
+                deckTitle.trim() ||
+                "New Chat",
+              createdAt:
+                prev.find((entry) => entry.id === nextConversationId)?.createdAt ??
+                new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            }),
+          );
+        }
+        return;
+      }
+
+      resolvedConversationId = nextConversationId;
+      const previousConversationKey = requestConversationKey;
+      switchConversationTracking(nextConversationId);
+
+      if (previousConversationKey !== nextConversationId) {
+        const pendingMessages = liveConversationMessagesRef.current[previousConversationKey];
+        if (pendingMessages) {
+          liveConversationMessagesRef.current[nextConversationId] = pendingMessages;
+          delete liveConversationMessagesRef.current[previousConversationKey];
+        }
+      }
+
+      if (shouldUpdateHistory) {
+        setConversationHistory((prev) =>
+          upsertConversationHistory(prev, {
+            id: nextConversationId,
+            projectId: nextProjectId ?? projectId ?? null,
+            title:
+              nextTitle?.trim() ||
+              prev.find((entry) => entry.id === nextConversationId)?.title ||
+              deckTitle.trim() ||
+              "New Chat",
+            createdAt:
+              prev.find((entry) => entry.id === nextConversationId)?.createdAt ??
+              new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          }),
+        );
+      }
+    };
+
     try {
+      startConversationTracking(currentConversationKey, projectId, deckTitle);
+
       const payload: Record<string, string> = { message: userText };
       if (conversationId) payload.conversationId = conversationId;
       if (projectId) payload.projectId = projectId;
@@ -305,7 +558,6 @@ const ChatPage: React.FC = () => {
       let contentBlocks: any[] = [];
       let accumulatedText = "";
       let pendingTokens = false;
-      let doneConvId = conversationId ?? null;
       let thinkTimers: { startTime: number; endTime?: number }[] = [
         { startTime: thinkingStartedAt },
       ];
@@ -328,7 +580,7 @@ const ChatPage: React.FC = () => {
           contentBlocks[contentBlocks.length - 1].type === "think" &&
           !contentBlocks[contentBlocks.length - 1].endTime;
 
-        setMessages((prev) =>
+        setMessagesForConversationKey(requestConversationKey, (prev) =>
           prev.map((m) =>
             m.id === assistantId
               ? {
@@ -471,6 +723,15 @@ const ChatPage: React.FC = () => {
                 }
                 contentBlocks = reconstructedBlocks;
               }
+            } else if (eventName === "conversation") {
+              doneConvId = data.conversationId ?? doneConvId;
+              if (data.conversationId) {
+                startConversationTracking(
+                  data.conversationId,
+                  data.projectId ?? projectId ?? null,
+                  data.title ?? "New Chat",
+                );
+              }
             } else if (eventName === "done") {
               doneConvId = data.conversationId;
               break outer;
@@ -486,7 +747,9 @@ const ChatPage: React.FC = () => {
 
       // Navigate to conversation URL on first message
       if (!conversationId && doneConvId) {
-        navigate(`/chat/${doneConvId}${projectId ? `?projectId=${projectId}` : ''}`, { replace: true });
+        navigate(`/chat/${doneConvId}${projectId ? `?projectId=${projectId}` : ""}`, {
+          replace: true,
+        });
       }
 
       // Refetch slides
@@ -494,7 +757,7 @@ const ChatPage: React.FC = () => {
     } catch (error: any) {
       console.error("Chat error:", error);
       const thinkingElapsed = Math.floor((Date.now() - thinkingStartedAt) / 1000);
-      setMessages((prev) =>
+      setMessagesForConversationKey(requestConversationKey, (prev) =>
         prev.map((m) =>
           m.id === assistantId
             ? {
@@ -507,7 +770,10 @@ const ChatPage: React.FC = () => {
         ),
       );
     } finally {
-      setIsLoading(false);
+      if (stopTrackingConversation) {
+        stopTrackingConversation();
+      }
+      await loadConversationHistory();
     }
   };
 
@@ -538,7 +804,8 @@ const ChatPage: React.FC = () => {
   // Render
   // ─────────────────────────────────────────────────────
 
-  const isEmpty = messages.length === 0 && !isLoading && !historyLoading;
+  const isEmpty = messages.length === 0 && !isCurrentConversationBusy && !historyLoading;
+  const activeChatLabel = conversationId ? deckTitle.trim() || "New Chat" : "New Chat";
 
   return (
     <div className="h-screen w-screen flex bg-background text-foreground overflow-hidden font-sans">
@@ -593,6 +860,8 @@ const ChatPage: React.FC = () => {
           <button
             onClick={() => {
               setMessages([]);
+              setDeckTitle("New Chat");
+              setIsConversationHistoryOpen(false);
               navigate(projectId ? `/chat?projectId=${projectId}` : `/chat`, { replace: true });
             }}
             className="text-muted-foreground hover:text-foreground transition-colors p-2 rounded-lg hover:bg-muted cursor-pointer"
@@ -601,6 +870,83 @@ const ChatPage: React.FC = () => {
             <Plus className="w-4 h-4" />
           </button>
         </div>
+
+        <div className="h-11 border-b border-border flex items-center gap-2 px-3 shrink-0 bg-card">
+          <button
+            onClick={() => setIsConversationHistoryOpen((prev) => !prev)}
+            className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            title={isConversationHistoryOpen ? "Hide chats" : "Show chats"}
+          >
+            <ChevronLeft
+              className={cn(
+                "h-4 w-4 transition-transform duration-200",
+                isConversationHistoryOpen && "-rotate-90",
+              )}
+            />
+          </button>
+          <span className="truncate text-sm font-medium text-muted-foreground">
+            {activeChatLabel}
+          </span>
+        </div>
+
+        {isConversationHistoryOpen && (
+          <div className="border-b border-border bg-muted/20 px-3 py-2">
+            <div className="max-h-56 space-y-1 overflow-y-auto pr-1 custom-scrollbar">
+              {isConversationHistoryLoading ? (
+                <div className="flex items-center gap-2 px-2 py-3 text-xs text-muted-foreground">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  <span>Loading chats…</span>
+                </div>
+              ) : visibleConversationHistory.length === 0 ? (
+                <div className="px-2 py-3 text-xs text-muted-foreground">No saved chats yet.</div>
+              ) : (
+                visibleConversationHistory.map((entry) => {
+                  const isActiveConversation = entry.id === conversationId;
+                  const status = conversationActivity[entry.id] ? "busy" : "idle";
+
+                  return (
+                    <button
+                      key={entry.id}
+                      onClick={() => {
+                        setIsConversationHistoryOpen(false);
+                        navigate(
+                          entry.projectId
+                            ? `/chat/${entry.id}?projectId=${entry.projectId}`
+                            : `/chat/${entry.id}`,
+                        );
+                      }}
+                      className={cn(
+                        "w-full rounded-xl border px-3 py-2 text-left transition-colors",
+                        isActiveConversation
+                          ? "border-primary/30 bg-primary/10"
+                          : "border-transparent bg-card hover:border-border hover:bg-card/80",
+                      )}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <span className="min-w-0 truncate text-sm font-medium text-foreground">
+                          {entry.title.trim() || "Untitled"}
+                        </span>
+                        <span
+                          className={cn(
+                            "shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold",
+                            status === "busy"
+                              ? "bg-amber-500/15 text-amber-700"
+                              : "bg-emerald-500/12 text-emerald-700",
+                          )}
+                        >
+                          {status}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-[11px] lowercase tracking-wide text-muted-foreground">
+                        {formatLastEdited(entry.updatedAt)}
+                      </p>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Message History */}
         <div
@@ -648,10 +994,10 @@ const ChatPage: React.FC = () => {
             />
             <button
               type="submit"
-              disabled={isLoading || !input.trim()}
+              disabled={isCurrentConversationBusy || !input.trim()}
               className="p-2.5 bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0 self-end"
             >
-              {isLoading ? (
+              {isCurrentConversationBusy ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
               ) : (
                 <Send className="w-4 h-4" />

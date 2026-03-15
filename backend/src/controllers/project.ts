@@ -69,7 +69,7 @@ export const createProject = async (req: Request, res: Response): Promise<void> 
             return;
         }
 
-        const defaultTitle = 'New Project';
+        const defaultTitle = 'New Chat';
 
         // 1. Create project first (we need to generate its UUID upfront, or return it)
         // Wait, project needs `minio_object_key`. We'll just generate the DB id first.
