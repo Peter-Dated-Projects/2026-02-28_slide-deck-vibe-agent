@@ -7,9 +7,31 @@ import * as projectController from './src/controllers/project';
 import { requireAuth, type AuthRequest } from './src/middleware/auth';
 import { dbService as db } from './src/core/container';
 import { chatWithAgent, chatWithAgentStream } from './src/services/agent';
+import { loadDeckHtmlForProject } from './src/services/projectDeck';
 import { config } from './src/config';
 
 const app = express();
+
+const touchConversationActivity = async (conversationId: string) => {
+    await db.query(
+        `
+            WITH updated_conversation AS (
+                UPDATE conversations
+                SET updated_at = NOW()
+                WHERE id = $1
+                RETURNING project_id
+            )
+            UPDATE projects
+            SET updated_at = NOW()
+            WHERE id IN (
+                SELECT project_id
+                FROM updated_conversation
+                WHERE project_id IS NOT NULL
+            )
+        `,
+        [conversationId]
+    );
+};
 
 app.use(cors({
   origin: process.env.FRONTEND_URL,
@@ -32,6 +54,56 @@ app.delete('/api/user/me', requireAuth, userController.deleteUser);
 // Project Routes
 app.get('/api/projects', requireAuth, projectController.getProjects);
 app.post('/api/projects', requireAuth, projectController.createProject);
+app.get('/api/conversations', requireAuth, async (req: AuthRequest, res: express.Response): Promise<void> => {
+    try {
+        const userId = req.user!.userId;
+        const projectId = typeof req.query.projectId === 'string' ? req.query.projectId : null;
+
+        const query = projectId
+            ? `
+                SELECT
+                    c.id,
+                    c.project_id AS "projectId",
+                    c.title,
+                    c.created_at AS "createdAt",
+                    c.updated_at AS "updatedAt"
+                FROM conversations c
+                WHERE c.user_id = $1 AND c.project_id = $2
+                ORDER BY c.updated_at DESC, c.created_at DESC
+            `
+            : `
+                SELECT
+                    c.id,
+                    c.project_id AS "projectId",
+                    c.title,
+                    c.created_at AS "createdAt",
+                    c.updated_at AS "updatedAt"
+                FROM conversations c
+                WHERE c.user_id = $1
+                ORDER BY c.updated_at DESC, c.created_at DESC
+            `;
+
+        const params = projectId ? [userId, projectId] : [userId];
+
+        const result = await db.query(
+            query,
+            params
+        );
+
+        const conversations = result.rows.map((row: any) => ({
+            id: row.id,
+            projectId: row.projectId,
+            title: row.title,
+            createdAt: row.createdAt,
+            updatedAt: row.updatedAt,
+        }));
+
+        res.json({ conversations });
+    } catch (error) {
+        console.error('Error fetching conversations:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
 
 // Agent Chat Route
 app.post('/api/chat', requireAuth, async (req: AuthRequest, res: express.Response): Promise<void> => {
@@ -45,14 +117,26 @@ app.post('/api/chat', requireAuth, async (req: AuthRequest, res: express.Respons
         }
 
         let currentConvId = conversationId;
+        const incomingProjectId = req.body.projectId;
 
         // Create conversation if it doesn't exist
         if (!currentConvId) {
+            // If projectId is provided, link to it; otherwise require it to be created via /api/projects
+            if (!incomingProjectId) {
+                res.status(400).json({ error: 'projectId or conversationId is required' });
+                return;
+            }
             const convResult = await db.query(
-                'INSERT INTO conversations (user_id, title) VALUES ($1, $2) RETURNING id',
-                [userId, message.substring(0, 50) + '...']
+                'INSERT INTO conversations (user_id, project_id, title) VALUES ($1, $2, $3) RETURNING id',
+                [userId, incomingProjectId, message.substring(0, 50) + '...']
             );
             currentConvId = convResult.rows[0].id;
+            
+            // Add conversation to project array
+            await db.query(
+                'UPDATE projects SET conversation_ids = array_append(conversation_ids, $1::UUID) WHERE id = $2',
+                [currentConvId, incomingProjectId]
+            );
         }
 
         // Save user message
@@ -60,6 +144,7 @@ app.post('/api/chat', requireAuth, async (req: AuthRequest, res: express.Respons
             'INSERT INTO messages (conversation_id, role, content) VALUES ($1, $2, $3)',
             [currentConvId, 'user', JSON.stringify({ text: message })]
         );
+        await touchConversationActivity(currentConvId);
 
         // Fetch conversation history
         const historyResult = await db.query(
@@ -104,6 +189,7 @@ app.post('/api/chat', requireAuth, async (req: AuthRequest, res: express.Respons
                 'INSERT INTO messages (conversation_id, role, content) VALUES ($1, $2, $3)',
                 [currentConvId, 'assistant', JSON.stringify(agentResponse.content)]
             );
+            await touchConversationActivity(currentConvId);
         }
 
         res.json({
@@ -140,21 +226,45 @@ app.post('/api/chat/stream', requireAuth, async (req: AuthRequest, res: express.
 
     try {
         let currentConvId = conversationId;
+        const incomingProjectId = req.body.projectId;
 
         // Create conversation if needed
         if (!currentConvId) {
+            if (!incomingProjectId) {
+                send('error', JSON.stringify({ message: 'projectId or conversationId is required' }));
+                res.end();
+                return;
+            }
             const convResult = await db.query(
-                'INSERT INTO conversations (user_id, title) VALUES ($1, $2) RETURNING id',
-                [userId, message.substring(0, 50) + '...']
+                'INSERT INTO conversations (user_id, project_id, title) VALUES ($1, $2, $3) RETURNING id',
+                [userId, incomingProjectId, message.substring(0, 50) + '...']
             );
             currentConvId = convResult.rows[0].id;
+            
+            // Add conversation to project array
+            await db.query(
+                'UPDATE projects SET conversation_ids = array_append(conversation_ids, $1::UUID) WHERE id = $2',
+                [currentConvId, incomingProjectId]
+            );
         }
+
+        const conversationMetaResult = await db.query(
+            'SELECT title, project_id FROM conversations WHERE id = $1',
+            [currentConvId]
+        );
+        const conversationMeta = conversationMetaResult.rows[0];
+        send('conversation', JSON.stringify({
+            conversationId: currentConvId,
+            projectId: conversationMeta?.project_id ?? incomingProjectId ?? null,
+            title: conversationMeta?.title ?? 'New Chat'
+        }));
 
         // Save user message
         await db.query(
             'INSERT INTO messages (conversation_id, role, content) VALUES ($1, $2, $3)',
             [currentConvId, 'user', JSON.stringify({ text: message })]
         );
+        await touchConversationActivity(currentConvId);
 
         // Fetch conversation history
         const historyResult = await db.query(
@@ -340,8 +450,9 @@ app.post('/api/chat/stream', requireAuth, async (req: AuthRequest, res: express.
                                 if (token.includes("<think>") && token.includes("</think>")) {
                                    const parts = token.split("<think>");
                                    lastBlock.text += parts[0];
-                                   
-                                   const subParts = parts[1].split("</think>");
+
+                                              const thinkContent = parts[1] ?? "";
+                                              const subParts = thinkContent.split("</think>");
                                    const timer = { startTime: Date.now(), endTime: Date.now() };
                                    thinkTimers.push(timer);
                                    contentBlocks.push({ type: "think", text: subParts[0], startTime: timer.startTime, endTime: timer.endTime });
@@ -357,8 +468,9 @@ app.post('/api/chat/stream', requireAuth, async (req: AuthRequest, res: express.
                                 if (token.includes("<think>") && token.includes("</think>")) {
                                    const parts = token.split("<think>");
                                    if (parts[0]) contentBlocks.push({ type: "text", text: parts[0] });
-                                   
-                                   const subParts = parts[1].split("</think>");
+
+                                              const thinkContent = parts[1] ?? "";
+                                              const subParts = thinkContent.split("</think>");
                                    const timer = { startTime: Date.now(), endTime: Date.now() };
                                    thinkTimers.push(timer);
                                    contentBlocks.push({ type: "think", text: subParts[0], startTime: timer.startTime, endTime: timer.endTime });
@@ -400,6 +512,7 @@ app.post('/api/chat/stream', requireAuth, async (req: AuthRequest, res: express.
                     streamedToolResults.length > 0 ? JSON.stringify(streamedToolResults) : null,
                 ]
             );
+            await touchConversationActivity(currentConvId);
         }
 
         // Signal completion
@@ -493,6 +606,15 @@ app.patch('/api/conversations/:conversationId/title', requireAuth, async (req: A
             'UPDATE conversations SET title = $1, updated_at = NOW() WHERE id = $2',
             [title.trim(), conversationId]
         );
+        await db.query(
+            `
+                UPDATE projects p
+                SET updated_at = NOW()
+                FROM conversations c
+                WHERE c.id = $1 AND p.id = c.project_id
+            `,
+            [conversationId]
+        );
 
         res.json({ title: title.trim() });
     } catch (error) {
@@ -502,23 +624,31 @@ app.patch('/api/conversations/:conversationId/title', requireAuth, async (req: A
 });
 
 // Presentation Data Route (Protected)
-app.get('/api/presentation/:conversationId', requireAuth, async (req: AuthRequest, res: express.Response): Promise<void> => {
+app.get('/api/presentation/:projectId', requireAuth, async (req: AuthRequest, res: express.Response): Promise<void> => {
      try {
-         const { conversationId } = req.params;
+         const { projectId } = req.params;
          const userId = req.user!.userId;
 
-         const convResult = await db.query('SELECT user_id FROM conversations WHERE id = $1', [conversationId]);
-         if (convResult.rows.length === 0 || convResult.rows[0].user_id !== userId) {
+         const projResult = await db.query(
+             'SELECT p.id FROM projects p JOIN conversations c ON c.id = ANY(p.conversation_ids) WHERE p.id = $1 AND c.user_id = $2 LIMIT 1', 
+             [projectId, userId]
+         );
+         
+         if (projResult.rows.length === 0) {
              res.status(404).json({ error: 'Presentation not found' });
              return;
          }
 
-         const slidesResult = await db.query('SELECT minio_object_key, theme_data FROM slides WHERE conversation_id = $1 ORDER BY created_at ASC', [conversationId]);
+         const { html, cacheHit } = await loadDeckHtmlForProject(projectId as string);
+         const dbResult = await db.query('SELECT minio_object_key, theme_data FROM projects WHERE id = $1', [projectId]);
          
          res.json({
-             slides: slidesResult.rows
+             slides: dbResult.rows,
+             html,
+             cacheHit
          });
      } catch (error) {
+         console.error('Error fetching presentation:', error);
          res.status(500).json({ error: 'Error fetching presentation' });
      }
 });

@@ -196,9 +196,9 @@ describe('Database Integration Tests', () => {
 
         it('should create a slide', async () => {
             const result = await db.query(
-                `INSERT INTO slides (conversation_id, minio_object_key, theme_data) 
+                `INSERT INTO projects (conversation_ids, minio_object_key, theme_data) 
                  VALUES ($1, $2, $3) RETURNING id`,
-                [testConversationId, 'slides/test-user-hash/1.json', JSON.stringify({ theme: 'dark' })]
+                [[testConversationId], 'slides/test-user-hash/1.json', JSON.stringify({ theme: 'dark' })]
             );
             expect(result.rows.length).toBe(1);
             slideId = result.rows[0].id;
@@ -206,11 +206,11 @@ describe('Database Integration Tests', () => {
 
         it('should read the slide information', async () => {
             const result = await db.query(
-                'SELECT * FROM slides WHERE id = $1',
+                'SELECT * FROM projects WHERE id = $1',
                 [slideId]
             );
             expect(result.rows.length).toBe(1);
-            expect(result.rows[0].conversation_id).toBe(testConversationId);
+            expect(result.rows[0].conversation_ids).toContain(testConversationId);
             expect(result.rows[0].minio_object_key).toBe('slides/test-user-hash/1.json');
         });
     });

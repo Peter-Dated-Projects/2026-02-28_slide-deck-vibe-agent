@@ -41,6 +41,7 @@
     "google-auth-library": "^10.6.1",
     "jsonwebtoken": "^9.0.3",
     "openai": "^6.27.0",
-    "pg": "^8.19.0"
+    "pg": "^8.19.0",
+    "redis": "^5.11.0"
   }
 }

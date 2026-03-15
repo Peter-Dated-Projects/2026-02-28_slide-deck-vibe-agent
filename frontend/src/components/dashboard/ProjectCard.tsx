@@ -9,6 +9,7 @@ export interface ProjectData {
   createdAt?: string;
   thumbnailUrl?: string;
   theme?: string;
+  latest_conversation_id?: string;
 }
 
 interface ProjectCardProps {
@@ -28,7 +29,7 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({ project, onEdit, onDel
 
   return (
     <div className={`group relative flex flex-col bg-card/60 backdrop-blur-xl border border-border rounded-xl shadow-card hover:shadow-card-hover transition-all duration-200 overflow-hidden min-w-[300px] max-w-[500px] ${className}`}>
-      <Link to={`/chat/${project.id}`} className="block flex-1">
+      <Link to={`/chat/${project.latest_conversation_id}?projectId=${project.id}`} className="block flex-1">
         {/* 16:9 Thumbnail Area */}
         <div className="w-full aspect-video bg-muted relative overflow-hidden flex items-center justify-center group-hover:bg-muted/80 transition-colors pointer-events-none">
           {project.thumbnailUrl ? (
@@ -51,7 +52,7 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({ project, onEdit, onDel
 
       {/* Card Info Footer */}
       <div className="p-4 flex items-start justify-between gap-4 border-t border-border/50 bg-card">
-        <Link to={`/chat/${project.id}`} className="min-w-0 flex-1">
+        <Link to={`/chat/${project.latest_conversation_id}?projectId=${project.id}`} className="min-w-0 flex-1">
           <h3 className="text-base font-bold leading-tight text-foreground truncate group-hover:text-primary transition-colors">
             {project.name}
           </h3>

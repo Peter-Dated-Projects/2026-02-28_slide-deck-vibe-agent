@@ -37,6 +37,10 @@ export const config = {
     secretKey: process.env.S3_SECRET_KEY || 'admin123',
     bucketName: process.env.S3_BUCKET_NAME || 'vibe-slides',
   },
+  redis: {
+    url: process.env.REDIS_URL || 'redis://localhost:6379',
+    ttlSeconds: parseInt(process.env.REDIS_TTL_SECONDS || '300', 10),
+  },
   qwen: {
     apiKey: process.env.QWEN_API_KEY,
   },

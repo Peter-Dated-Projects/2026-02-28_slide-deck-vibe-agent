@@ -3,12 +3,14 @@ import { config } from '../config';
 import type { ILLMService } from './interfaces/ILLMService';
 import type { IStorageService } from './interfaces/IStorageService';
 import type { IDatabaseService } from './interfaces/IDatabaseService';
+import type { ICacheService } from './interfaces/ICacheService';
 
 import { QwenProvider } from '../infrastructure/providers/llm/QwenProvider';
 import { OllamaProvider } from '../infrastructure/providers/llm/OllamaProvider';
 import { MinioProvider } from '../infrastructure/providers/storage/MinioProvider';
 import { GCPStorageProvider } from '../infrastructure/providers/storage/GCPStorageProvider';
 import { PgDatabaseProvider } from '../infrastructure/providers/db/PgDatabaseProvider';
+import { RedisCacheProvider } from '../infrastructure/providers/cache/RedisCacheProvider';
 
 // Determine environment
 const isLocal = process.env.NODE_ENV === 'local' || process.env.NODE_ENV === 'development';
@@ -50,3 +52,6 @@ export const llmService: ILLMService = isLocal
         dbService,
         storageService
     );
+
+// 4. Initialize Cache Provider
+export const cacheService: ICacheService = new RedisCacheProvider(config.redis.url);

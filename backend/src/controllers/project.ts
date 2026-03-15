@@ -1,5 +1,6 @@
 import type { Request, Response } from 'express';
-import { dbService as db, storageService } from '../core/container';
+import { dbService as db } from '../core/container';
+import { ensureDeckExistsForProject } from '../services/projectDeck';
 
 export const getProjects = async (req: Request, res: Response): Promise<void> => {
     try {
@@ -9,24 +10,23 @@ export const getProjects = async (req: Request, res: Response): Promise<void> =>
             return;
         }
 
-        // Fetch conversations and their latest slide's theme data
+        // Fetch projects, and rely on the latest conversation dynamically.
+        // Or if we just rely on `projects` being the top layer.
+        // In the new schema:
+        // project owner is implied by the first conversation in conversation_ids, or we could join
+        // For security, project belong to the user of the conversations.
         const query = `
             SELECT 
-                c.id, 
+                p.id, 
                 c.title as name, 
-                c.created_at as "createdAt", 
-                c.updated_at as "updatedAt",
-                s.theme_data
-            FROM conversations c
-            LEFT JOIN LATERAL (
-                SELECT theme_data 
-                FROM slides 
-                WHERE conversation_id = c.id 
-                ORDER BY created_at ASC 
-                LIMIT 1
-            ) s ON true
+                p.created_at as "createdAt", 
+                p.updated_at as "updatedAt",
+                p.theme_data,
+                p.conversation_ids
+            FROM projects p
+            JOIN conversations c ON c.id = p.conversation_ids[1]
             WHERE c.user_id = $1
-            ORDER BY c.created_at DESC
+            ORDER BY p.created_at DESC
         `;
 
         const result = await db.query(query, [userId]);
@@ -39,13 +39,18 @@ export const getProjects = async (req: Request, res: Response): Promise<void> =>
                 theme = data.theme || 'Professional';
                 thumbnailUrl = data.preview_url;
             }
+            
+            // Just use the latest conversation ID for the routing link instead of the first
+            const latestConversationId = row.conversation_ids[row.conversation_ids.length - 1];
+            
             return {
                 id: row.id,
                 name: row.name,
                 createdAt: row.createdAt,
                 updatedAt: row.updatedAt,
                 theme,
-                thumbnailUrl
+                thumbnailUrl,
+                latest_conversation_id: latestConversationId
             };
         });
 
@@ -64,38 +69,32 @@ export const createProject = async (req: Request, res: Response): Promise<void> 
             return;
         }
 
-        const defaultTitle = 'New Project';
+        const defaultTitle = 'New Chat';
 
-        // 1. Create conversation record in postgres
+        // 1. Create project first (we need to generate its UUID upfront, or return it)
+        // Wait, project needs `minio_object_key`. We'll just generate the DB id first.
+        const projResult = await db.query(
+             'INSERT INTO projects (minio_object_key) VALUES ($1) RETURNING id',
+             ['temp']
+        );
+        const projectId = projResult.rows[0].id;
+        
+        // 2. Create conversation record
         const convResult = await db.query(
-            'INSERT INTO conversations (user_id, title) VALUES ($1, $2) RETURNING id, title, created_at, updated_at',
-            [userId, defaultTitle]
+            'INSERT INTO conversations (user_id, project_id, title) VALUES ($1, $2, $3) RETURNING id, title, created_at, updated_at',
+            [userId, projectId, defaultTitle]
         );
         const conversation = convResult.rows[0];
-        const projectId = conversation.id;
-
-        // 2. Upload skeleton HTML file to S3
-        const s3Key = `users/${userId}/${projectId}.html`;
-        const skeletonHtml = `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>${defaultTitle}</title>
-</head>
-<body>
-</body>
-</html>`;
-
-        await storageService.uploadFile(s3Key, skeletonHtml, 'text/html');
-
-        // 3. Create a slide record linking the conversation to the S3 file
+        
+        // 3. Update project with the conversation ID
         await db.query(
-            'INSERT INTO slides (conversation_id, minio_object_key) VALUES ($1, $2)',
-            [projectId, s3Key]
+             'UPDATE projects SET conversation_ids = ARRAY[$1]::UUID[] WHERE id = $2',
+             [conversation.id, projectId]
         );
 
-        // 4. Return the new project in the same shape as getProjects
+        // 4. Ensure the project deck is seeded from frontend/public/default.html in S3 and cached.
+        await ensureDeckExistsForProject(projectId, userId);
+
         res.status(201).json({
             project: {
                 id: projectId,
@@ -104,6 +103,7 @@ export const createProject = async (req: Request, res: Response): Promise<void> 
                 updatedAt: conversation.updated_at,
                 theme: 'Professional',
                 thumbnailUrl: undefined,
+                latest_conversation_id: conversation.id
             }
         });
     } catch (error) {
