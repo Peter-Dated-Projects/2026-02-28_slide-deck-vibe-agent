@@ -34,6 +34,8 @@ export default function ProjectsPage() {
   const [loading, setLoading] = useState(true);
   const inFlightPreviewRequestsRef = useRef<Set<string>>(new Set());
   const attemptedPreviewFallbackRef = useRef<Set<string>>(new Set());
+  const refreshBurstIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const refreshBurstTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const fetchProjects = useCallback(async () => {
     const response = await api.get("/projects");
@@ -85,6 +87,71 @@ export default function ProjectsPage() {
     };
     void loadProjects();
   }, [fetchProjects]);
+
+  useEffect(() => {
+    if (loading) return;
+
+    const clearRefreshBurst = () => {
+      if (refreshBurstIntervalRef.current) {
+        clearInterval(refreshBurstIntervalRef.current);
+        refreshBurstIntervalRef.current = null;
+      }
+
+      if (refreshBurstTimeoutRef.current) {
+        clearTimeout(refreshBurstTimeoutRef.current);
+        refreshBurstTimeoutRef.current = null;
+      }
+    };
+
+    const refreshProjectsSilently = async () => {
+      try {
+        await fetchProjects();
+      } catch (error) {
+        console.error("Failed to refresh projects", error);
+      }
+    };
+
+    const startRefreshBurst = () => {
+      clearRefreshBurst();
+      void refreshProjectsSilently();
+
+      refreshBurstIntervalRef.current = setInterval(() => {
+        void refreshProjectsSilently();
+      }, 2500);
+
+      refreshBurstTimeoutRef.current = setTimeout(() => {
+        clearRefreshBurst();
+      }, 10000);
+    };
+
+    const handleFocus = () => {
+      startRefreshBurst();
+    };
+
+    const handlePageShow = () => {
+      startRefreshBurst();
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        startRefreshBurst();
+      } else {
+        clearRefreshBurst();
+      }
+    };
+
+    startRefreshBurst();
+    window.addEventListener("focus", handleFocus);
+    window.addEventListener("pageshow", handlePageShow);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      clearRefreshBurst();
+      window.removeEventListener("focus", handleFocus);
+      window.removeEventListener("pageshow", handlePageShow);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [fetchProjects, loading]);
 
   // Derived state
   const recentProjects = useMemo(() => {
