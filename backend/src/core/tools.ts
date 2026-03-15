@@ -30,10 +30,31 @@ export const getTools = async (vibeManager: VibeManager): Promise<{ tools: OpenA
             type: 'function',
             function: {
                 name: 'read_theme',
-                description: 'Extract the deck-wide CSS variables block containing theme information shared across the entire slide deck.',
+                description: 'Extract the deck-wide CSS variables block containing theme information shared across the entire slide deck. Returns both CSS and a content hash.',
                 parameters: {
                     type: 'object',
                     properties: {}
+                }
+            }
+        },
+        {
+            type: 'function',
+            function: {
+                name: 'write_theme',
+                description: 'Overwrite the deck-wide CSS variables block that controls shared presentation theme styles. You MUST provide the content hash obtained from a recent read_theme call.',
+                parameters: {
+                    type: 'object',
+                    properties: {
+                        newCss: {
+                            type: 'string',
+                            description: 'The full CSS content to place in the theme block (for example, :root variable definitions).'
+                        },
+                        hash: {
+                            type: 'string',
+                            description: 'The content hash of the theme CSS obtained from a recent read_theme call.'
+                        }
+                    },
+                    required: ['newCss', 'hash']
                 }
             }
         },
@@ -64,7 +85,7 @@ export const getTools = async (vibeManager: VibeManager): Promise<{ tools: OpenA
         }
     ];
 
-    const systemInstruction = `You have access to ${slideCount} slides in the current presentation. The read_slide and write_slide tools only return/modify the content inside each <section class="slide"> (the section wrapper itself is preserved). The read_theme tool returns deck-wide theme CSS shared across the entire slide deck. Use read_slide and read_theme to inspect before modifications. To modify a slide, you MUST first read it using read_slide to obtain its content hash, then pass that hash to write_slide.`;
+    const systemInstruction = `You have access to ${slideCount} slides in the current presentation. The read_slide and write_slide tools only return/modify the content inside each <section class="slide"> (the section wrapper itself is preserved). The read_theme and write_theme tools read/modify deck-wide theme CSS shared across the entire slide deck. Use read_slide and read_theme to inspect before modifications. To modify a slide, you MUST first read it using read_slide to obtain its content hash, then pass that hash to write_slide. To modify theme CSS, you MUST first read it using read_theme to obtain its content hash, then pass that hash to write_theme.`;
 
     return { tools, systemInstruction };
 };
@@ -108,7 +129,27 @@ export const executeTool = async (vibeManager: VibeManager, name: string, args: 
         
         if (name === 'read_theme') {
             const themeCss = vibeManager.getTheme();
-            return themeCss || JSON.stringify({ error: 'No theme block found' });
+            if (!themeCss) return JSON.stringify({ error: 'No theme block found' });
+            const hash = crypto.createHash('sha256').update(themeCss).digest('hex');
+            return JSON.stringify({ css: themeCss, hash });
+        }
+
+        if (name === 'write_theme') {
+            if (!args.newCss) return JSON.stringify({ error: 'Missing newCss' });
+            if (!args.hash) return JSON.stringify({ error: 'Missing hash. You must read the theme first to get the content hash.' });
+
+            const currentThemeCss = vibeManager.getTheme();
+            if (!currentThemeCss) {
+                return JSON.stringify({ error: 'No theme block found' });
+            }
+
+            const currentHash = crypto.createHash('sha256').update(currentThemeCss).digest('hex');
+            if (currentHash !== args.hash) {
+                return JSON.stringify({ error: 'Hash mismatch. The theme has been modified since you last read it, or you provided an incorrect hash. Please call read_theme again to get the latest hash.' });
+            }
+
+            await vibeManager.setTheme(args.newCss);
+            return JSON.stringify({ success: true, message: 'Successfully updated theme CSS' });
         }
         
         return JSON.stringify({ error: `Unknown tool: ${name}` });

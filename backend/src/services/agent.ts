@@ -61,7 +61,7 @@ export const chatWithAgent = async (conversationId: string, messages: any[]) => 
                     }
                     const output = await executeTool(vibeManager, name, args);
 
-                    if (name === 'write_slide') {
+                    if (name === 'write_slide' || name === 'write_theme') {
                         try {
                             const parsed = JSON.parse(output);
                             if (parsed?.success) {
@@ -166,7 +166,7 @@ export const chatWithAgentStream = async (
                  const output = await executeTool(vibeManager, name, args);
                  let shouldRefreshPresentation = false;
 
-                 if (name === 'write_slide') {
+                 if (name === 'write_slide' || name === 'write_theme') {
                      try {
                          const parsed = JSON.parse(output);
                          if (parsed?.success) {

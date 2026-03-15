@@ -4,18 +4,7 @@ import { useAuth } from "../contexts/AuthContext";
 import api, { getAccessToken } from "../api";
 import { SlideRenderer, type SlideData } from "../components/SlideRenderer";
 import { ChatMessage, type ChatMessageData } from "../components/chat/ChatMessage";
-import {
-  Send,
-  Loader2,
-  ChevronLeft,
-  ChevronRight,
-  Presentation,
-  Trash2,
-  CreditCard,
-  X,
-  Home,
-  Pencil,
-} from "lucide-react";
+import { Send, Loader2, Presentation, Trash2, CreditCard, X, Home, Pencil } from "lucide-react";
 import { usePersistentWidth } from "../hooks/usePersistentWidth";
 
 // ─────────────────────────────────────────────────────
@@ -82,7 +71,7 @@ const ChatPage: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [slides, setSlides] = useState<SlideData[]>([]);
-  const [currentSlideIndex, setCurrentSlideIndex] = useState(0);
+  const [currentSlideIndex] = useState(0);
   const [showSettings, setShowSettings] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [sidebarWidth, setSidebarWidth] = usePersistentWidth({
@@ -525,9 +514,6 @@ const ChatPage: React.FC = () => {
     submitMessage();
   };
 
-  const nextSlide = () => setCurrentSlideIndex((prev) => Math.min(prev + 1, slides.length - 1));
-  const prevSlide = () => setCurrentSlideIndex((prev) => Math.max(prev - 1, 0));
-
   const handleDeleteAccount = async () => {
     if (
       !window.confirm(
@@ -654,7 +640,6 @@ const ChatPage: React.FC = () => {
                 "focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 transition-all placeholder:text-muted-foreground",
                 "max-h-[400px] leading-relaxed",
               )}
-              disabled={isLoading}
             />
             <button
               type="submit"
@@ -750,39 +735,6 @@ const ChatPage: React.FC = () => {
                   />
                 </div>
               ))}
-            </div>
-
-            <div className="absolute bottom-12 left-1/2 -translate-x-1/2 flex items-center gap-6 bg-card/80 backdrop-blur-xl border border-border px-6 py-3 rounded-full shadow-card z-20">
-              <button
-                onClick={prevSlide}
-                disabled={currentSlideIndex === 0}
-                className="p-2 text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-              >
-                <ChevronLeft className="w-5 h-5" />
-              </button>
-
-              <div className="flex gap-2">
-                {slides.map((_, idx) => (
-                  <button
-                    key={idx}
-                    onClick={() => setCurrentSlideIndex(idx)}
-                    className={cn(
-                      "h-1.5 rounded-full transition-all duration-300",
-                      idx === currentSlideIndex
-                        ? "w-6 bg-indigo-500"
-                        : "w-1.5 bg-white/20 hover:bg-white/40",
-                    )}
-                  />
-                ))}
-              </div>
-
-              <button
-                onClick={nextSlide}
-                disabled={currentSlideIndex === slides.length - 1}
-                className="p-2 text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-              >
-                <ChevronRight className="w-5 h-5" />
-              </button>
             </div>
           </>
         )}
