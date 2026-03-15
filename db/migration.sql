@@ -17,4 +17,7 @@ SET project_id = p.id
 FROM projects p
 WHERE c.id = ANY(p.conversation_ids);
 
+-- 5. Store generated preview location for dashboard thumbnails
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS preview_url TEXT;
+
 COMMIT;

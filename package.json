@@ -19,6 +19,7 @@
     "start": "concurrently \"docker compose --env-file .env.local up\" \"cd backend && cross-env NODE_ENV=local bun run dev\" \"cd frontend && bun run preview\""
   },
   "dependencies": {
-    "playwright-core": "^1.58.2"
+    "playwright-core": "^1.58.2",
+    "sharp": "^0.34.5"
   }
 }

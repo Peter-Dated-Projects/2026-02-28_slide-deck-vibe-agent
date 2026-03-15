@@ -54,6 +54,7 @@ app.delete('/api/user/me', requireAuth, userController.deleteUser);
 // Project Routes
 app.get('/api/projects', requireAuth, projectController.getProjects);
 app.post('/api/projects', requireAuth, projectController.createProject);
+app.post('/api/projects/:projectId/preview', requireAuth, projectController.generateProjectPreview);
 app.get('/api/conversations', requireAuth, async (req: AuthRequest, res: express.Response): Promise<void> => {
     try {
         const userId = req.user!.userId;
