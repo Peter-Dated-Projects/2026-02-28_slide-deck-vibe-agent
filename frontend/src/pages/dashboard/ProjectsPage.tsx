@@ -91,7 +91,7 @@ export default function ProjectsPage() {
       const response = await api.post('/projects');
       const newProject: ProjectData = response.data.project;
       setProjectsData(prev => [newProject, ...prev]);
-      navigate(`/chat/${newProject.id}`);
+      navigate(`/chat/${newProject.latest_conversation_id}?projectId=${newProject.id}`);
     } catch (err) {
       console.error('Failed to create project', err);
     } finally {

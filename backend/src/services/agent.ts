@@ -1,21 +1,25 @@
-import { llmService } from '../core/container';
+import { llmService, dbService as db } from '../core/container';
 import * as path from 'path';
 import * as fs from 'fs/promises';
 import * as os from 'os';
 import { VibeManager } from '../core/vibeManager';
 import { getTools, executeTool } from '../core/tools';
-import { loadDeckHtmlForConversation, saveDeckHtmlForConversation } from './projectDeck';
+import { loadDeckHtmlForProject, saveDeckHtmlForProject } from './projectDeck';
 
 const createConversationVibeManager = async (conversationId: string) => {
-    const { html } = await loadDeckHtmlForConversation(conversationId);
+    const res = await db.query('SELECT project_id FROM conversations WHERE id = $1', [conversationId]);
+    const projectId = res.rows[0]?.project_id;
+    if (!projectId) throw new Error("Project ID not found for conversation");
+
+    const { html } = await loadDeckHtmlForProject(projectId);
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'vibe-agent-'));
-    const tempFilePath = path.join(tempDir, `${conversationId}.html`);
+    const tempFilePath = path.join(tempDir, `${projectId}.html`);
     await fs.writeFile(tempFilePath, html, { encoding: 'utf-8' });
     const vibeManager = await VibeManager.create(tempFilePath);
 
     const persist = async () => {
         const updatedHtml = await fs.readFile(tempFilePath, { encoding: 'utf-8' });
-        await saveDeckHtmlForConversation(conversationId, updatedHtml);
+        await saveDeckHtmlForProject(projectId, updatedHtml);
     };
 
     const cleanup = async () => {

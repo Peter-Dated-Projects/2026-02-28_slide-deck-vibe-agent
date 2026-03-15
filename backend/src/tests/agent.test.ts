@@ -7,7 +7,21 @@ jest.mock('../core/container', () => ({
             content: [{ type: 'text', text: 'Hello!' }],
             stop_reason: 'end_turn'
         })
+    },
+    dbService: {
+        query: jest.fn().mockResolvedValue({
+            rows: [{ project_id: '00000000-0000-0000-0000-000000000001' }]
+        })
     }
+}));
+
+jest.mock('../services/projectDeck', () => ({
+    loadDeckHtmlForProject: jest.fn().mockResolvedValue({
+        html: '<html><body><section class="slide"></section></body></html>',
+        s3Key: 'test/key.html',
+        cacheHit: false
+    }),
+    saveDeckHtmlForProject: jest.fn().mockResolvedValue('test/key.html')
 }));
 
 describe('Agent Services', () => {

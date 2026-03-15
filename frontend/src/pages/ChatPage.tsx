@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import api, { getAccessToken } from "../api";
 import { SlideRenderer, type SlideData } from "../components/SlideRenderer";
 import { ChatMessage, type ChatMessageData } from "../components/chat/ChatMessage";
-import { Send, Loader2, Presentation, Trash2, CreditCard, X, Home, Pencil } from "lucide-react";
+import { Send, Loader2, Presentation, Trash2, CreditCard, X, Home, Pencil, Plus } from "lucide-react";
 import { usePersistentWidth } from "../hooks/usePersistentWidth";
 
 // ─────────────────────────────────────────────────────
@@ -63,6 +63,8 @@ function parseStreamSnapshot(snapshot: string) {
 
 const ChatPage: React.FC = () => {
   const { conversationId } = useParams<{ conversationId?: string }>();
+  const [searchParams] = useSearchParams();
+  const projectId = searchParams.get('projectId');
   const navigate = useNavigate();
   const { user, logout } = useAuth();
 
@@ -150,7 +152,7 @@ const ChatPage: React.FC = () => {
     setHistoryLoading(true);
     Promise.all([
       api.get(`/conversations/${conversationId}/messages`),
-      fetchPresentation(conversationId),
+      projectId ? fetchPresentation(projectId) : Promise.resolve(),
     ])
       .then(([msgRes]) => {
         const hydratedMessages: ChatMessageData[] = (msgRes.data.messages ?? []).map(
@@ -182,7 +184,7 @@ const ChatPage: React.FC = () => {
       .finally(() => {
         setHistoryLoading(false);
       });
-  }, [conversationId]);
+  }, [conversationId, projectId]);
 
   // ─────────────────────────────────────────────────────
   // Debounced title save
@@ -280,6 +282,7 @@ const ChatPage: React.FC = () => {
     try {
       const payload: Record<string, string> = { message: userText };
       if (conversationId) payload.conversationId = conversationId;
+      if (projectId) payload.projectId = projectId;
 
       const token = getAccessToken();
       const response = await fetch(`${import.meta.env.VITE_API_URL}/chat/stream`, {
@@ -310,9 +313,8 @@ const ChatPage: React.FC = () => {
       let toolCallsCache: any[] = [];
       let toolResultsCache: any[] = [];
       const requestPresentationRefresh = () => {
-        const targetConversationId = doneConvId ?? conversationId;
-        if (targetConversationId) {
-          fetchPresentation(targetConversationId);
+        if (projectId) {
+          fetchPresentation(projectId);
         }
       };
 
@@ -484,11 +486,11 @@ const ChatPage: React.FC = () => {
 
       // Navigate to conversation URL on first message
       if (!conversationId && doneConvId) {
-        navigate(`/chat/${doneConvId}`, { replace: true });
+        navigate(`/chat/${doneConvId}${projectId ? `?projectId=${projectId}` : ''}`, { replace: true });
       }
 
       // Refetch slides
-      if (doneConvId) fetchPresentation(doneConvId);
+      if (projectId) fetchPresentation(projectId);
     } catch (error: any) {
       console.error("Chat error:", error);
       const thinkingElapsed = Math.floor((Date.now() - thinkingStartedAt) / 1000);
@@ -559,7 +561,7 @@ const ChatPage: React.FC = () => {
             className="flex-shrink-0 w-8 h-8 rounded-lg bg-primary/20 flex items-center justify-center border border-primary/30 hover:opacity-75 transition-opacity cursor-pointer"
             title="Back to Dashboard"
           >
-            <Presentation className="w-4 h-4 text-primary" />
+            <Home className="w-4 h-4 text-primary" />
           </button>
 
           {/* Editable deck title */}
@@ -587,13 +589,16 @@ const ChatPage: React.FC = () => {
             )}
           </div>
 
-          {/* Home button */}
+          {/* New Chat button */}
           <button
-            onClick={() => navigate("/")}
+            onClick={() => {
+              setMessages([]);
+              navigate(projectId ? `/chat?projectId=${projectId}` : `/chat`, { replace: true });
+            }}
             className="text-muted-foreground hover:text-foreground transition-colors p-2 rounded-lg hover:bg-muted cursor-pointer"
-            title="Back to Dashboard"
+            title="New Chat"
           >
-            <Home className="w-4 h-4" />
+            <Plus className="w-4 h-4" />
           </button>
         </div>
 
