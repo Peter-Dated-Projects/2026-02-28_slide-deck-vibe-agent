@@ -12,6 +12,32 @@ import { config } from './src/config';
 
 const app = express();
 
+const getTitleFromFirstRequest = (message: string) => message.trim().slice(0, 150);
+
+const updateTitleFromFirstRequestIfNeeded = async (
+    conversationId: string,
+    message: string
+) => {
+    const existingMessageResult = await db.query(
+        'SELECT 1 FROM messages WHERE conversation_id = $1 LIMIT 1',
+        [conversationId]
+    );
+
+    if (existingMessageResult.rows.length > 0) {
+        return;
+    }
+
+    const nextTitle = getTitleFromFirstRequest(message);
+    if (!nextTitle) {
+        return;
+    }
+
+    await db.query(
+        'UPDATE conversations SET title = $1, updated_at = NOW() WHERE id = $2',
+        [nextTitle, conversationId]
+    );
+};
+
 const touchConversationActivity = async (conversationId: string) => {
     await db.query(
         `
@@ -54,6 +80,7 @@ app.delete('/api/user/me', requireAuth, userController.deleteUser);
 // Project Routes
 app.get('/api/projects', requireAuth, projectController.getProjects);
 app.post('/api/projects', requireAuth, projectController.createProject);
+app.post('/api/projects/:projectId/preview', requireAuth, projectController.generateProjectPreview);
 app.get('/api/conversations', requireAuth, async (req: AuthRequest, res: express.Response): Promise<void> => {
     try {
         const userId = req.user!.userId;
@@ -128,7 +155,7 @@ app.post('/api/chat', requireAuth, async (req: AuthRequest, res: express.Respons
             }
             const convResult = await db.query(
                 'INSERT INTO conversations (user_id, project_id, title) VALUES ($1, $2, $3) RETURNING id',
-                [userId, incomingProjectId, message.substring(0, 50) + '...']
+                [userId, incomingProjectId, getTitleFromFirstRequest(message)]
             );
             currentConvId = convResult.rows[0].id;
             
@@ -138,6 +165,8 @@ app.post('/api/chat', requireAuth, async (req: AuthRequest, res: express.Respons
                 [currentConvId, incomingProjectId]
             );
         }
+
+        await updateTitleFromFirstRequestIfNeeded(currentConvId, message);
 
         // Save user message
         await db.query(
@@ -237,7 +266,7 @@ app.post('/api/chat/stream', requireAuth, async (req: AuthRequest, res: express.
             }
             const convResult = await db.query(
                 'INSERT INTO conversations (user_id, project_id, title) VALUES ($1, $2, $3) RETURNING id',
-                [userId, incomingProjectId, message.substring(0, 50) + '...']
+                [userId, incomingProjectId, getTitleFromFirstRequest(message)]
             );
             currentConvId = convResult.rows[0].id;
             
@@ -247,6 +276,8 @@ app.post('/api/chat/stream', requireAuth, async (req: AuthRequest, res: express.
                 [currentConvId, incomingProjectId]
             );
         }
+
+        await updateTitleFromFirstRequestIfNeeded(currentConvId, message);
 
         const conversationMetaResult = await db.query(
             'SELECT title, project_id FROM conversations WHERE id = $1',

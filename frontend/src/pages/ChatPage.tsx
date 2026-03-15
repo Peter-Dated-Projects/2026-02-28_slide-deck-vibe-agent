@@ -200,6 +200,7 @@ const ChatPage: React.FC = () => {
   );
   const currentConversationKey = getConversationRequestKey(conversationId, projectId);
   const currentConversationKeyRef = useRef(currentConversationKey);
+  const hasTriggeredExitPreviewRef = useRef(false);
   useEffect(() => {
     currentConversationKeyRef.current = currentConversationKey;
   }, [currentConversationKey]);
@@ -230,6 +231,50 @@ const ChatPage: React.FC = () => {
   useEffect(() => {
     void loadConversationHistory();
   }, [loadConversationHistory]);
+
+  useEffect(() => {
+    hasTriggeredExitPreviewRef.current = false;
+
+    if (!projectId) {
+      return;
+    }
+
+    const triggerPreviewGeneration = () => {
+      if (hasTriggeredExitPreviewRef.current) {
+        return;
+      }
+
+      hasTriggeredExitPreviewRef.current = true;
+      const token = getAccessToken();
+      if (!token) {
+        return;
+      }
+
+      fetch(`${import.meta.env.VITE_API_URL}/projects/${projectId}/preview`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        credentials: "include",
+        keepalive: true,
+        body: JSON.stringify({ reason: "page-exit" }),
+      }).catch((error) => {
+        console.error("Failed to generate project preview on exit:", error);
+      });
+    };
+
+    const handleBeforeUnload = () => {
+      triggerPreviewGeneration();
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+
+    return () => {
+      triggerPreviewGeneration();
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+    };
+  }, [projectId]);
 
   const handleResizeMouseDown = (e: React.MouseEvent) => {
     isResizing.current = true;

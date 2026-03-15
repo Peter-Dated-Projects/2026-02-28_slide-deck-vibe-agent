@@ -1,6 +1,6 @@
 import type { Request, Response } from 'express';
-import { dbService as db } from '../core/container';
-import { ensureDeckExistsForProject } from '../services/projectDeck';
+import { dbService as db, storageService } from '../core/container';
+import { ensureDeckExistsForProject, generatePreviewForProject } from '../services/projectDeck';
 
 export const getProjects = async (req: Request, res: Response): Promise<void> => {
     try {
@@ -21,6 +21,7 @@ export const getProjects = async (req: Request, res: Response): Promise<void> =>
                 c.title as name, 
                 p.created_at as "createdAt", 
                 p.updated_at as "updatedAt",
+                p.theme_data ->> 'preview_url' as preview_url,
                 p.theme_data,
                 p.conversation_ids
             FROM projects p
@@ -31,13 +32,22 @@ export const getProjects = async (req: Request, res: Response): Promise<void> =>
 
         const result = await db.query(query, [userId]);
 
-        const projects = result.rows.map((row: any) => {
+        const projects = await Promise.all(result.rows.map(async (row: any) => {
             let theme = 'Professional';
-            let thumbnailUrl = undefined;
+            let thumbnailUrl: string | undefined;
+
+            if (row.preview_url) {
+                try {
+                    thumbnailUrl = await storageService.getFileUrl(row.preview_url);
+                } catch (error) {
+                    console.error(`[projectController] Failed to sign preview URL for project ${row.id}:`, error);
+                }
+            }
+
             if (row.theme_data) {
                 const data = typeof row.theme_data === 'string' ? JSON.parse(row.theme_data) : row.theme_data;
                 theme = data.theme || 'Professional';
-                thumbnailUrl = data.preview_url;
+                thumbnailUrl = thumbnailUrl || data.preview_url;
             }
             
             // Just use the latest conversation ID for the routing link instead of the first
@@ -52,7 +62,7 @@ export const getProjects = async (req: Request, res: Response): Promise<void> =>
                 thumbnailUrl,
                 latest_conversation_id: latestConversationId
             };
-        });
+        }));
 
         res.json({ projects });
     } catch (error) {
@@ -108,6 +118,40 @@ export const createProject = async (req: Request, res: Response): Promise<void> 
         });
     } catch (error) {
         console.error('Error creating project:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+};
+
+export const generateProjectPreview = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const userId = (req as any).user?.userId;
+        const rawProjectId = req.params.projectId;
+        const projectId = Array.isArray(rawProjectId) ? rawProjectId[0] : rawProjectId;
+
+        if (!userId) {
+            res.status(401).json({ error: 'Unauthorized' });
+            return;
+        }
+
+        if (!projectId) {
+            res.status(400).json({ error: 'Project ID is required' });
+            return;
+        }
+
+        const ownerCheck = await db.query(
+            'SELECT 1 FROM conversations WHERE project_id = $1 AND user_id = $2 LIMIT 1',
+            [projectId, userId]
+        );
+
+        if (ownerCheck.rows.length === 0) {
+            res.status(404).json({ error: 'Project not found' });
+            return;
+        }
+
+        await generatePreviewForProject(projectId, userId);
+        res.status(202).json({ success: true });
+    } catch (error) {
+        console.error('Error generating project preview:', error);
         res.status(500).json({ error: 'Internal server error' });
     }
 };

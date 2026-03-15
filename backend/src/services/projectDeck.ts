@@ -1,9 +1,16 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import { chromium, type Page } from 'playwright-core';
+import sharp from 'sharp';
 import { cacheService, dbService as db, storageService } from '../core/container';
 import { config } from '../config';
 
 const DECK_CACHE_PREFIX = 'deck:html:';
+const PREVIEW_VIEWPORT = { width: 1920, height: 1080 };
+const PREVIEW_OUTPUT = { width: 1280, height: 720 };
+const PREVIEW_JPEG_QUALITY = 80;
+const PREVIEW_ANIMATION_MAX_WAIT_MS = 5000;
+const PREVIEW_ANIMATION_POLL_MS = 50;
 
 const getCacheKey = (projectId: string) => `${DECK_CACHE_PREFIX}${projectId}`;
 
@@ -30,6 +37,107 @@ const getProjectOwner = async (projectId: string): Promise<string> => {
         throw new Error(`Project owner for ${projectId} not found`);
     }
     return userId;
+};
+
+const getPreviewKey = (userId: string, projectId: string): string => `users/${userId}/previews/${projectId}.jpg`;
+
+const waitForVisualStability = async (page: Page): Promise<void> => {
+    // Let initial style/layout updates flush before we inspect animation state.
+    await page.waitForTimeout(PREVIEW_ANIMATION_POLL_MS * 2);
+
+    const startedAt = Date.now();
+    let hasActiveAnimations = true;
+
+    while (Date.now() - startedAt < PREVIEW_ANIMATION_MAX_WAIT_MS) {
+        const activeAnimationCount = await page.evaluate(() => {
+            const globalObj = globalThis as any;
+            const doc = globalObj.document;
+
+            if (!doc || typeof doc.getAnimations !== 'function') {
+                return 0;
+            }
+
+            return doc
+                .getAnimations({ subtree: true })
+                .filter((animation: any) => animation.playState === 'running' || animation.playState === 'pending')
+                .length;
+        });
+
+        hasActiveAnimations = activeAnimationCount > 0;
+        if (!hasActiveAnimations) {
+            break;
+        }
+
+        await page.waitForTimeout(PREVIEW_ANIMATION_POLL_MS);
+    }
+
+    if (hasActiveAnimations) {
+        console.warn('[projectDeck] Preview capture timed out waiting for animations/transitions to settle.');
+    }
+};
+
+const renderPreviewJpeg = async (html: string): Promise<Buffer> => {
+    const browser = await chromium.launch({ headless: true });
+
+    try {
+        const context = await browser.newContext({ viewport: PREVIEW_VIEWPORT });
+        const page = await context.newPage();
+
+        await page.setContent(html, { waitUntil: 'networkidle' });
+        await waitForVisualStability(page);
+        const png = await page.screenshot({ type: 'png', fullPage: false });
+
+        return await sharp(png)
+            .resize(PREVIEW_OUTPUT.width, PREVIEW_OUTPUT.height, {
+                fit: 'cover',
+                position: 'centre'
+            })
+            .jpeg({ quality: PREVIEW_JPEG_QUALITY, mozjpeg: true })
+            .toBuffer();
+    } finally {
+        await browser.close();
+    }
+};
+
+const refreshPreviewForProject = async (projectId: string, userId: string, html: string): Promise<void> => {
+    try {
+        const previewKey = getPreviewKey(userId, projectId);
+        const jpeg = await renderPreviewJpeg(html);
+
+        await storageService.uploadFile(previewKey, jpeg, 'image/jpeg');
+        await db.query(
+            `
+                UPDATE projects
+                SET theme_data = COALESCE(theme_data, '{}'::jsonb) || jsonb_build_object('preview_url', to_jsonb($2::text))
+                WHERE id = $1
+            `,
+            [projectId, previewKey]
+        );
+
+        try {
+            await db.query(
+                'UPDATE projects SET preview_url = $2 WHERE id = $1',
+                [projectId, previewKey]
+            );
+        } catch (error: any) {
+            if (error?.code !== '42703') {
+                throw error;
+            }
+        }
+    } catch (error) {
+        console.error(`[projectDeck] Failed to refresh preview for project ${projectId}:`, error);
+    }
+};
+
+export const generatePreviewForProject = async (projectId: string, existingUserId?: string): Promise<string> => {
+    const userId = existingUserId || await getProjectOwner(projectId);
+    const s3Key = await ensureDeckExistsForProject(projectId, userId);
+    const cacheKey = getCacheKey(projectId);
+    const cachedHtml = await cacheService.get(cacheKey);
+
+    const html = cachedHtml ?? await storageService.getFileContent(s3Key);
+    await refreshPreviewForProject(projectId, userId, html);
+    return getPreviewKey(userId, projectId);
 };
 
 export const ensureDeckExistsForProject = async (projectId: string, existingUserId?: string): Promise<string> => {

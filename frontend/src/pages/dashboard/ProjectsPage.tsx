@@ -1,8 +1,8 @@
-import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { ProjectCard, ProjectData } from '../../components/dashboard/ProjectCard';
-import { ChevronLeft, ChevronRight, Plus, Loader2 } from 'lucide-react';
-import api from '../../api';
+import React, { useState, useMemo, useRef, useEffect, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
+import { ProjectCard, ProjectData } from "../../components/dashboard/ProjectCard";
+import { ChevronLeft, ChevronRight, Plus, Loader2 } from "lucide-react";
+import api from "../../api";
 
 export default function ProjectsPage() {
   const navigate = useNavigate();
@@ -13,7 +13,7 @@ export default function ProjectsPage() {
   // Setup ResizeObserver to calculate columns dynamically
   useEffect(() => {
     if (!containerRef.current) return;
-    
+
     const observer = new ResizeObserver((entries) => {
       for (const entry of entries) {
         const width = entry.contentRect.width;
@@ -32,34 +32,144 @@ export default function ProjectsPage() {
 
   const [projectsData, setProjectsData] = useState<ProjectData[]>([]);
   const [loading, setLoading] = useState(true);
+  const inFlightPreviewRequestsRef = useRef<Set<string>>(new Set());
+  const attemptedPreviewFallbackRef = useRef<Set<string>>(new Set());
+  const refreshBurstIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const refreshBurstTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const fetchProjects = useCallback(async () => {
+    const response = await api.get("/projects");
+    const projects: ProjectData[] = response.data.projects || [];
+    setProjectsData(projects);
+
+    // Reset fallback markers once a valid thumbnail arrives.
+    for (const project of projects) {
+      if (project.thumbnailUrl) {
+        attemptedPreviewFallbackRef.current.delete(project.id);
+      }
+    }
+  }, []);
+
+  const requestPreviewFallback = useCallback(
+    async (projectId: string) => {
+      if (inFlightPreviewRequestsRef.current.has(projectId)) {
+        return;
+      }
+
+      if (attemptedPreviewFallbackRef.current.has(projectId)) {
+        return;
+      }
+
+      attemptedPreviewFallbackRef.current.add(projectId);
+      inFlightPreviewRequestsRef.current.add(projectId);
+
+      try {
+        await api.post(`/projects/${projectId}/preview`);
+        await fetchProjects();
+      } catch (error) {
+        console.error(`Failed to generate preview for project ${projectId}`, error);
+      } finally {
+        inFlightPreviewRequestsRef.current.delete(projectId);
+      }
+    },
+    [fetchProjects],
+  );
 
   useEffect(() => {
-    const fetchProjects = async () => {
+    const loadProjects = async () => {
       try {
-        const response = await api.get('/projects');
-        setProjectsData(response.data.projects || []);
+        await fetchProjects();
       } catch (err) {
-        console.error('Failed to fetch projects', err);
+        console.error("Failed to fetch projects", err);
       } finally {
         setLoading(false);
       }
     };
-    fetchProjects();
-  }, []);
+    void loadProjects();
+  }, [fetchProjects]);
+
+  useEffect(() => {
+    if (loading) return;
+
+    const clearRefreshBurst = () => {
+      if (refreshBurstIntervalRef.current) {
+        clearInterval(refreshBurstIntervalRef.current);
+        refreshBurstIntervalRef.current = null;
+      }
+
+      if (refreshBurstTimeoutRef.current) {
+        clearTimeout(refreshBurstTimeoutRef.current);
+        refreshBurstTimeoutRef.current = null;
+      }
+    };
+
+    const refreshProjectsSilently = async () => {
+      try {
+        await fetchProjects();
+      } catch (error) {
+        console.error("Failed to refresh projects", error);
+      }
+    };
+
+    const startRefreshBurst = () => {
+      clearRefreshBurst();
+      void refreshProjectsSilently();
+
+      refreshBurstIntervalRef.current = setInterval(() => {
+        void refreshProjectsSilently();
+      }, 2500);
+
+      refreshBurstTimeoutRef.current = setTimeout(() => {
+        clearRefreshBurst();
+      }, 10000);
+    };
+
+    const handleFocus = () => {
+      startRefreshBurst();
+    };
+
+    const handlePageShow = () => {
+      startRefreshBurst();
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        startRefreshBurst();
+      } else {
+        clearRefreshBurst();
+      }
+    };
+
+    startRefreshBurst();
+    window.addEventListener("focus", handleFocus);
+    window.addEventListener("pageshow", handlePageShow);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      clearRefreshBurst();
+      window.removeEventListener("focus", handleFocus);
+      window.removeEventListener("pageshow", handlePageShow);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [fetchProjects, loading]);
 
   // Derived state
   const recentProjects = useMemo(() => {
     const threeDaysAgo = new Date();
     threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
-    
+
     return projectsData
-      .filter(p => new Date(p.updatedAt) >= threeDaysAgo)
+      .filter((p) => new Date(p.updatedAt) >= threeDaysAgo)
       .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
       .slice(0, 5); // Keep top 5 most recent max
   }, [projectsData]);
 
   const sortedAllProjects = useMemo(() => {
-    return [...projectsData].sort((a, b) => new Date(b.createdAt || b.updatedAt).getTime() - new Date(a.createdAt || a.updatedAt).getTime());
+    return [...projectsData].sort(
+      (a, b) =>
+        new Date(b.createdAt || b.updatedAt).getTime() -
+        new Date(a.createdAt || a.updatedAt).getTime(),
+    );
   }, [projectsData]);
 
   const totalPages = Math.ceil(sortedAllProjects.length / itemsPerPage);
@@ -88,12 +198,12 @@ export default function ProjectsPage() {
     if (creating) return;
     setCreating(true);
     try {
-      const response = await api.post('/projects');
+      const response = await api.post("/projects");
       const newProject: ProjectData = response.data.project;
-      setProjectsData(prev => [newProject, ...prev]);
+      setProjectsData((prev) => [newProject, ...prev]);
       navigate(`/chat/${newProject.latest_conversation_id}?projectId=${newProject.id}`);
     } catch (err) {
-      console.error('Failed to create project', err);
+      console.error("Failed to create project", err);
     } finally {
       setCreating(false);
     }
@@ -111,8 +221,12 @@ export default function ProjectsPage() {
     <div className="max-w-7xl mx-auto pb-12">
       <div className="flex items-center justify-between mb-8">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-foreground md:text-3xl">Projects</h1>
-          <p className="text-sm text-muted-foreground mt-1">Manage your presentations and slide decks.</p>
+          <h1 className="text-2xl font-bold tracking-tight text-foreground md:text-3xl">
+            Projects
+          </h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            Manage your presentations and slide decks.
+          </p>
         </div>
         <button
           onClick={handleCreateProject}
@@ -129,8 +243,13 @@ export default function ProjectsPage() {
           <h2 className="text-lg font-semibold text-foreground mb-4">Recents</h2>
           <div className="relative">
             <div className="flex overflow-x-auto gap-6 pb-4 snap-x [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
-              {recentProjects.map(project => (
-                <ProjectCard key={project.id} project={project} className="w-[300px] sm:w-[320px] max-h-[250px] shrink-0 snap-start" />
+              {recentProjects.map((project) => (
+                <ProjectCard
+                  key={project.id}
+                  project={project}
+                  className="w-[300px] sm:w-[320px] max-h-[250px] shrink-0 snap-start"
+                  onThumbnailUnavailable={requestPreviewFallback}
+                />
               ))}
               {/* Spacer empty div to allow scrolling past the fade overlay */}
               <div className="w-4 shrink-0" />
@@ -158,16 +277,27 @@ export default function ProjectsPage() {
               disabled={creating}
               className="cursor-pointer bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 inline-flex items-center justify-center gap-1.5 rounded-md transition-colors disabled:opacity-50 disabled:pointer-events-none"
             >
-              {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+              {creating ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Plus className="h-4 w-4" />
+              )}
               <span>Create your first project</span>
             </button>
           </div>
         ) : (
-          <div ref={containerRef} className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-6 mb-8 auto-rows-max">
-            {paginatedProjects.map(project => (
+          <div
+            ref={containerRef}
+            className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-6 mb-8 auto-rows-max"
+          >
+            {paginatedProjects.map((project) => (
               <div key={project.id} className="min-w-0 flex items-stretch">
                 <div className="w-full h-full flex items-stretch justify-start">
-                  <ProjectCard project={project} className="w-full" />
+                  <ProjectCard
+                    project={project}
+                    className="w-full"
+                    onThumbnailUnavailable={requestPreviewFallback}
+                  />
                 </div>
               </div>
             ))}
@@ -189,8 +319,8 @@ export default function ProjectsPage() {
                 const pageNum = idx + 1;
                 // Simple logic to show current, first, last, and slightly around current
                 if (
-                  pageNum === 1 || 
-                  pageNum === totalPages || 
+                  pageNum === 1 ||
+                  pageNum === totalPages ||
                   (pageNum >= currentPage - 1 && pageNum <= currentPage + 1)
                 ) {
                   return (
@@ -199,20 +329,24 @@ export default function ProjectsPage() {
                       onClick={() => handlePageChange(pageNum)}
                       className={`h-9 w-9 inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors ${
                         currentPage === pageNum
-                          ? 'bg-primary text-primary-foreground'
-                          : 'border border-transparent bg-transparent hover:bg-muted text-foreground'
+                          ? "bg-primary text-primary-foreground"
+                          : "border border-transparent bg-transparent hover:bg-muted text-foreground"
                       }`}
                     >
                       {pageNum}
                     </button>
                   );
                 }
-                
+
                 // Render ellipses
                 if (pageNum === currentPage - 2 || pageNum === currentPage + 2) {
-                  return <span key={pageNum} className="px-1 text-muted-foreground">...</span>;
+                  return (
+                    <span key={pageNum} className="px-1 text-muted-foreground">
+                      ...
+                    </span>
+                  );
                 }
-                
+
                 return null;
               })}
             </div>

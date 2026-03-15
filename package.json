@@ -17,5 +17,9 @@
     "manage:db": "cd backend && cross-env NODE_ENV=local bun run manage:db --",
     "test": "cd backend && bun test",
     "start": "concurrently \"docker compose --env-file .env.local up\" \"cd backend && cross-env NODE_ENV=local bun run dev\" \"cd frontend && bun run preview\""
+  },
+  "dependencies": {
+    "playwright-core": "^1.58.2",
+    "sharp": "^0.34.5"
   }
 }
