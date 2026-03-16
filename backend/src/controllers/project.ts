@@ -18,7 +18,7 @@ export const getProjects = async (req: Request, res: Response): Promise<void> =>
         const query = `
             SELECT 
                 p.id, 
-                c.title as name, 
+                p.theme_data ->> 'name' as project_name,
                 p.created_at as "createdAt", 
                 p.updated_at as "updatedAt",
                 p.theme_data ->> 'preview_url' as preview_url,
@@ -35,6 +35,22 @@ export const getProjects = async (req: Request, res: Response): Promise<void> =>
         const projects = await Promise.all(result.rows.map(async (row: any) => {
             let theme = 'Professional';
             let thumbnailUrl: string | undefined;
+            let resolvedName = typeof row.project_name === 'string' ? row.project_name.trim() : '';
+
+            if (!resolvedName) {
+                resolvedName = `Project ${String(row.id).slice(0, 8)}`;
+            }
+
+            if (!row.project_name) {
+                await db.query(
+                    `
+                        UPDATE projects
+                        SET theme_data = COALESCE(theme_data, '{}'::jsonb) || jsonb_build_object('name', to_jsonb($2::text))
+                        WHERE id = $1
+                    `,
+                    [row.id, resolvedName]
+                );
+            }
 
             if (row.preview_url) {
                 try {
@@ -55,7 +71,7 @@ export const getProjects = async (req: Request, res: Response): Promise<void> =>
             
             return {
                 id: row.id,
-                name: row.name,
+                name: resolvedName,
                 createdAt: row.createdAt,
                 updatedAt: row.updatedAt,
                 theme,
@@ -80,6 +96,7 @@ export const createProject = async (req: Request, res: Response): Promise<void> 
         }
 
         const defaultTitle = 'New Chat';
+        const defaultProjectName = 'Untitled Project';
 
         // 1. Create project first (we need to generate its UUID upfront, or return it)
         // Wait, project needs `minio_object_key`. We'll just generate the DB id first.
@@ -98,8 +115,14 @@ export const createProject = async (req: Request, res: Response): Promise<void> 
         
         // 3. Update project with the conversation ID
         await db.query(
-             'UPDATE projects SET conversation_ids = ARRAY[$1]::UUID[] WHERE id = $2',
-             [conversation.id, projectId]
+               `
+                  UPDATE projects
+                  SET
+                    conversation_ids = ARRAY[$1]::UUID[],
+                    theme_data = COALESCE(theme_data, '{}'::jsonb) || jsonb_build_object('name', to_jsonb($3::text))
+                  WHERE id = $2
+               `,
+               [conversation.id, projectId, defaultProjectName]
         );
 
         // 4. Ensure the project deck is seeded from frontend/public/default.html in S3 and cached.
@@ -108,7 +131,7 @@ export const createProject = async (req: Request, res: Response): Promise<void> 
         res.status(201).json({
             project: {
                 id: projectId,
-                name: conversation.title,
+                name: defaultProjectName,
                 createdAt: conversation.created_at,
                 updatedAt: conversation.updated_at,
                 theme: 'Professional',
@@ -152,6 +175,62 @@ export const generateProjectPreview = async (req: Request, res: Response): Promi
         res.status(202).json({ success: true });
     } catch (error) {
         console.error('Error generating project preview:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+};
+
+export const updateProjectName = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const userId = (req as any).user?.userId;
+        const rawProjectId = req.params.projectId;
+        const projectId = Array.isArray(rawProjectId) ? rawProjectId[0] : rawProjectId;
+        const { name } = req.body;
+
+        if (!userId) {
+            res.status(401).json({ error: 'Unauthorized' });
+            return;
+        }
+
+        if (!projectId) {
+            res.status(400).json({ error: 'Project ID is required' });
+            return;
+        }
+
+        if (typeof name !== 'string') {
+            res.status(400).json({ error: 'name is required' });
+            return;
+        }
+
+        const trimmedName = name.trim();
+        if (!trimmedName) {
+            res.status(400).json({ error: 'name is required' });
+            return;
+        }
+
+        const ownership = await db.query(
+            'SELECT 1 FROM conversations WHERE project_id = $1 AND user_id = $2 LIMIT 1',
+            [projectId, userId]
+        );
+
+        if (ownership.rows.length === 0) {
+            res.status(404).json({ error: 'Project not found' });
+            return;
+        }
+
+        await db.query(
+            `
+                UPDATE projects
+                SET
+                    theme_data = COALESCE(theme_data, '{}'::jsonb) || jsonb_build_object('name', to_jsonb($2::text)),
+                    updated_at = NOW()
+                WHERE id = $1
+            `,
+            [projectId, trimmedName]
+        );
+
+        res.json({ name: trimmedName });
+    } catch (error) {
+        console.error('Error updating project name:', error);
         res.status(500).json({ error: 'Internal server error' });
     }
 };

@@ -80,6 +80,7 @@ app.delete('/api/user/me', requireAuth, userController.deleteUser);
 // Project Routes
 app.get('/api/projects', requireAuth, projectController.getProjects);
 app.post('/api/projects', requireAuth, projectController.createProject);
+app.patch('/api/projects/:projectId/name', requireAuth, projectController.updateProjectName);
 app.post('/api/projects/:projectId/preview', requireAuth, projectController.generateProjectPreview);
 app.get('/api/conversations', requireAuth, async (req: AuthRequest, res: express.Response): Promise<void> => {
     try {
@@ -92,9 +93,11 @@ app.get('/api/conversations', requireAuth, async (req: AuthRequest, res: express
                     c.id,
                     c.project_id AS "projectId",
                     c.title,
+                    COALESCE(p.theme_data ->> 'name', 'Untitled Project') AS "projectName",
                     c.created_at AS "createdAt",
                     c.updated_at AS "updatedAt"
                 FROM conversations c
+                LEFT JOIN projects p ON p.id = c.project_id
                 WHERE c.user_id = $1 AND c.project_id = $2
                 ORDER BY c.updated_at DESC, c.created_at DESC
             `
@@ -103,9 +106,11 @@ app.get('/api/conversations', requireAuth, async (req: AuthRequest, res: express
                     c.id,
                     c.project_id AS "projectId",
                     c.title,
+                    COALESCE(p.theme_data ->> 'name', 'Untitled Project') AS "projectName",
                     c.created_at AS "createdAt",
                     c.updated_at AS "updatedAt"
                 FROM conversations c
+                LEFT JOIN projects p ON p.id = c.project_id
                 WHERE c.user_id = $1
                 ORDER BY c.updated_at DESC, c.created_at DESC
             `;
@@ -121,6 +126,7 @@ app.get('/api/conversations', requireAuth, async (req: AuthRequest, res: express
             id: row.id,
             projectId: row.projectId,
             title: row.title,
+            projectName: row.projectName,
             createdAt: row.createdAt,
             updatedAt: row.updatedAt,
         }));
@@ -280,14 +286,23 @@ app.post('/api/chat/stream', requireAuth, async (req: AuthRequest, res: express.
         await updateTitleFromFirstRequestIfNeeded(currentConvId, message);
 
         const conversationMetaResult = await db.query(
-            'SELECT title, project_id FROM conversations WHERE id = $1',
+            `
+                SELECT
+                    c.title,
+                    c.project_id,
+                    COALESCE(p.theme_data ->> 'name', 'Untitled Project') AS project_name
+                FROM conversations c
+                LEFT JOIN projects p ON p.id = c.project_id
+                WHERE c.id = $1
+            `,
             [currentConvId]
         );
         const conversationMeta = conversationMetaResult.rows[0];
         send('conversation', JSON.stringify({
             conversationId: currentConvId,
             projectId: conversationMeta?.project_id ?? incomingProjectId ?? null,
-            title: conversationMeta?.title ?? 'New Chat'
+            title: conversationMeta?.title ?? 'New Chat',
+            projectName: conversationMeta?.project_name ?? 'Untitled Project'
         }));
 
         // Save user message
@@ -564,7 +579,15 @@ app.get('/api/conversations/:conversationId/messages', requireAuth, async (req: 
 
         // Verify ownership and fetch title
         const convResult = await db.query(
-            'SELECT user_id, title FROM conversations WHERE id = $1',
+            `
+                SELECT
+                    c.user_id,
+                    c.title,
+                    COALESCE(p.theme_data ->> 'name', 'Untitled Project') AS project_name
+                FROM conversations c
+                LEFT JOIN projects p ON p.id = c.project_id
+                WHERE c.id = $1
+            `,
             [conversationId]
         );
         if (convResult.rows.length === 0 || convResult.rows[0].user_id !== userId) {
@@ -605,7 +628,11 @@ app.get('/api/conversations/:conversationId/messages', requireAuth, async (req: 
             };
         });
 
-        res.json({ messages, title: convResult.rows[0].title ?? 'Untitled' });
+        res.json({
+            messages,
+            title: convResult.rows[0].title ?? 'Untitled',
+            projectName: convResult.rows[0].project_name ?? 'Untitled Project'
+        });
     } catch (error) {
         console.error('Error fetching messages:', error);
         res.status(500).json({ error: 'Error fetching conversation messages' });
