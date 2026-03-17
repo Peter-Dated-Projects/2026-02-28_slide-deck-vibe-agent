@@ -1,6 +1,7 @@
 import type { ILLMService } from "../../../core/interfaces/ILLMService";
 import type { IDatabaseService } from "../../../core/interfaces/IDatabaseService";
 import type { IStorageService } from "../../../core/interfaces/IStorageService";
+import { extractToolCallsFromText } from "./toolCallParser";
 
 export class OllamaProvider implements ILLMService {
     private baseUrl: string;
@@ -100,6 +101,8 @@ export class OllamaProvider implements ILLMService {
         const decoder = new TextDecoder();
         let fullText = '';
         let isThinking = false;
+        let accumulatedThinking = '';
+        let toolCallsCollected: any[] = [];
 
         while (true) {
             const { done, value } = await reader.read();
@@ -118,41 +121,68 @@ export class OllamaProvider implements ILLMService {
                             onChunk('<think>');
                             fullText += '<think>';
                             isThinking = true;
+                            accumulatedThinking = '';
                         }
                         onChunk(thinkingToken);
                         fullText += thinkingToken;
+                        accumulatedThinking += thinkingToken;
                     }
 
                     const token: string = json.message?.content ?? '';
                     if (token) {
                         if (isThinking) {
+                            // Thinking block is ending, extract any tool calls from it
+                            const extractedToolCalls = extractToolCallsFromText(accumulatedThinking);
+                            if (extractedToolCalls.length > 0) {
+                                toolCallsCollected.push(...extractedToolCalls);
+                            }
+                            
                             onChunk('</think>');
                             fullText += '</think>';
                             isThinking = false;
+                            accumulatedThinking = '';
                         }
                         onChunk(token);
                         fullText += token;
                     }
+                    
                     // Ollama streaming tool calls (handled similarly to standard content)
                     // Note: Ollama usually returns tool calls in a single non-streamed chunk at the end,
                     // but we handle the structure if it streams it.
                     if (json.message?.tool_calls) {
-                         const tcStr = JSON.stringify({ type: 'tool_calls', tool_calls: json.message.tool_calls });
-                         // emit a special token that the frontend can parse
-                         onChunk(`[TOOL_CALLS]${tcStr}[/TOOL_CALLS]`);
+                         toolCallsCollected.push(...json.message.tool_calls);
                     }
                     
                     if (json.done) {
                         if (isThinking) {
+                            // Extract tool calls from final thinking block
+                            const extractedToolCalls = extractToolCallsFromText(accumulatedThinking);
+                            if (extractedToolCalls.length > 0) {
+                                toolCallsCollected.push(...extractedToolCalls);
+                            }
+                            
                             onChunk('</think>');
                             fullText += '</think>';
                         }
+                        
+                        // Emit all collected tool calls at the end
+                        if (toolCallsCollected.length > 0) {
+                            const tcStr = JSON.stringify({ type: 'tool_calls', tool_calls: toolCallsCollected });
+                            onChunk(`[TOOL_CALLS]${tcStr}[/TOOL_CALLS]`);
+                        }
+                        
                         return fullText;
                     }
                 } catch {
                     // Incomplete JSON chunk — skip
                 }
             }
+        }
+
+        // Final check: emit any collected tool calls
+        if (toolCallsCollected.length > 0) {
+            const tcStr = JSON.stringify({ type: 'tool_calls', tool_calls: toolCallsCollected });
+            onChunk(`[TOOL_CALLS]${tcStr}[/TOOL_CALLS]`);
         }
 
         return fullText;
