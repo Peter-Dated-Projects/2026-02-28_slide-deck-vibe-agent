@@ -28,6 +28,8 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
   className = "",
 }) => {
   const missingThumbnailRequestedRef = React.useRef(false);
+  const [menu, setMenu] = React.useState<{ x: number; y: number } | null>(null);
+  const menuRef = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
     if (!project.thumbnailUrl && onThumbnailUnavailable && !missingThumbnailRequestedRef.current) {
@@ -46,6 +48,43 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
     onThumbnailUnavailable?.(project.id);
   };
 
+  const handleContextMenu = (e: React.MouseEvent) => {
+    if (!onDelete) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setMenu({ x: e.clientX, y: e.clientY });
+  };
+
+  const handleMenuDelete = () => {
+    if (!onDelete) return;
+    onDelete(project.id);
+    setMenu(null);
+  };
+
+  React.useEffect(() => {
+    if (!menu) return;
+
+    const onPointerDown = (e: PointerEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenu(null);
+      }
+    };
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setMenu(null);
+      }
+    };
+
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [menu]);
+
   // Mock format date
   const dateStr = new Date(project.updatedAt).toLocaleDateString(undefined, {
     month: "short",
@@ -55,8 +94,29 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
 
   return (
     <div
+      onContextMenu={handleContextMenu}
       className={`group relative flex flex-col bg-card/60 backdrop-blur-xl border border-border rounded-xl shadow-card hover:shadow-card-hover transition-all duration-200 overflow-hidden min-w-[300px] max-w-[500px] ${className}`}
     >
+      {menu && (
+        <div
+          ref={menuRef}
+          style={{ position: "fixed", top: menu.y, left: menu.x, zIndex: 9999 }}
+          className="min-w-[160px] rounded-lg border border-border bg-popover shadow-lg py-1 text-xs"
+        >
+          <button
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              handleMenuDelete();
+            }}
+            className="flex w-full items-center gap-2 px-3 py-1.5 hover:bg-destructive/10 transition-colors text-destructive"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            Delete project
+          </button>
+        </div>
+      )}
+
       <Link
         to={`/chat/${project.latest_conversation_id}?projectId=${project.id}`}
         className="block flex-1"

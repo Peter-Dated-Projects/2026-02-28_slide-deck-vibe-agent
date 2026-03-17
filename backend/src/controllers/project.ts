@@ -281,3 +281,39 @@ export const updateProjectName = async (req: Request, res: Response): Promise<vo
         res.status(500).json({ error: 'Internal server error' });
     }
 };
+
+export const deleteProject = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const userId = (req as any).user?.userId;
+        const rawProjectId = req.params.projectId;
+        const projectId = Array.isArray(rawProjectId) ? rawProjectId[0] : rawProjectId;
+
+        if (!userId) {
+            res.status(401).json({ error: 'Unauthorized' });
+            return;
+        }
+
+        if (!projectId) {
+            res.status(400).json({ error: 'Project ID is required' });
+            return;
+        }
+
+        const ownership = await db.query(
+            'SELECT 1 FROM conversations WHERE project_id = $1 AND user_id = $2 LIMIT 1',
+            [projectId, userId]
+        );
+
+        if (ownership.rows.length === 0) {
+            res.status(404).json({ error: 'Project not found' });
+            return;
+        }
+
+        await db.query('DELETE FROM projects WHERE id = $1', [projectId]);
+        await invalidateProjectsCache(userId);
+
+        res.status(204).send();
+    } catch (error) {
+        console.error('Error deleting project:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+};
