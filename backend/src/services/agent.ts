@@ -6,6 +6,15 @@ import { VibeManager } from '../core/vibeManager';
 import { getTools, executeTool, type AgentRuntimeState } from '../core/tools';
 import { loadDeckHtmlForProject, saveDeckHtmlForProject } from './projectDeck';
 
+const createInitialWorkflowTasks = (): AgentRuntimeState['tasks'] => [
+    { id: 'discovery-purpose', title: 'Collect slide deck purpose', done: false },
+    { id: 'discovery-audience', title: 'Collect presenter audience', done: false },
+    { id: 'discovery-theme', title: 'Collect preferred theme', done: false },
+    { id: 'discovery-content', title: 'Collect source content for the deck', done: false },
+    { id: 'planning-structure', title: 'Plan slide structure and subtopics from collected content', done: false },
+    { id: 'planning-slide-tasks', title: 'Create per-slide tasks before editing', done: false }
+];
+
 const buildSystemInstructionWithTaskList = (baseInstruction: string, runtimeState: AgentRuntimeState) => {
     if (!runtimeState.tasks.length) {
         return `${baseInstruction}\n\nCurrent task checklist: (none yet)`;
@@ -46,7 +55,7 @@ const createConversationVibeManager = async (conversationId: string) => {
 export const chatWithAgent = async (conversationId: string, messages: any[]) => {
     const { vibeManager, persist, cleanup } = await createConversationVibeManager(conversationId);
     const { tools, systemInstruction } = await getTools(vibeManager);
-    const runtimeState: AgentRuntimeState = { tasks: [] };
+    const runtimeState: AgentRuntimeState = { tasks: createInitialWorkflowTasks() };
 
     let currentMessages = [...messages];
     let turnCount = 0;
@@ -117,7 +126,7 @@ export const chatWithAgentStream = async (
 ): Promise<string> => {
     const { vibeManager, persist, cleanup } = await createConversationVibeManager(conversationId);
     const { tools, systemInstruction } = await getTools(vibeManager);
-    const runtimeState: AgentRuntimeState = { tasks: [] };
+    const runtimeState: AgentRuntimeState = { tasks: createInitialWorkflowTasks() };
 
     try {
         if (!llmService.chatWithAgentStream) {

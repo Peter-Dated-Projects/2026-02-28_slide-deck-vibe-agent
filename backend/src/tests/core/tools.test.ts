@@ -176,7 +176,16 @@ describe('Core Tools - V3 UUID and OCC behavior', () => {
     });
 
     it('set_task_list/read_task_list/update_task_status maintains in-memory checklist', async () => {
-        const runtimeState = { tasks: [] };
+        const runtimeState = {
+            tasks: [
+                { id: 'discovery-purpose', title: 'Collect slide deck purpose', done: false },
+                { id: 'discovery-audience', title: 'Collect presenter audience', done: false },
+                { id: 'discovery-theme', title: 'Collect preferred theme', done: false },
+                { id: 'discovery-content', title: 'Collect source content for the deck', done: false },
+                { id: 'planning-structure', title: 'Plan slide structure and subtopics from collected content', done: false },
+                { id: 'planning-slide-tasks', title: 'Create per-slide tasks before editing', done: false }
+            ]
+        };
 
         const setResult = await executeTool(vibeManager, 'set_task_list', {
             tasks: [
@@ -187,7 +196,8 @@ describe('Core Tools - V3 UUID and OCC behavior', () => {
 
         const setParsed = JSON.parse(setResult);
         expect(setParsed.success).toBe(true);
-        expect(setParsed.tasks).toHaveLength(2);
+        expect(setParsed.tasks.some((task: any) => task.id === 'task-1')).toBe(true);
+        expect(setParsed.tasks.some((task: any) => task.id === 'task-2')).toBe(true);
 
         const updateResult = await executeTool(vibeManager, 'update_task_status', {
             id: 'task-1',
@@ -204,9 +214,69 @@ describe('Core Tools - V3 UUID and OCC behavior', () => {
         const readResult = await executeTool(vibeManager, 'read_task_list', {}, runtimeState);
         const readParsed = JSON.parse(readResult);
         expect(readParsed.success).toBe(true);
-        expect(readParsed.tasks).toEqual([
-            { id: 'task-1', title: 'Inspect slides', done: true },
-            { id: 'task-2', title: 'Apply updates', done: false }
-        ]);
+        expect(readParsed.tasks.some((task: any) => task.id === 'task-1' && task.done)).toBe(true);
+        expect(readParsed.tasks.some((task: any) => task.id === 'task-2' && !task.done)).toBe(true);
+    });
+
+    it('set_task_list does not remove required planning tasks when partial tasks are provided', async () => {
+        const runtimeState = {
+            tasks: [
+                { id: 'discovery-purpose', title: 'Collect slide deck purpose', done: false },
+                { id: 'discovery-audience', title: 'Collect presenter audience', done: false },
+                { id: 'discovery-theme', title: 'Collect preferred theme', done: false },
+                { id: 'discovery-content', title: 'Collect source content for the deck', done: false },
+                { id: 'planning-structure', title: 'Plan slide structure and subtopics from collected content', done: false },
+                { id: 'planning-slide-tasks', title: 'Create per-slide tasks before editing', done: false }
+            ]
+        };
+
+        const setResult = await executeTool(vibeManager, 'set_task_list', {
+            tasks: [
+                { id: 'discovery-purpose', title: 'Collect slide deck purpose', done: true },
+                { id: 'discovery-audience', title: 'Collect presenter audience', done: true },
+                { id: 'discovery-theme', title: 'Collect preferred theme', done: true },
+                { id: 'discovery-content', title: 'Collect source content for the deck', done: true }
+            ]
+        }, runtimeState);
+        const parsed = JSON.parse(setResult);
+
+        expect(parsed.success).toBe(true);
+        expect(parsed.tasks.some((task: any) => task.id === 'planning-structure')).toBe(true);
+        expect(parsed.tasks.some((task: any) => task.id === 'planning-slide-tasks')).toBe(true);
+    });
+
+    it('blocks mutating tools until discovery and planning tasks are complete', async () => {
+        const runtimeState = {
+            tasks: [
+                { id: 'discovery-purpose', title: 'Collect slide deck purpose', done: false },
+                { id: 'discovery-audience', title: 'Collect presenter audience', done: false },
+                { id: 'discovery-theme', title: 'Collect preferred theme', done: false },
+                { id: 'discovery-content', title: 'Collect source content for the deck', done: false },
+                { id: 'planning-structure', title: 'Plan slide structure and subtopics from collected content', done: false },
+                { id: 'planning-slide-tasks', title: 'Create per-slide tasks before editing', done: false }
+            ]
+        };
+
+        const blockedResult = await executeTool(vibeManager, 'write_slide', {
+            slide_id: slide1Id,
+            newHtml: '<section class="slide"><h1>Blocked</h1></section>',
+            hash: 'fake-hash'
+        }, runtimeState);
+        const blockedParsed = JSON.parse(blockedResult);
+        expect(blockedParsed.error).toContain('Discovery phase is incomplete');
+
+        runtimeState.tasks.forEach((task) => {
+            task.done = true;
+        });
+
+        const readResult = await executeTool(vibeManager, 'read_slide', { slide_id: slide1Id });
+        const readParsed = JSON.parse(readResult);
+        const allowedResult = await executeTool(vibeManager, 'write_slide', {
+            slide_id: slide1Id,
+            newHtml: '<section class="slide"><h1>Allowed</h1></section>',
+            hash: readParsed.slides[0].hash
+        }, runtimeState);
+        const allowedParsed = JSON.parse(allowedResult);
+        expect(allowedParsed.mutated).toBe(true);
     });
 });
