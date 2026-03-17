@@ -123,7 +123,7 @@ const ThinkingBlock: React.FC<ThinkingBlockProps> = ({
       : `Agent thought`;
 
   return (
-    <div className="mb-3 w-full">
+    <div className="mb-1 w-full">
       {/* Toggle row */}
       <button
         onClick={() => setExpanded((v) => !v)}
@@ -204,7 +204,7 @@ const ToolBlock: React.FC<ToolBlockProps> = ({ toolCalls, toolResults }) => {
   if (!toolCalls || toolCalls.length === 0) return null;
 
   return (
-    <div className="mb-3 w-full">
+    <div className="mb-1 w-full">
       <button
         onClick={() => setExpanded((v) => !v)}
         className={cn(
@@ -392,9 +392,10 @@ export const ChatMessage: React.FC<ChatMessageProps> = React.memo(({ message }) 
   );
 
   const handleCopy = useCallback(() => {
-    const textToCopy = typeof message.content === "string"
-      ? message.content
-      : message.content.map(b => b.text || b.content || JSON.stringify(b)).join("\n");
+    const textToCopy =
+      typeof message.content === "string"
+        ? message.content
+        : message.content.map((b) => b.text || b.content || JSON.stringify(b)).join("\n");
     navigator.clipboard.writeText(textToCopy).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
@@ -456,9 +457,12 @@ export const ChatMessage: React.FC<ChatMessageProps> = React.memo(({ message }) 
         )}
       >
         {/* Legacy Tool block — only for older assistant messages where content is a string */}
-        {!isUser && typeof message.content === 'string' && message.toolCalls && message.toolCalls.length > 0 && (
-          <ToolBlock toolCalls={message.toolCalls} toolResults={message.toolResults} />
-        )}
+        {!isUser &&
+          typeof message.content === "string" &&
+          message.toolCalls &&
+          message.toolCalls.length > 0 && (
+            <ToolBlock toolCalls={message.toolCalls} toolResults={message.toolResults} />
+          )}
 
         {/* Message content */}
         {message.content && (
@@ -485,36 +489,41 @@ export const ChatMessage: React.FC<ChatMessageProps> = React.memo(({ message }) 
                         key="initial"
                         isThinking={message.isThinking !== false}
                         startTime={message.thinkTimers?.[0]?.startTime || message.thinkingStartedAt}
-                        endTime={message.isThinking === false ? (message.thinkTimers?.[0]?.startTime || message.thinkingStartedAt) : undefined}
-                      />
+                        endTime={
+                          message.isThinking === false
+                            ? message.thinkTimers?.[0]?.startTime || message.thinkingStartedAt
+                            : undefined
+                        }
+                      />,
                     );
                     return elements;
                   }
 
                   let thinkIdx = 0;
                   const renderedElements: React.ReactNode[] = [];
-                  
+
                   if (blocks[0].type !== "think") {
-                      renderedElements.push(
-                        <ThinkingBlock
-                          key="fake-initial-think"
-                          isThinking={false}
-                          startTime={message.thinkingStartedAt}
-                          endTime={message.thinkingStartedAt}
-                        />
-                      );
+                    renderedElements.push(
+                      <ThinkingBlock
+                        key="fake-initial-think"
+                        isThinking={false}
+                        startTime={message.thinkingStartedAt}
+                        endTime={message.thinkingStartedAt}
+                      />,
+                    );
                   }
-                  
+
                   for (let i = 0; i < blocks.length; i++) {
                     const block = blocks[i];
-                    
+
                     if (block.type === "think") {
                       // If the block itself has timers from the new DB schema, use them directly
-                      let timerStartTime = block.startTime || message.thinkTimers?.[thinkIdx]?.startTime;
+                      let timerStartTime =
+                        block.startTime || message.thinkTimers?.[thinkIdx]?.startTime;
                       let timerEndTime = block.endTime || message.thinkTimers?.[thinkIdx]?.endTime;
 
                       if (i === 0 && message.thinkingStartedAt) {
-                          timerStartTime = message.thinkingStartedAt;
+                        timerStartTime = message.thinkingStartedAt;
                       }
 
                       const isLastThinkBlock = i === blocks.length - 1;
@@ -530,45 +539,49 @@ export const ChatMessage: React.FC<ChatMessageProps> = React.memo(({ message }) 
                           endTime={timerEndTime}
                           thinkingStartedAt={message.thinkingStartedAt}
                           thinkingTime={currentlyThinking ? undefined : message.thinkingTime}
-                        />
+                        />,
                       );
                       thinkIdx++;
-                    } 
-                    else if (block.type === "tool_call" || block.type === "tool_result") {
+                    } else if (block.type === "tool_call" || block.type === "tool_result") {
                       // Coalesce adjacent tool_calls and tool_results
                       const groupToolCalls = [];
                       const groupToolResults = [];
                       let j = i;
-                      
-                      while (j < blocks.length && (blocks[j].type === "tool_call" || blocks[j].type === "tool_result")) {
-                         if (blocks[j].type === "tool_call") {
-                             groupToolCalls.push(blocks[j].tool_call);
-                         } else {
-                             groupToolResults.push({ id: blocks[j].id, result: blocks[j].result });
-                         }
-                         j++;
+
+                      while (
+                        j < blocks.length &&
+                        (blocks[j].type === "tool_call" || blocks[j].type === "tool_result")
+                      ) {
+                        if (blocks[j].type === "tool_call") {
+                          groupToolCalls.push(blocks[j].tool_call);
+                        } else {
+                          groupToolResults.push({ id: blocks[j].id, result: blocks[j].result });
+                        }
+                        j++;
                       }
-                      
+
                       if (groupToolCalls.length > 0) {
-                          renderedElements.push(
-                              <ToolBlock 
-                                  key={`toolgroup-${i}`} 
-                                  toolCalls={groupToolCalls} 
-                                  toolResults={groupToolResults.length > 0 ? groupToolResults : undefined} 
-                              />
-                          );
+                        renderedElements.push(
+                          <ToolBlock
+                            key={`toolgroup-${i}`}
+                            toolCalls={groupToolCalls}
+                            toolResults={groupToolResults.length > 0 ? groupToolResults : undefined}
+                          />,
+                        );
                       }
-                      
+
                       // Skip the loop forward by the coalesced amount
-                      i = j - 1; 
-                    } 
-                    else {
+                      i = j - 1;
+                    } else {
                       renderedElements.push(
-                          <MarkdownContent key={`text-${i}`} content={block.content || block.text || ""} />
+                        <MarkdownContent
+                          key={`text-${i}`}
+                          content={block.content || block.text || ""}
+                        />,
                       );
                     }
                   }
-                  
+
                   return renderedElements;
                 })()}
               </div>

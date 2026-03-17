@@ -3,7 +3,7 @@ import * as path from 'path';
 import * as fs from 'fs/promises';
 import * as os from 'os';
 import { VibeManager } from '../core/vibeManager';
-import { getTools, executeTool, type AgentRuntimeState } from '../core/tools';
+import { getTools, executeTool, type AgentRuntimeState, type AgentTaskItem } from '../core/tools';
 import { loadDeckHtmlForProject, saveDeckHtmlForProject } from './projectDeck';
 
 const buildSystemInstructionWithTaskList = (baseInstruction: string, runtimeState: AgentRuntimeState) => {
@@ -16,6 +16,46 @@ const buildSystemInstructionWithTaskList = (baseInstruction: string, runtimeStat
         .join('\n');
 
     return `${baseInstruction}\n\nCurrent task checklist:\n${checklist}`;
+};
+
+const normalizeTaskList = (raw: unknown): AgentTaskItem[] => {
+    if (!Array.isArray(raw)) {
+        return [];
+    }
+
+    const normalized: AgentTaskItem[] = [];
+    const seenIds = new Set<string>();
+
+    for (const entry of raw) {
+        const item = entry as Partial<AgentTaskItem> | null | undefined;
+        const id = String(item?.id || '').trim();
+        const title = String(item?.title || '').trim();
+        if (!id || !title || seenIds.has(id)) {
+            continue;
+        }
+
+        seenIds.add(id);
+        normalized.push({
+            id,
+            title,
+            done: Boolean(item?.done)
+        });
+    }
+
+    return normalized;
+};
+
+const loadConversationTaskList = async (conversationId: string): Promise<AgentTaskItem[]> => {
+    const result = await db.query('SELECT task_list FROM conversations WHERE id = $1', [conversationId]);
+    const rawTasks = result.rows[0]?.task_list;
+    return normalizeTaskList(rawTasks);
+};
+
+const persistConversationTaskList = async (conversationId: string, tasks: AgentTaskItem[]) => {
+    await db.query(
+        'UPDATE conversations SET task_list = $1::jsonb, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
+        [JSON.stringify(tasks), conversationId]
+    );
 };
 
 const createConversationVibeManager = async (conversationId: string) => {
@@ -44,7 +84,7 @@ const createConversationVibeManager = async (conversationId: string) => {
 export const chatWithAgent = async (conversationId: string, messages: any[]) => {
     const { vibeManager, persist, cleanup } = await createConversationVibeManager(conversationId);
     const { tools, systemInstruction } = await getTools(vibeManager);
-    const runtimeState: AgentRuntimeState = { tasks: [] };
+    const runtimeState: AgentRuntimeState = { tasks: await loadConversationTaskList(conversationId) };
 
     let currentMessages = [...messages];
     let turnCount = 0;
@@ -84,6 +124,10 @@ export const chatWithAgent = async (conversationId: string, messages: any[]) => 
                         if (parsed?.mutated) {
                             await persist();
                         }
+
+                        if (parsed?.success && (name === 'create_tasks' || name === 'update_task_status')) {
+                            await persistConversationTaskList(conversationId, runtimeState.tasks);
+                        }
                     } catch {
                         // keep going even if tool output is non-JSON
                     }
@@ -115,7 +159,7 @@ export const chatWithAgentStream = async (
 ): Promise<string> => {
     const { vibeManager, persist, cleanup } = await createConversationVibeManager(conversationId);
     const { tools, systemInstruction } = await getTools(vibeManager);
-    const runtimeState: AgentRuntimeState = { tasks: [] };
+    const runtimeState: AgentRuntimeState = { tasks: await loadConversationTaskList(conversationId) };
 
     try {
         if (!llmService.chatWithAgentStream) {
@@ -189,6 +233,10 @@ export const chatWithAgentStream = async (
                      if (parsed?.mutated) {
                          await persist();
                          shouldRefreshPresentation = true;
+                     }
+
+                     if (parsed?.success && (name === 'create_tasks' || name === 'update_task_status')) {
+                         await persistConversationTaskList(conversationId, runtimeState.tasks);
                      }
                  } catch {
                      // keep going even if tool output is non-JSON
