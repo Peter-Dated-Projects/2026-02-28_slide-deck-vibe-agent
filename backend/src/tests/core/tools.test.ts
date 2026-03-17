@@ -175,29 +175,13 @@ describe('Core Tools - V3 UUID and OCC behavior', () => {
         expect(systemInstruction).toContain('slide_id for all write_slide operations');
     });
 
-    it('set_task_list/read_task_list/update_task_status maintains in-memory checklist', async () => {
+    it('update_task_status updates an existing in-memory checklist task', async () => {
         const runtimeState = {
-            tasks: [
-                { id: 'discovery-purpose', title: 'Collect slide deck purpose', done: false },
-                { id: 'discovery-audience', title: 'Collect presenter audience', done: false },
-                { id: 'discovery-theme', title: 'Collect preferred theme', done: false },
-                { id: 'discovery-content', title: 'Collect source content for the deck', done: false },
-                { id: 'planning-structure', title: 'Plan slide structure and subtopics from collected content', done: false },
-                { id: 'planning-slide-tasks', title: 'Create per-slide tasks before editing', done: false }
-            ]
-        };
-
-        const setResult = await executeTool(vibeManager, 'set_task_list', {
             tasks: [
                 { id: 'task-1', title: 'Inspect slides', done: false },
                 { id: 'task-2', title: 'Apply updates', done: false }
             ]
-        }, runtimeState);
-
-        const setParsed = JSON.parse(setResult);
-        expect(setParsed.success).toBe(true);
-        expect(setParsed.tasks.some((task: any) => task.id === 'task-1')).toBe(true);
-        expect(setParsed.tasks.some((task: any) => task.id === 'task-2')).toBe(true);
+        };
 
         const updateResult = await executeTool(vibeManager, 'update_task_status', {
             id: 'task-1',
@@ -210,10 +194,65 @@ describe('Core Tools - V3 UUID and OCC behavior', () => {
             title: 'Inspect slides',
             done: true
         });
+        expect(runtimeState.tasks.some((task: any) => task.id === 'task-1' && task.done)).toBe(true);
+        expect(runtimeState.tasks.some((task: any) => task.id === 'task-2' && !task.done)).toBe(true);
+    });
 
-        const readResult = await executeTool(vibeManager, 'read_task_list', {}, runtimeState);
-        const readParsed = JSON.parse(readResult);
-        expect(readParsed.success).toBe(true);
-        expect(readParsed.tasks.some((task: any) => task.id === 'task-1' && task.done)).toBe(true);
-        expect(readParsed.tasks.some((task: any) => task.id === 'task-2' && !task.done)).toBe(true);
+    it('create_tasks creates tasks with done=false and uses description as title', async () => {
+        const runtimeState = {
+            tasks: [
+                { id: 'existing-task', title: 'Already exists', done: true }
+            ]
+        };
+
+        const createResult = await executeTool(vibeManager, 'create_tasks', {
+            tasks: [
+                { id: 'task-1', description: 'Inspect slides' },
+                { id: 'task-2', description: 'Apply updates' },
+                { id: 'existing-task', description: 'Should be ignored' }
+            ]
+        }, runtimeState);
+
+        const createParsed = JSON.parse(createResult);
+        expect(createParsed.success).toBe(true);
+        expect(createParsed.created).toEqual([
+            { id: 'task-1', title: 'Inspect slides', done: false },
+            { id: 'task-2', title: 'Apply updates', done: false }
+        ]);
+        expect(createParsed.tasks.some((task: any) => task.id === 'task-1' && !task.done)).toBe(true);
+        expect(createParsed.tasks.some((task: any) => task.id === 'task-2' && !task.done)).toBe(true);
+        expect(createParsed.tasks.filter((task: any) => task.id === 'existing-task')).toHaveLength(1);
+    });
+
+    it('create_tasks rejects tasks that include completion status', async () => {
+        const runtimeState = {
+            tasks: []
+        };
+
+        const createResult = await executeTool(vibeManager, 'create_tasks', {
+            tasks: [
+                { id: 'task-1', description: 'Inspect slides', done: true }
+            ]
+        }, runtimeState);
+
+        const createParsed = JSON.parse(createResult);
+        expect(createParsed.mutated).toBe(false);
+        expect(createParsed.error).toContain('does not accept task completion status');
+        expect(runtimeState.tasks).toHaveLength(0);
+    });
+
+    it('getTools includes create_tasks with id and description fields', async () => {
+        const { tools } = await getTools(vibeManager);
+        const createTasksTool = tools.find((tool: any) => tool.type === 'function' && tool.function.name === 'create_tasks');
+
+        expect(createTasksTool).toBeDefined();
+        if (!createTasksTool) throw new Error('create_tasks tool is not registered');
+
+        const taskItemSchema = (createTasksTool.function.parameters as any)?.properties?.tasks?.items;
+        expect((createTasksTool.function.parameters as any)?.additionalProperties).toBe(false);
+        expect(taskItemSchema?.required).toEqual(['id', 'description']);
+        expect(taskItemSchema?.properties?.id?.type).toBe('string');
+        expect(taskItemSchema?.properties?.description?.type).toBe('string');
+        expect(taskItemSchema?.additionalProperties).toBe(false);
+    });
 });

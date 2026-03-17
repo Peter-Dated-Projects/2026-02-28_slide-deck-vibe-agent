@@ -54,7 +54,7 @@ export const TaskListBar: React.FC<TaskListBarProps> = ({ tasks }) => {
         className="w-full h-6 border border-border bg-background/70 px-2 text-[10px] text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-colors flex items-center justify-between"
       >
         <span className="truncate">
-          Task List: '{remaining}/{total}' tasks left
+          Task List: '{total - remaining}/{total}' tasks completed
         </span>
         {isOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronUp className="h-3 w-3" />}
       </button>

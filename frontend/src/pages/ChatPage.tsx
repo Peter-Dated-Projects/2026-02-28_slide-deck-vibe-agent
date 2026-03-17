@@ -1161,7 +1161,7 @@ const ChatPage: React.FC = () => {
         {/* Message History */}
         <div
           ref={messagesContainerRef}
-          className="flex-1 overflow-y-auto p-3 space-y-1 scroll-smooth custom-scrollbar"
+          className="flex-1 min-h-0 overflow-y-auto p-3 space-y-1 scroll-smooth custom-scrollbar"
         >
           {historyLoading && (
             <div className="h-full flex items-center justify-center text-muted-foreground">
@@ -1184,6 +1184,7 @@ const ChatPage: React.FC = () => {
           {!historyLoading && messages.map((m) => <ChatMessage key={m.id} message={m} />)}
 
           <div ref={messagesEndRef} />
+          <div aria-hidden="true" className="h-[30%] min-h-20" />
         </div>
 
         {/* Input Area */}

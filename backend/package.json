@@ -6,6 +6,7 @@
     "test": "cross-env NODE_ENV=test jest",
     "typecheck": "tsc --noEmit",
     "init:db": "bun run scripts/init-db.ts",
+    "migrate:db": "cross-env NODE_ENV=local bun run scripts/migrate-db.ts",
     "sync:db": "cross-env NODE_ENV=local bun run scripts/sync-s3-users.ts",
     "manage:db": "cross-env NODE_ENV=local bun run scripts/manage-db.ts"
   },

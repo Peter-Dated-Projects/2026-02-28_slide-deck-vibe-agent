@@ -64,32 +64,22 @@ export const getTools = async (vibeManager: VibeManager): Promise<{ tools: OpenA
         {
             type: 'function',
             function: {
-                name: 'read_task_list',
-                description: 'Read the current in-memory task checklist for this request.',
+                name: 'create_tasks',
+                description: 'Create checklist tasks from id and description. New tasks default to unfinished.',
                 parameters: {
                     type: 'object',
-                    properties: {}
-                }
-            }
-        },
-        {
-            type: 'function',
-            function: {
-                name: 'set_task_list',
-                description: 'Merge tasks into the in-memory checklist. Existing tasks are preserved unless overridden by matching id.',
-                parameters: {
-                    type: 'object',
+                    additionalProperties: false,
                     properties: {
                         tasks: {
                             type: 'array',
                             items: {
                                 type: 'object',
+                                additionalProperties: false,
                                 properties: {
                                     id: { type: 'string' },
-                                    title: { type: 'string' },
-                                    done: { type: 'boolean' }
+                                    description: { type: 'string' }
                                 },
-                                required: ['id', 'title']
+                                required: ['id', 'description']
                             }
                         }
                     },
@@ -438,12 +428,7 @@ export const executeTool = async (
     runtimeState?: AgentRuntimeState
 ): Promise<string> => {
     try {
-        if (name === 'read_task_list') {
-            const tasks = runtimeState?.tasks || [];
-            return formatResult({ success: true, tasks, mutated: false });
-        }
-
-        if (name === 'set_task_list') {
+        if (name === 'create_tasks') {
             if (!runtimeState) {
                 return formatResult({ error: 'Task list runtime is unavailable.', mutated: false });
             }
@@ -452,31 +437,37 @@ export const executeTool = async (
                 return formatResult({ error: 'Missing tasks array.', mutated: false });
             }
 
-            const mergedMap = new Map<string, AgentTaskItem>();
-
-            for (const existing of runtimeState.tasks) {
-                mergedMap.set(existing.id, existing);
-            }
-
-            const seenIds = new Set<string>();
+            const existingIds = new Set(runtimeState.tasks.map((task) => task.id));
+            const createdTasks: AgentTaskItem[] = [];
+            const seenIncomingIds = new Set<string>();
 
             for (const rawTask of args.tasks) {
+                if (rawTask && Object.prototype.hasOwnProperty.call(rawTask, 'done')) {
+                    return formatResult({
+                        error: 'create_tasks does not accept task completion status. Use update_task_status.',
+                        mutated: false
+                    });
+                }
+
                 const id = String(rawTask?.id || '').trim();
-                const title = String(rawTask?.title || '').trim();
-                if (!id || !title || seenIds.has(id)) {
+                const description = String(rawTask?.description || '').trim();
+
+                if (!id || !description || existingIds.has(id) || seenIncomingIds.has(id)) {
                     continue;
                 }
 
-                seenIds.add(id);
-                mergedMap.set(id, {
+                const nextTask: AgentTaskItem = {
                     id,
-                    title,
-                    done: Boolean(rawTask?.done)
-                });
+                    title: description,
+                    done: false
+                };
+
+                runtimeState.tasks.push(nextTask);
+                createdTasks.push(nextTask);
+                seenIncomingIds.add(id);
             }
 
-            runtimeState.tasks = Array.from(mergedMap.values());
-            return formatResult({ success: true, tasks: runtimeState.tasks, mutated: false });
+            return formatResult({ success: true, created: createdTasks, tasks: runtimeState.tasks, mutated: false });
         }
 
         if (name === 'update_task_status') {

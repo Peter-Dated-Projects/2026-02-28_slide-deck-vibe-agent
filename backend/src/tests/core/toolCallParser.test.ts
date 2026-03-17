@@ -3,7 +3,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
-import { extractToolCallsFromText } from '../infrastructure/providers/llm/toolCallParser';
+import { extractToolCallsFromText } from '../../infrastructure/providers/llm/toolCallParser';
 
 describe('extractToolCallsFromText', () => {
     it('should extract tool calls from JSON with tool_calls array', () => {
@@ -23,7 +23,10 @@ describe('extractToolCallsFromText', () => {
         
         const toolCalls = extractToolCallsFromText(text);
         expect(toolCalls).toHaveLength(1);
-        expect(toolCalls[0].function.name).toBe('update_slide');
+        const firstToolCall = toolCalls[0];
+        expect(firstToolCall).toBeDefined();
+        if (!firstToolCall) throw new Error('Expected first tool call');
+        expect(firstToolCall.function.name).toBe('update_slide');
     });
 
     it('should extract tool calls from XML-style function_calls tags', () => {
@@ -44,7 +47,10 @@ describe('extractToolCallsFromText', () => {
         
         const toolCalls = extractToolCallsFromText(text);
         expect(toolCalls.length).toBeGreaterThan(0);
-        expect(toolCalls[0].function.name).toBe('update_slide');
+        const firstToolCall = toolCalls[0];
+        expect(firstToolCall).toBeDefined();
+        if (!firstToolCall) throw new Error('Expected first tool call');
+        expect(firstToolCall.function.name).toBe('update_slide');
     });
 
     it('should extract multiple tool calls', () => {
@@ -69,8 +75,13 @@ describe('extractToolCallsFromText', () => {
         
         const toolCalls = extractToolCallsFromText(text);
         expect(toolCalls.length).toBe(2);
-        expect(toolCalls[0].function.name).toBe('add_slide');
-        expect(toolCalls[1].function.name).toBe('update_slide');
+        const firstToolCall = toolCalls[0];
+        const secondToolCall = toolCalls[1];
+        expect(firstToolCall).toBeDefined();
+        expect(secondToolCall).toBeDefined();
+        if (!firstToolCall || !secondToolCall) throw new Error('Expected two tool calls');
+        expect(firstToolCall.function.name).toBe('add_slide');
+        expect(secondToolCall.function.name).toBe('update_slide');
     });
 
     it('should handle tool calls inside thinking blocks', () => {
@@ -94,7 +105,10 @@ describe('extractToolCallsFromText', () => {
         
         const toolCalls = extractToolCallsFromText(text);
         expect(toolCalls).toHaveLength(1);
-        expect(toolCalls[0].function.name).toBe('update_slide');
+        const firstToolCall = toolCalls[0];
+        expect(firstToolCall).toBeDefined();
+        if (!firstToolCall) throw new Error('Expected first tool call');
+        expect(firstToolCall.function.name).toBe('update_slide');
     });
 
     it('should not extract malformed tool calls', () => {

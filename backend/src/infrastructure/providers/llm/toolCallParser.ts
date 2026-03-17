@@ -132,7 +132,12 @@ export function extractToolCallsFromText(text: string): ParsedToolCall[] {
         const parameters: Record<string, any> = {};
         for (const paramMatch of paramMatches) {
             const paramName = paramMatch[1];
-            const paramValue = paramMatch[2].trim();
+            const rawParamValue = paramMatch[2];
+            if (!paramName || rawParamValue === undefined) {
+                continue;
+            }
+
+            const paramValue = rawParamValue.trim();
             parameters[paramName] = paramValue;
         }
         
