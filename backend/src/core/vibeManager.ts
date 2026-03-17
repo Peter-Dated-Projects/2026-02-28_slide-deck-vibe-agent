@@ -1,10 +1,19 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 
+export interface VibeManifest {
+    engine_version: string;
+    project_id: string;
+    theme_id: string;
+    transition_style: string;
+    active_slides: string[];
+    [key: string]: any;
+}
+
 export class VibeManager {
     /**
-     * Surgical Orchestrator for Vibe Slide HTML files.
-     * Uses regex to read/write specific regions without disturbing the core engine.
+     * Surgical Orchestrator for Vibe Slide V3 HTML files.
+     * Uses optimized regex to manage themes, transitions, and ID-based slides.
      */
     private filePath: string;
     private content: string;
@@ -16,10 +25,6 @@ export class VibeManager {
         this.content = content;
     }
 
-    /**
-     * Factory method to asynchronously create a new VibeManager instance.
-     * @param filePath The absolute path to the HTML file.
-     */
     static async create(filePath: string): Promise<VibeManager> {
         VibeManager.assertAbsoluteFilePath(filePath, 'filePath');
         const content = await fs.readFile(filePath, { encoding: 'utf-8' });
@@ -30,212 +35,186 @@ export class VibeManager {
         await fs.writeFile(this.filePath, this.content, { encoding: 'utf-8' });
     }
 
+    // --- UTILITIES ---
+
     private static assertString(value: string, name: string, allowEmpty = false): void {
-        if (typeof value !== 'string') {
-            throw new Error(`${name} must be a string`);
-        }
-
-        if (!allowEmpty && value.trim().length === 0) {
-            throw new Error(`${name} cannot be empty`);
-        }
-    }
-
-    private static assertPositiveInteger(value: number, name: string): void {
-        if (!Number.isInteger(value) || value < 1) {
-            throw new Error(`${name} must be a positive integer`);
-        }
+        if (typeof value !== 'string') throw new Error(`${name} must be a string`);
+        if (!allowEmpty && value.trim().length === 0) throw new Error(`${name} cannot be empty`);
     }
 
     private static assertAbsoluteFilePath(value: string, name: string): void {
         VibeManager.assertString(value, name);
-        if (!path.isAbsolute(value)) {
-            throw new Error(`${name} must be an absolute path`);
-        }
+        if (!path.isAbsolute(value)) throw new Error(`${name} must be an absolute path`);
     }
 
-    private getSlideBlocks(requireContainer = false): string[] {
-        const containerPattern = /<!-- VIBE_SLIDES_CONTAINER_START -->([\s\S]*?)<!-- VIBE_SLIDES_CONTAINER_END -->/;
-        const containerMatch = containerPattern.exec(this.content);
+    // --- THEME, TRANSITIONS & ANIMATIONS ---
 
-        if (!containerMatch || containerMatch[1] === undefined) {
-            if (requireContainer) {
-                throw new Error('Slides container markers not found');
-            }
-            return [];
-        }
-
-        const slidesRegion = containerMatch[1];
-        const slidePattern = /<!-- VIBE_SLIDE_(\d+)_START -->\s*([\s\S]*?)\s*<!-- VIBE_SLIDE_\1_END -->/g;
-        const blocks: string[] = [];
-        let match: RegExpExecArray | null = null;
-
-        while ((match = slidePattern.exec(slidesRegion)) !== null) {
-            if (match[2] !== undefined) {
-                blocks.push(match[2].trim());
-            }
-        }
-
-        return blocks;
-    }
-
-    private replaceSlideBlocks(blocks: string[]): void {
-        const containerPattern = /(<!-- VIBE_SLIDES_CONTAINER_START -->)([\s\S]*?)(<!-- VIBE_SLIDES_CONTAINER_END -->)/;
-        if (!containerPattern.test(this.content)) {
-            throw new Error('Slides container markers not found');
-        }
-
-        const renderedSlides = blocks
-            .map((block, idx) => {
-                const slideIndex = idx + 1;
-                return `\n        <!-- VIBE_SLIDE_${slideIndex}_START -->\n        ${block.trim()}\n        <!-- VIBE_SLIDE_${slideIndex}_END -->\n`;
-            })
-            .join('\n');
-
-        this.content = this.content.replace(
-            containerPattern,
-            `$1\n${renderedSlides}\n        $3`,
-        );
-    }
-
-    // --- THEME METHODS ---
-
-    /**
-     * Extracts the CSS variables block.
-     */
-    getTheme(): string {
-        const pattern = /<!-- VIBE_THEME_START -->\s*(.*?)\s*<!-- VIBE_THEME_END -->/s;
+    private getBlock(startMarker: string, endMarker: string): string {
+        const escapedStart = startMarker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const escapedEnd = endMarker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const pattern = new RegExp(`${escapedStart}\\s*([\\s\\S]*?)\\s*${escapedEnd}`, 'i');
         const match = pattern.exec(this.content);
         return match && match[1] ? match[1].trim() : "";
     }
 
-    /**
-     * Overwrites the CSS variables block.
-     * @param newCss The new CSS string to insert.
-     */
-    async setTheme(newCss: string): Promise<void> {
-        VibeManager.assertString(newCss, 'newCss');
-        const pattern = /(<!-- VIBE_THEME_START -->).*?(<!-- VIBE_THEME_END -->)/s;
+    private async setBlock(startMarker: string, endMarker: string, newContent: string): Promise<void> {
+        const escapedStart = startMarker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const escapedEnd = endMarker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const pattern = new RegExp(`(${escapedStart})[\\s\\S]*?(${escapedEnd})`, 'i');
+        
         if (!pattern.test(this.content)) {
-            throw new Error('Theme markers not found');
+            throw new Error(`Markers ${startMarker} / ${endMarker} not found in template`);
         }
-        const replacement = `$1\n        ${newCss.trim()}\n        $2`;
-        this.content = this.content.replace(pattern, replacement);
+        
+        this.content = this.content.replace(pattern, `$1\n        ${newContent.trim()}\n        $2`);
         await this.save();
     }
 
-    // --- SLIDE METHODS ---
+    getTheme(): string { return this.getBlock('<!-- VIBE_THEME_START -->', '<!-- VIBE_THEME_END -->'); }
+    async setTheme(css: string): Promise<void> { await this.setBlock('<!-- VIBE_THEME_START -->', '<!-- VIBE_THEME_END -->', css); }
 
-    /**
-     * Extracts inner HTML content for a specific slide index (1-based).
-     * Returns only the content inside <section class="slide">, not the section wrapper itself.
-     */
-    getSlide(index: number): string | null {
-        VibeManager.assertPositiveInteger(index, 'index');
-        const pattern = new RegExp(`<!-- VIBE_SLIDE_${index}_START -->\\s*(.*?)\\s*<!-- VIBE_SLIDE_${index}_END -->`, 's');
-        const match = pattern.exec(this.content);
-        if (!match || !match[1]) return null;
+    getTransitions(): string { return this.getBlock('<!-- VIBE_TRANSITIONS_START -->', '<!-- VIBE_TRANSITIONS_END -->'); }
+    async setTransitions(css: string): Promise<void> { await this.setBlock('<!-- VIBE_TRANSITIONS_START -->', '<!-- VIBE_TRANSITIONS_END -->', css); }
 
-        const sectionPattern = /<section\b[^>]*\bclass\s*=\s*["'][^"']*\bslide\b[^"']*["'][^>]*>([\s\S]*?)<\/section>/i;
-        const sectionMatch = sectionPattern.exec(match[1]);
-        return sectionMatch && sectionMatch[1] ? sectionMatch[1].trim() : null;
-    }
+    getAnimations(): string { return this.getBlock('<!-- VIBE_ANIMATIONS_START -->', '<!-- VIBE_ANIMATIONS_END -->'); }
+    async setAnimations(css: string): Promise<void> { await this.setBlock('<!-- VIBE_ANIMATIONS_START -->', '<!-- VIBE_ANIMATIONS_END -->', css); }
 
-    /**
-     * Overwrites the inner HTML content of a specific slide by index.
-     * Only content inside <section class="slide"> is replaced.
-     */
-    async setSlide(index: number, newHtml: string): Promise<void> {
-        VibeManager.assertPositiveInteger(index, 'index');
-        VibeManager.assertString(newHtml, 'newHtml');
-        const pattern = new RegExp(`(<!-- VIBE_SLIDE_${index}_START -->\\s*)([\\s\\S]*?)(\\s*<!-- VIBE_SLIDE_${index}_END -->)`, 's');
-        const match = pattern.exec(this.content);
-        if (!match || !match[2]) {
-            throw new Error(`Slide ${index} not found`);
+    // --- MANIFEST (JSON STATE) ---
+
+    getManifest(): VibeManifest {
+        const json = this.getBlock('<!-- <!-- VIBE_MANIFEST_START --> -->', '<!-- <!-- VIBE_MANIFEST_END --> -->');
+        // Fallback for V3 single comment style if double fails
+        const fallback = json || this.getBlock('<!-- VIBE_MANIFEST_START -->', '<!-- VIBE_MANIFEST_END -->');
+        try {
+            return JSON.parse(fallback);
+        } catch (e) {
+            throw new Error("Failed to parse Vibe Manifest JSON from HTML");
         }
+    }
 
-        const sectionPattern = /(<section\b[^>]*\bclass\s*=\s*["'][^"']*\bslide\b[^"']*["'][^>]*>)([\s\S]*?)(<\/section>)/i;
-        if (!sectionPattern.test(match[2])) {
-            throw new Error(`Slide ${index} does not contain a valid <section class=\"slide\"> block`);
+    async setManifest(manifest: VibeManifest): Promise<void> {
+        const jsonString = JSON.stringify(manifest, null, 4);
+        // Supports both double and single comment V3 styles
+        const start = this.content.includes('<!-- <!-- VIBE_MANIFEST_START --> -->') 
+            ? '<!-- <!-- VIBE_MANIFEST_START --> -->' 
+            : '<!-- VIBE_MANIFEST_START -->';
+        const end = this.content.includes('<!-- <!-- VIBE_MANIFEST_END --> -->') 
+            ? '<!-- <!-- VIBE_MANIFEST_END --> -->' 
+            : '<!-- VIBE_MANIFEST_END -->';
+
+        await this.setBlock(start, end, `<script id="vibe-manifest" type="application/json">\n    ${jsonString}\n    </script>`);
+    }
+
+    // --- GLOBAL UI ---
+
+    getGlobalUI(): string { return this.getBlock('<!-- <!-- VIBE_GLOBAL_UI_START --> -->', '<!-- <!-- VIBE_GLOBAL_UI_END --> -->'); }
+    async setGlobalUI(html: string): Promise<void> { await this.setBlock('<!-- <!-- VIBE_GLOBAL_UI_START --> -->', '<!-- <!-- VIBE_GLOBAL_UI_END --> -->', html); }
+
+    // --- SLIDE MANAGEMENT (ID & INDEX SUPPORT) ---
+
+    private getSlideMetadata(): { id: string, fullBlock: string, content: string }[] {
+        const containerPattern = /<!-- <!-- VIBE_SLIDES_CONTAINER_START --> -->([\s\S]*?)<!-- <!-- VIBE_SLIDES_CONTAINER_END --> -->/;
+        const match = containerPattern.exec(this.content);
+        if (!match) return [];
+
+        const slidesRegion = match[1];
+        // Regex to capture the ID from VIBE_SLIDE_ID:{ID}_START
+        const slidePattern = /<!-- VIBE_SLIDE_ID:([\w-]+)_START -->([\s\S]*?)<!-- VIBE_SLIDE_ID:\1_END -->/g;
+        const results = [];
+        let m;
+        while ((m = slidePattern.exec(slidesRegion)) !== null) {
+            results.push({
+                id: m[1],
+                fullBlock: m[0],
+                content: m[2].trim()
+            });
         }
-
-        const updatedSlideBlock = match[2].replace(sectionPattern, `$1\n${newHtml.trim()}\n$3`);
-        this.content = this.content.replace(pattern, `$1${updatedSlideBlock}$3`);
-        await this.save();
+        return results;
     }
 
     /**
-     * Appends a new slide to the deck.
-     */
-    async addSlide(newHtml: string): Promise<void> {
-        VibeManager.assertString(newHtml, 'newHtml');
-        const blocks = this.getSlideBlocks(true);
-        blocks.push(newHtml.trim());
-        this.replaceSlideBlocks(blocks);
-        await this.save();
-    }
-
-    /**
-     * Inserts a new slide into the deck
-     */
-    async insertSlide(index: number, newHtml: string): Promise<void> {
-        VibeManager.assertPositiveInteger(index, 'index');
-        VibeManager.assertString(newHtml, 'newHtml');
-
-        const blocks = this.getSlideBlocks(true);
-        if (index > blocks.length + 1) {
-            throw new Error(`index must be between 1 and ${blocks.length + 1}`);
-        }
-
-        blocks.splice(index - 1, 0, newHtml.trim());
-        this.replaceSlideBlocks(blocks);
-        await this.save();
-    }
-
-    /**
-     * Removes a slide and its markers.
-     */
-    async deleteSlide(index: number): Promise<void> {
-        VibeManager.assertPositiveInteger(index, 'index');
-        const blocks = this.getSlideBlocks(true);
-        if (index > blocks.length) {
-            throw new Error(`Slide ${index} not found`);
-        }
-
-        blocks.splice(index - 1, 1);
-        this.replaceSlideBlocks(blocks);
-        await this.save();
-    }
-
-    /**
-     * Gets the total number of slides currently in the deck.
+     * Gets total slide count.
      */
     getSlideCount(): number {
-        return this.getSlideBlocks(false).length;
-    }
-
-    // --- SCRIPT METHODS ---
-
-    /**
-     * Extracts the JavaScript block.
-     */
-    getScript(): string {
-        const pattern = /<!-- VIBE_SCRIPT_START -->\s*(.*?)\s*<!-- VIBE_SCRIPT_END -->/s;
-        const match = pattern.exec(this.content);
-        return match && match[1] ? match[1].trim() : "";
+        return this.getSlideMetadata().length;
     }
 
     /**
-     * Overwrites the JavaScript block.
-     * @param newJs The new JavaScript string to insert.
+     * Retrieves slide HTML. 
+     * @param identifier Either the UUID string or the 1-based index.
      */
-    async setScript(newJs: string): Promise<void> {
-        VibeManager.assertString(newJs, 'newJs');
-        const pattern = /(<!-- VIBE_SCRIPT_START -->).*?(<!-- VIBE_SCRIPT_END -->)/s;
-        if (!pattern.test(this.content)) {
-            throw new Error('Script markers not found');
+    getSlide(identifier: string | number): string | null {
+        const slides = this.getSlideMetadata();
+        if (typeof identifier === 'number') {
+            return slides[identifier - 1]?.content || null;
         }
-        const replacement = `$1\n        ${newJs.trim()}\n        $2`;
-        this.content = this.content.replace(pattern, replacement);
+        return slides.find(s => s.id === identifier)?.content || null;
+    }
+
+    /**
+     * Updates an existing slide.
+     */
+    async setSlide(identifier: string | number, newHtml: string): Promise<void> {
+        const slides = this.getSlideMetadata();
+        let targetId: string | undefined;
+
+        if (typeof identifier === 'number') {
+            targetId = slides[identifier - 1]?.id;
+        } else {
+            targetId = identifier;
+        }
+
+        if (!targetId) throw new Error(`Slide ${identifier} not found`);
+
+        const pattern = new RegExp(`(<!-- VIBE_SLIDE_ID:${targetId}_START -->)[\\s\\S]*?(<!-- VIBE_SLIDE_ID:${targetId}_END -->)`, 'i');
+        this.content = this.content.replace(pattern, `$1\n        ${newHtml.trim()}\n        $2`);
+        await this.save();
+    }
+
+    /**
+     * Appends a new slide with a new UUID.
+     */
+    async addSlide(newHtml: string, customId?: string): Promise<string> {
+        const id = customId || crypto.randomUUID();
+        const newBlock = `\n        <!-- VIBE_SLIDE_ID:${id}_START -->\n        ${newHtml.trim()}\n        <!-- VIBE_SLIDE_ID:${id}_END -->\n`;
+        
+        const containerEnd = '<!-- <!-- VIBE_SLIDES_CONTAINER_END --> -->';
+        if (!this.content.includes(containerEnd)) throw new Error("Slide container end marker missing");
+
+        this.content = this.content.replace(containerEnd, `${newBlock}        ${containerEnd}`);
+        
+        // Update manifest active_slides
+        const manifest = this.getManifest();
+        manifest.active_slides.push(id);
+        await this.setManifest(manifest);
+        
+        await this.save();
+        return id;
+    }
+
+    /**
+     * Deletes a slide.
+     */
+    async deleteSlide(identifier: string | number): Promise<void> {
+        const slides = this.getSlideMetadata();
+        let targetId: string | undefined;
+
+        if (typeof identifier === 'number') {
+            targetId = slides[identifier - 1]?.id;
+        } else {
+            targetId = identifier;
+        }
+
+        if (!targetId) throw new Error(`Slide ${identifier} not found`);
+
+        const pattern = new RegExp(`\\s*<!-- VIBE_SLIDE_ID:${targetId}_START -->[\\s\\S]*?<!-- VIBE_SLIDE_ID:${targetId}_END -->\\s*`, 'i');
+        this.content = this.content.replace(pattern, '\n');
+
+        // Update manifest
+        const manifest = this.getManifest();
+        manifest.active_slides = manifest.active_slides.filter(id => id !== targetId);
+        await this.setManifest(manifest);
+
         await this.save();
     }
 }

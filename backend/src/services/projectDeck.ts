@@ -11,11 +11,28 @@ const PREVIEW_OUTPUT = { width: 1280, height: 720 };
 const PREVIEW_JPEG_QUALITY = 80;
 const PREVIEW_ANIMATION_MAX_WAIT_MS = 5000;
 const PREVIEW_ANIMATION_POLL_MS = 50;
+const PREVIEW_CONCURRENCY_LIMIT = 1;
+const PREVIEW_DEBUG = process.env.PREVIEW_DEBUG !== 'false' && process.env.PREVIEW_DEBUG !== '0';
+
+const previewJobsByProject = new Map<string, Promise<string>>();
+const previewQueue: Array<() => void> = [];
+let activePreviewJobs = 0;
+
+const logPreviewDebug = (message: string, details?: Record<string, unknown>) => {
+    if (!PREVIEW_DEBUG) return;
+
+    if (details) {
+        console.info(`[projectDeck][debug] ${message}`, details);
+        return;
+    }
+
+    console.info(`[projectDeck][debug] ${message}`);
+};
 
 const getCacheKey = (projectId: string) => `${DECK_CACHE_PREFIX}${projectId}`;
 
 const getDefaultHtml = async (): Promise<string> => {
-    const defaultHtmlPath = path.resolve(__dirname, '../../../frontend/public/default.html');
+    const defaultHtmlPath = path.resolve(__dirname, '../core/template.html');
     return fs.readFile(defaultHtmlPath, { encoding: 'utf-8' });
 };
 
@@ -40,6 +57,42 @@ const getProjectOwner = async (projectId: string): Promise<string> => {
 };
 
 const getPreviewKey = (userId: string, projectId: string): string => `users/${userId}/previews/${projectId}.jpg`;
+
+const runWithPreviewSlot = async <T>(task: () => Promise<T>): Promise<T> => {
+    if (activePreviewJobs >= PREVIEW_CONCURRENCY_LIMIT) {
+        logPreviewDebug('Preview job waiting for queue slot', {
+            activePreviewJobs,
+            queuedJobs: previewQueue.length + 1,
+            concurrencyLimit: PREVIEW_CONCURRENCY_LIMIT
+        });
+        await new Promise<void>((resolve) => {
+            previewQueue.push(resolve);
+        });
+    }
+
+    activePreviewJobs += 1;
+    logPreviewDebug('Preview slot acquired', {
+        activePreviewJobs,
+        queuedJobs: previewQueue.length,
+        concurrencyLimit: PREVIEW_CONCURRENCY_LIMIT
+    });
+
+    try {
+        return await task();
+    } finally {
+        activePreviewJobs -= 1;
+        const next = previewQueue.shift();
+        logPreviewDebug('Preview slot released', {
+            activePreviewJobs,
+            queuedJobs: previewQueue.length,
+            concurrencyLimit: PREVIEW_CONCURRENCY_LIMIT,
+            wakingQueuedJob: Boolean(next)
+        });
+        if (next) {
+            next();
+        }
+    }
+};
 
 const waitForVisualStability = async (page: Page): Promise<void> => {
     // Let initial style/layout updates flush before we inspect animation state.
@@ -101,6 +154,13 @@ const renderPreviewJpeg = async (html: string): Promise<Buffer> => {
 
 const refreshPreviewForProject = async (projectId: string, userId: string, html: string): Promise<void> => {
     try {
+        const startedAt = Date.now();
+        logPreviewDebug('Refreshing preview started', {
+            projectId,
+            userId,
+            htmlLength: html.length
+        });
+
         const previewKey = getPreviewKey(userId, projectId);
         const jpeg = await renderPreviewJpeg(html);
 
@@ -124,20 +184,68 @@ const refreshPreviewForProject = async (projectId: string, userId: string, html:
                 throw error;
             }
         }
+
+        logPreviewDebug('Refreshing preview completed', {
+            projectId,
+            userId,
+            previewKey,
+            jpegBytes: jpeg.length,
+            elapsedMs: Date.now() - startedAt
+        });
     } catch (error) {
         console.error(`[projectDeck] Failed to refresh preview for project ${projectId}:`, error);
     }
 };
 
 export const generatePreviewForProject = async (projectId: string, existingUserId?: string): Promise<string> => {
-    const userId = existingUserId || await getProjectOwner(projectId);
-    const s3Key = await ensureDeckExistsForProject(projectId, userId);
-    const cacheKey = getCacheKey(projectId);
-    const cachedHtml = await cacheService.get(cacheKey);
+    const existingJob = previewJobsByProject.get(projectId);
+    if (existingJob) {
+        logPreviewDebug('Reusing in-flight preview job', { projectId });
+        return existingJob;
+    }
 
-    const html = cachedHtml ?? await storageService.getFileContent(s3Key);
-    await refreshPreviewForProject(projectId, userId, html);
-    return getPreviewKey(userId, projectId);
+    const previewJob = runWithPreviewSlot(async () => {
+        const startedAt = Date.now();
+        logPreviewDebug('Preview job started', { projectId });
+
+        const userId = existingUserId || await getProjectOwner(projectId);
+        const s3Key = await ensureDeckExistsForProject(projectId, userId);
+        const cacheKey = getCacheKey(projectId);
+        const cachedHtml = await cacheService.get(cacheKey);
+
+        const html = cachedHtml ?? await storageService.getFileContent(s3Key);
+        logPreviewDebug('Preview source HTML resolved', {
+            projectId,
+            userId,
+            s3Key,
+            cacheHit: cachedHtml !== null,
+            htmlLength: html.length
+        });
+
+        await refreshPreviewForProject(projectId, userId, html);
+
+        logPreviewDebug('Preview job completed', {
+            projectId,
+            userId,
+            elapsedMs: Date.now() - startedAt
+        });
+
+        return getPreviewKey(userId, projectId);
+    }).finally(() => {
+        previewJobsByProject.delete(projectId);
+        logPreviewDebug('Preview job removed from in-flight map', {
+            projectId,
+            remainingInFlightJobs: previewJobsByProject.size
+        });
+    });
+
+    previewJobsByProject.set(projectId, previewJob);
+    logPreviewDebug('Preview job registered as in-flight', {
+        projectId,
+        inFlightJobs: previewJobsByProject.size
+    });
+
+    return previewJob;
 };
 
 export const ensureDeckExistsForProject = async (projectId: string, existingUserId?: string): Promise<string> => {

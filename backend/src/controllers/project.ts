@@ -1,6 +1,20 @@
 import type { Request, Response } from 'express';
-import { dbService as db, storageService } from '../core/container';
+import { cacheService, dbService as db, storageService } from '../core/container';
+import { config } from '../config';
 import { ensureDeckExistsForProject, generatePreviewForProject } from '../services/projectDeck';
+
+const PROJECTS_CACHE_PREFIX = 'projects:list:';
+const PROJECTS_CACHE_TTL_SECONDS = Math.max(5, Math.min(config.redis.ttlSeconds, 30));
+
+const getProjectsCacheKey = (userId: string): string => `${PROJECTS_CACHE_PREFIX}${userId}`;
+
+const invalidateProjectsCache = async (userId: string): Promise<void> => {
+    try {
+        await cacheService.del(getProjectsCacheKey(userId));
+    } catch (error) {
+        console.warn(`[projectController] Failed to invalidate projects cache for user ${userId}:`, error);
+    }
+};
 
 export const getProjects = async (req: Request, res: Response): Promise<void> => {
     try {
@@ -8,6 +22,18 @@ export const getProjects = async (req: Request, res: Response): Promise<void> =>
         if (!userId) {
             res.status(401).json({ error: 'Unauthorized' });
             return;
+        }
+
+        const cacheKey = getProjectsCacheKey(userId);
+        try {
+            const cachedPayload = await cacheService.get(cacheKey);
+            if (cachedPayload) {
+                const cachedProjects = JSON.parse(cachedPayload);
+                res.json({ projects: cachedProjects });
+                return;
+            }
+        } catch (error) {
+            console.warn(`[projectController] Failed to read projects cache for user ${userId}:`, error);
         }
 
         // Fetch projects, and rely on the latest conversation dynamically.
@@ -80,6 +106,12 @@ export const getProjects = async (req: Request, res: Response): Promise<void> =>
             };
         }));
 
+        try {
+            await cacheService.set(cacheKey, JSON.stringify(projects), PROJECTS_CACHE_TTL_SECONDS);
+        } catch (error) {
+            console.warn(`[projectController] Failed to set projects cache for user ${userId}:`, error);
+        }
+
         res.json({ projects });
     } catch (error) {
         console.error('Error fetching projects:', error);
@@ -125,8 +157,9 @@ export const createProject = async (req: Request, res: Response): Promise<void> 
                [conversation.id, projectId, defaultProjectName]
         );
 
-        // 4. Ensure the project deck is seeded from frontend/public/default.html in S3 and cached.
+        // 4. Ensure the project deck is seeded from backend/src/core/template.html in S3 and cached.
         await ensureDeckExistsForProject(projectId, userId);
+        await invalidateProjectsCache(userId);
 
         res.status(201).json({
             project: {
@@ -171,7 +204,20 @@ export const generateProjectPreview = async (req: Request, res: Response): Promi
             return;
         }
 
-        await generatePreviewForProject(projectId, userId);
+        if (process.env.PREVIEW_DEBUG !== 'false' && process.env.PREVIEW_DEBUG !== '0') {
+            console.info('[projectController][debug] Preview request accepted', {
+                projectId,
+                userId
+            });
+        }
+
+        // Fire-and-forget: preview generation can be expensive and should not block the request.
+        void generatePreviewForProject(projectId, userId).catch((error) => {
+            console.error(`Error generating project preview for project ${projectId}:`, error);
+        }).finally(() => {
+            void invalidateProjectsCache(userId);
+        });
+
         res.status(202).json({ success: true });
     } catch (error) {
         console.error('Error generating project preview:', error);
@@ -227,6 +273,8 @@ export const updateProjectName = async (req: Request, res: Response): Promise<vo
             `,
             [projectId, trimmedName]
         );
+
+        await invalidateProjectsCache(userId);
 
         res.json({ name: trimmedName });
     } catch (error) {
