@@ -88,6 +88,7 @@ interface ConversationHistoryEntry {
   id: string;
   projectId: string | null;
   title: string;
+  projectName?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -180,6 +181,7 @@ const ChatPage: React.FC = () => {
   });
   const [isResizingState, setIsResizingState] = useState(false);
   const [deckTitle, setDeckTitle] = useState("New Chat");
+  const [conversationTitle, setConversationTitle] = useState("New Chat");
   const [isTitleFocused, setIsTitleFocused] = useState(false);
   const [conversationHistory, setConversationHistory] = useState<ConversationHistoryEntry[]>([]);
   const [isConversationHistoryLoading, setIsConversationHistoryLoading] = useState(true);
@@ -212,13 +214,40 @@ const ChatPage: React.FC = () => {
       const response = await api.get("/conversations", {
         params: projectId ? { projectId } : undefined,
       });
-      setConversationHistory(sortConversationHistory(response.data.conversations ?? []));
+      const nextHistory: ConversationHistoryEntry[] = (response.data.conversations ?? []).map(
+        (entry: any) => ({
+          id: entry.id,
+          projectId: entry.projectId ?? null,
+          title: entry.title ?? "Untitled",
+          projectName: entry.projectName,
+          createdAt: entry.createdAt,
+          updatedAt: entry.updatedAt,
+        }),
+      );
+
+      setConversationHistory(sortConversationHistory(nextHistory));
+
+      if (projectId) {
+        const currentProjectName = nextHistory.find(
+          (entry) => entry.projectId === projectId,
+        )?.projectName;
+        if (currentProjectName?.trim()) {
+          setDeckTitle(currentProjectName);
+        }
+      }
+
+      if (conversationId) {
+        const currentConversation = nextHistory.find((entry) => entry.id === conversationId);
+        if (currentConversation?.title?.trim()) {
+          setConversationTitle(currentConversation.title);
+        }
+      }
     } catch (error) {
       console.error("Failed to load conversations:", error);
     } finally {
       setIsConversationHistoryLoading(false);
     }
-  }, [projectId]);
+  }, [conversationId, projectId]);
 
   const visibleConversationHistory = useMemo(() => {
     if (!projectId) {
@@ -231,6 +260,12 @@ const ChatPage: React.FC = () => {
   useEffect(() => {
     void loadConversationHistory();
   }, [loadConversationHistory]);
+
+  useEffect(() => {
+    if (!conversationId) {
+      setConversationTitle("New Chat");
+    }
+  }, [conversationId]);
 
   useEffect(() => {
     hasTriggeredExitPreviewRef.current = false;
@@ -363,7 +398,14 @@ const ChatPage: React.FC = () => {
         );
         setMessages(hydratedMessages);
         liveConversationMessagesRef.current[conversationId] = hydratedMessages;
-        if (msgRes.data.title) setDeckTitle(msgRes.data.title);
+        if (msgRes.data.title) {
+          setConversationTitle(msgRes.data.title);
+        }
+        if (msgRes.data.projectName) {
+          setDeckTitle(msgRes.data.projectName);
+        } else if (msgRes.data.title) {
+          setDeckTitle(msgRes.data.title);
+        }
         // Always start at the bottom when opening a conversation
         userScrolledUp.current = false;
         setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: "instant" }), 50);
@@ -380,27 +422,37 @@ const ChatPage: React.FC = () => {
   // Debounced title save
   // ─────────────────────────────────────────────────────
   useEffect(() => {
-    if (!conversationId || !deckTitle.trim()) return;
+    if (!deckTitle.trim()) return;
     const timer = setTimeout(() => {
-      api
-        .patch(`/conversations/${conversationId}/title`, { title: deckTitle.trim() })
+      const request = projectId
+        ? api.patch(`/projects/${projectId}/name`, { name: deckTitle.trim() })
+        : conversationId
+          ? api.patch(`/conversations/${conversationId}/title`, { title: deckTitle.trim() })
+          : null;
+
+      if (!request) return;
+
+      request
         .then(() => {
-          setConversationHistory((prev) =>
-            upsertConversationHistory(prev, {
-              id: conversationId,
-              projectId: projectId ?? null,
-              title: deckTitle.trim(),
-              createdAt:
-                prev.find((entry) => entry.id === conversationId)?.createdAt ??
-                new Date().toISOString(),
-              updatedAt: new Date().toISOString(),
-            }),
-          );
+          if (!projectId) {
+            setConversationHistory((prev) =>
+              upsertConversationHistory(prev, {
+                id: conversationId!,
+                projectId: projectId ?? null,
+                title: deckTitle.trim(),
+                projectName: prev.find((entry) => entry.id === conversationId)?.projectName,
+                createdAt:
+                  prev.find((entry) => entry.id === conversationId)?.createdAt ??
+                  new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+              }),
+            );
+          }
         })
         .catch((err) => console.error("Failed to save title:", err));
     }, 600);
     return () => clearTimeout(timer);
-  }, [conversationId, deckTitle]);
+  }, [conversationId, deckTitle, projectId]);
 
   // ─────────────────────────────────────────────────────
   // Slide fetching
@@ -532,8 +584,8 @@ const ChatPage: React.FC = () => {
               title:
                 nextTitle?.trim() ||
                 prev.find((entry) => entry.id === nextConversationId)?.title ||
-                deckTitle.trim() ||
                 "New Chat",
+              projectName: prev.find((entry) => entry.id === nextConversationId)?.projectName,
               createdAt:
                 prev.find((entry) => entry.id === nextConversationId)?.createdAt ??
                 new Date().toISOString(),
@@ -564,8 +616,8 @@ const ChatPage: React.FC = () => {
             title:
               nextTitle?.trim() ||
               prev.find((entry) => entry.id === nextConversationId)?.title ||
-              deckTitle.trim() ||
               "New Chat",
+            projectName: prev.find((entry) => entry.id === nextConversationId)?.projectName,
             createdAt:
               prev.find((entry) => entry.id === nextConversationId)?.createdAt ??
               new Date().toISOString(),
@@ -776,6 +828,14 @@ const ChatPage: React.FC = () => {
                   data.projectId ?? projectId ?? null,
                   data.title ?? "New Chat",
                 );
+
+                if (data.title?.trim()) {
+                  setConversationTitle(data.title);
+                }
+
+                if (data.projectName?.trim()) {
+                  setDeckTitle(data.projectName);
+                }
               }
             } else if (eventName === "done") {
               doneConvId = data.conversationId;
@@ -850,7 +910,7 @@ const ChatPage: React.FC = () => {
   // ─────────────────────────────────────────────────────
 
   const isEmpty = messages.length === 0 && !isCurrentConversationBusy && !historyLoading;
-  const activeChatLabel = conversationId ? deckTitle.trim() || "New Chat" : "New Chat";
+  const activeChatLabel = conversationTitle.trim() || "New Chat";
 
   return (
     <div className="h-screen w-screen flex bg-background text-foreground overflow-hidden font-sans">
@@ -905,7 +965,7 @@ const ChatPage: React.FC = () => {
           <button
             onClick={() => {
               setMessages([]);
-              setDeckTitle("New Chat");
+              setConversationTitle("New Chat");
               setIsConversationHistoryOpen(false);
               navigate(projectId ? `/chat?projectId=${projectId}` : `/chat`, { replace: true });
             }}
@@ -969,7 +1029,7 @@ const ChatPage: React.FC = () => {
                     >
                       <div className="flex items-start justify-between gap-3">
                         <span className="min-w-0 truncate text-sm font-medium text-foreground">
-                          {entry.title.trim() || "Untitled"}
+                          {entry.title.trim() || "Untitled Project"}
                         </span>
                         <span
                           className={cn(
