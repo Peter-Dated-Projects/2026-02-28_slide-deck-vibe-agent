@@ -11,6 +11,7 @@ describe('Core Tools - read/write slide OCC', () => {
     let vibeManager: VibeManager;
 
     const initialSlideInnerHtml = '<h1>Original Title</h1>';
+    const secondSlideInnerHtml = '<h2>Second Slide</h2><p>Details</p>';
 
     const fixtureHtml = `<!doctype html>
 <html>
@@ -27,6 +28,9 @@ describe('Core Tools - read/write slide OCC', () => {
         <!-- VIBE_SLIDE_1_START -->
         <section class="slide">${initialSlideInnerHtml}</section>
         <!-- VIBE_SLIDE_1_END -->
+        <!-- VIBE_SLIDE_2_START -->
+        <section class="slide">${secondSlideInnerHtml}</section>
+        <!-- VIBE_SLIDE_2_END -->
         <!-- VIBE_SLIDES_CONTAINER_END -->
     </div>
 </body>
@@ -43,21 +47,50 @@ describe('Core Tools - read/write slide OCC', () => {
         await fs.rm(tempDir, { recursive: true, force: true });
     });
 
-    it('read_slide returns JSON with html and sha256 hash', async () => {
+    it('read_slide returns slideId/html/hash mapping for a single slide', async () => {
         const result = await executeTool(vibeManager, 'read_slide', { index: 1 });
         const parsed = JSON.parse(result);
 
         const expectedHash = crypto.createHash('sha256').update(initialSlideInnerHtml).digest('hex');
 
         expect(parsed).toEqual({
-            html: initialSlideInnerHtml,
-            hash: expectedHash
+            slides: [
+                {
+                    slideId: 1,
+                    html: initialSlideInnerHtml,
+                    hash: expectedHash
+                }
+            ]
         });
+    });
+
+    it('read_slide supports multiple slide indices and returns unique per-slide hashes', async () => {
+        const result = await executeTool(vibeManager, 'read_slide', { indices: [1, 2] });
+        const parsed = JSON.parse(result);
+
+        const firstHash = crypto.createHash('sha256').update(initialSlideInnerHtml).digest('hex');
+        const secondHash = crypto.createHash('sha256').update(secondSlideInnerHtml).digest('hex');
+
+        expect(parsed).toEqual({
+            slides: [
+                {
+                    slideId: 1,
+                    html: initialSlideInnerHtml,
+                    hash: firstHash
+                },
+                {
+                    slideId: 2,
+                    html: secondSlideInnerHtml,
+                    hash: secondHash
+                }
+            ]
+        });
+        expect(parsed.slides[0].hash).not.toBe(parsed.slides[1].hash);
     });
 
     it('write_slide succeeds with a correct hash and updates the slide', async () => {
         const readResult = await executeTool(vibeManager, 'read_slide', { index: 1 });
-        const { hash } = JSON.parse(readResult);
+        const hash = JSON.parse(readResult).slides[0].hash;
 
         const updatedInnerHtml = '<h1>Updated Title</h1>';
         const writeResult = await executeTool(vibeManager, 'write_slide', {
@@ -127,6 +160,7 @@ describe('Core Tools - read/write slide OCC', () => {
         expect(writeSlideTool.function.description).toContain('MUST provide the content hash');
         expect(writeSlideTool.function.description).toContain('inside <section class=\"slide\">');
         expect(systemInstruction).toContain('MUST first read it using read_slide');
+        expect(systemInstruction).toContain('returns explicit slideId/html/hash tuples');
         expect(systemInstruction).toContain('only return/modify the content inside each <section class="slide">');
         expect(systemInstruction).toContain('shared across the entire slide deck');
     });
