@@ -20,67 +20,6 @@ export interface AgentRuntimeState {
     tasks: AgentTaskItem[];
 }
 
-const DISCOVERY_TASK_IDS = [
-    'discovery-purpose',
-    'discovery-audience',
-    'discovery-theme',
-    'discovery-content'
-];
-
-const PLANNING_TASK_IDS = [
-    'planning-structure',
-    'planning-slide-tasks'
-];
-
-const REQUIRED_WORKFLOW_TASKS: AgentTaskItem[] = [
-    { id: 'discovery-purpose', title: 'Collect slide deck purpose', done: false },
-    { id: 'discovery-audience', title: 'Collect presenter audience', done: false },
-    { id: 'discovery-theme', title: 'Collect preferred theme', done: false },
-    { id: 'discovery-content', title: 'Collect source content for the deck', done: false },
-    { id: 'planning-structure', title: 'Plan slide structure and subtopics from collected content', done: false },
-    { id: 'planning-slide-tasks', title: 'Create per-slide tasks before editing', done: false }
-];
-
-const MUTATING_TOOL_NAMES = new Set([
-    'write_slide',
-    'add_slide',
-    'delete_slide',
-    'duplicate_slide',
-    'move_slide',
-    'write_manifest',
-    'reorder_slides',
-    'write_theme',
-    'write_transitions',
-    'write_animations',
-    'write_global_ui',
-    'migrate_template_to_v3',
-    'apply_changes'
-]);
-
-const areTasksDone = (runtimeState: AgentRuntimeState, ids: string[]) => {
-    return ids.every((id) => runtimeState.tasks.some((task) => task.id === id && task.done));
-};
-
-const ensureRequiredWorkflowTasks = (tasks: AgentTaskItem[]): AgentTaskItem[] => {
-    const map = new Map<string, AgentTaskItem>();
-
-    for (const task of tasks) {
-        if (!task.id || !task.title) {
-            continue;
-        }
-
-        map.set(task.id, { ...task, done: Boolean(task.done) });
-    }
-
-    for (const required of REQUIRED_WORKFLOW_TASKS) {
-        if (!map.has(required.id)) {
-            map.set(required.id, { ...required });
-        }
-    }
-
-    return Array.from(map.values());
-};
-
 const hashOf = (value: unknown): string =>
     crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
 
@@ -484,26 +423,7 @@ export const getTools = async (vibeManager: VibeManager): Promise<{ tools: OpenA
         }
     ];
 
-    const systemInstruction = `You are editing a Vibe V3 slide deck with stable UUID slide IDs. Use slide_id for all write_slide operations (index writes are not allowed). Index may still be used for read_slide when needed. Always read before write and pass the returned hash (OCC). Use list_slides first when planning multi-slide updates. Use read_manifest/write_manifest or reorder_slides/move_slide to control active slide order. Use write_theme, write_transitions, write_animations, and write_global_ui for global style/UI updates. After structural edits, call validate_deck_state to confirm HTML and manifest alignment.
-
-Workflow policy (strict order):
-1) Discovery phase first. Collect and confirm all of these before any slide mutation:
-- deck purpose
-- target audience
-- preferred theme/style
-- source content/material for the deck
-2) Planning phase second. Only after discovery is complete:
-- read all existing material
-- separate material into topics/subtopics and slide groups
-- create and maintain explicit per-slide tasks
-3) Execution phase last. Only after planning is complete:
-- perform slide edits/additions/reordering/style changes until all slide tasks are complete.
-
-Do not call mutating slide tools during discovery. 
-During planning, you may read/list/inspect but do not mutate content yet. 
-Keep progress updates brief: when a tool finishes, briefly explain what you did and your current status. 
-Do not provide long between-tool explanations. 
-For multi-step work, create and maintain a checklist with set_task_list/update_task_status and consult read_task_list as needed.`;
+    const systemInstruction = `You are editing a Vibe V3 slide deck with stable UUID slide IDs. Use slide_id for all write_slide operations (index writes are not allowed). Index may still be used for read_slide when needed. Always read before write and pass the returned hash (OCC). Use list_slides first when planning multi-slide updates. Use read_manifest/write_manifest or reorder_slides/move_slide to control active slide order. Use write_theme, write_transitions, write_animations, and write_global_ui for global style/UI updates. After structural edits, call validate_deck_state to confirm HTML and manifest alignment. Keep progress updates brief: when a tool finishes, briefly explain what you did and your current status.`;
 
     return { tools, systemInstruction };
 };
@@ -534,7 +454,7 @@ export const executeTool = async (
 
             const mergedMap = new Map<string, AgentTaskItem>();
 
-            for (const existing of ensureRequiredWorkflowTasks(runtimeState.tasks)) {
+            for (const existing of runtimeState.tasks) {
                 mergedMap.set(existing.id, existing);
             }
 
@@ -555,7 +475,7 @@ export const executeTool = async (
                 });
             }
 
-            runtimeState.tasks = ensureRequiredWorkflowTasks(Array.from(mergedMap.values()));
+            runtimeState.tasks = Array.from(mergedMap.values());
             return formatResult({ success: true, tasks: runtimeState.tasks, mutated: false });
         }
 
@@ -582,25 +502,7 @@ export const executeTool = async (
             return formatResult({ success: true, task: runtimeState.tasks[idx], tasks: runtimeState.tasks, mutated: false });
         }
 
-        if (runtimeState && MUTATING_TOOL_NAMES.has(name)) {
-            const discoveryComplete = areTasksDone(runtimeState, DISCOVERY_TASK_IDS);
-            if (!discoveryComplete) {
-                return formatResult({
-                    error: 'Discovery phase is incomplete. Collect purpose, audience, theme, and source content before editing slides.',
-                    mutated: false,
-                    required_task_ids: DISCOVERY_TASK_IDS
-                });
-            }
 
-            const planningComplete = areTasksDone(runtimeState, PLANNING_TASK_IDS);
-            if (!planningComplete) {
-                return formatResult({
-                    error: 'Planning phase is incomplete. Finalize structure and per-slide tasks before editing slides.',
-                    mutated: false,
-                    required_task_ids: PLANNING_TASK_IDS
-                });
-            }
-        }
 
         if (name === 'list_slides') {
             const slides = vibeManager.listSlides().map((slide) => ({
