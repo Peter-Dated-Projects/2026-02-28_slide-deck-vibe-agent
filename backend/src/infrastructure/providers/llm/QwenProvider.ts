@@ -2,6 +2,7 @@ import OpenAI from 'openai';
 import type { ILLMService } from "../../../core/interfaces/ILLMService";
 import type { IDatabaseService } from "../../../core/interfaces/IDatabaseService";
 import type { IStorageService } from "../../../core/interfaces/IStorageService";
+import { extractToolCallsFromText } from "./toolCallParser";
 
 export class QwenProvider implements ILLMService {
     private openai: OpenAI;
@@ -103,6 +104,9 @@ export class QwenProvider implements ILLMService {
 
         let fullText = '';
         let toolCallsCache: any[] = [];
+        let accumulatedContent = ''; // Track all content including thinking
+        let isInThinkingBlock = false;
+        let thinkingContent = '';
         
         for await (const chunk of stream) {
             // Handle standard text content
@@ -110,6 +114,23 @@ export class QwenProvider implements ILLMService {
             if (token) {
                 onChunk(token);
                 fullText += token;
+                accumulatedContent += token;
+                
+                // Track if we're in a thinking block (simple heuristic)
+                if (token.includes('<think>')) {
+                    isInThinkingBlock = true;
+                    thinkingContent = '';
+                } else if (token.includes('</think>')) {
+                    isInThinkingBlock = false;
+                    // Extract tool calls from thinking block
+                    const extractedToolCalls = extractToolCallsFromText(thinkingContent);
+                    if (extractedToolCalls.length > 0) {
+                        toolCallsCache.push(...extractedToolCalls);
+                    }
+                    thinkingContent = '';
+                } else if (isInThinkingBlock) {
+                    thinkingContent += token;
+                }
             }
             
             // Handle tool calls streaming (Qwen/OpenAI format)
@@ -128,6 +149,23 @@ export class QwenProvider implements ILLMService {
                         toolCallsCache[idx].function.arguments += tc.function.arguments;
                     }
                 }
+            }
+        }
+        
+        // If we exited with an active thinking block, extract from it
+        if (isInThinkingBlock && thinkingContent) {
+            const extractedToolCalls = extractToolCallsFromText(thinkingContent);
+            if (extractedToolCalls.length > 0) {
+                toolCallsCache.push(...extractedToolCalls);
+            }
+        }
+        
+        // Also check the entire accumulated content for tool calls
+        const globalExtractedToolCalls = extractToolCallsFromText(accumulatedContent);
+        for (const tc of globalExtractedToolCalls) {
+            // Only add if not already in cache
+            if (!toolCallsCache.some(existing => existing.id === tc.id)) {
+                toolCallsCache.push(tc);
             }
         }
         
