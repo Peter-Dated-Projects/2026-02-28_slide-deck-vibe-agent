@@ -226,7 +226,7 @@ const ToolBlock: React.FC<ToolBlockProps> = ({ toolCalls, toolResults }) => {
             <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path>
           </svg>
         </div>
-        <span className="flex-1 text-left overflow-hidden text-ellipsis whitespace-nowrap">
+        <span className="flex-1 text-left break-words [overflow-wrap:anywhere]">
           {toolCalls.length === 1
             ? `Agent ran: ${toolCalls[0].function?.name || "tool"}`
             : "Agent ran multiple tools..."}
@@ -354,7 +354,7 @@ const mdComponents = {
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
 const MarkdownContent: React.FC<{ content: string }> = ({ content }) => (
-  <div className="chat-markdown">
+  <div className="chat-markdown break-words [overflow-wrap:anywhere]">
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
       rehypePlugins={[rehypeHighlight]}
@@ -449,7 +449,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = React.memo(({ message }) 
         onContextMenu={handleContextMenu}
         className={cn(
           isUser ? "max-w-[70%]" : "w-full",
-          "rounded-[8px] px-4 py-2.5 mt-2 transition-all duration-200",
+          "rounded-[8px] px-4 py-2.5 mt-2 transition-all duration-200 break-words [overflow-wrap:anywhere]",
           isUser
             ? "bg-primary text-primary-foreground rounded-tr-[2px] shadow-sm"
             : "bg-card text-foreground rounded-tl-[2px] border border-border",
@@ -469,7 +469,9 @@ export const ChatMessage: React.FC<ChatMessageProps> = React.memo(({ message }) 
           <>
             {isUser ? (
               // User messages: preserve line breaks, no markdown
-              <p className="text-[12px] leading-relaxed whitespace-pre-wrap">{message.content}</p>
+              <p className="text-[12px] leading-relaxed whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+                {message.content}
+              </p>
             ) : (
               // Assistant messages: parse and handle think blocks + markdown
               <div className="space-y-3 w-full">
