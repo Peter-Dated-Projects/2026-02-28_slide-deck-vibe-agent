@@ -10,6 +10,16 @@ type ToolResult = {
     [key: string]: any;
 };
 
+export interface AgentTaskItem {
+    id: string;
+    title: string;
+    done: boolean;
+}
+
+export interface AgentRuntimeState {
+    tasks: AgentTaskItem[];
+}
+
 const hashOf = (value: unknown): string =>
     crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
 
@@ -51,6 +61,57 @@ export const getTools = async (vibeManager: VibeManager): Promise<{ tools: OpenA
     const slideCount = vibeManager.getSlideCount();
 
     const tools: OpenAI.Chat.ChatCompletionTool[] = [
+        {
+            type: 'function',
+            function: {
+                name: 'read_task_list',
+                description: 'Read the current in-memory task checklist for this request.',
+                parameters: {
+                    type: 'object',
+                    properties: {}
+                }
+            }
+        },
+        {
+            type: 'function',
+            function: {
+                name: 'set_task_list',
+                description: 'Merge tasks into the in-memory checklist. Existing tasks are preserved unless overridden by matching id.',
+                parameters: {
+                    type: 'object',
+                    properties: {
+                        tasks: {
+                            type: 'array',
+                            items: {
+                                type: 'object',
+                                properties: {
+                                    id: { type: 'string' },
+                                    title: { type: 'string' },
+                                    done: { type: 'boolean' }
+                                },
+                                required: ['id', 'title']
+                            }
+                        }
+                    },
+                    required: ['tasks']
+                }
+            }
+        },
+        {
+            type: 'function',
+            function: {
+                name: 'update_task_status',
+                description: 'Mark a checklist task as done/undone.',
+                parameters: {
+                    type: 'object',
+                    properties: {
+                        id: { type: 'string' },
+                        done: { type: 'boolean' }
+                    },
+                    required: ['id', 'done']
+                }
+            }
+        },
         {
             type: 'function',
             function: {
@@ -362,7 +423,7 @@ export const getTools = async (vibeManager: VibeManager): Promise<{ tools: OpenA
         }
     ];
 
-    const systemInstruction = `You are editing a Vibe V3 slide deck with stable UUID slide IDs. Use slide_id for all write_slide operations (index writes are not allowed). Index may still be used for read_slide when needed. Always read before write and pass the returned hash (OCC). Use list_slides first when planning multi-slide updates. Use read_manifest/write_manifest or reorder_slides/move_slide to control active slide order. Use write_theme, write_transitions, write_animations, and write_global_ui for global style/UI updates. After structural edits, call validate_deck_state to confirm HTML and manifest alignment.`;
+    const systemInstruction = `You are editing a Vibe V3 slide deck with stable UUID slide IDs. Use slide_id for all write_slide operations (index writes are not allowed). Index may still be used for read_slide when needed. Always read before write and pass the returned hash (OCC). Use list_slides first when planning multi-slide updates. Use read_manifest/write_manifest or reorder_slides/move_slide to control active slide order. Use write_theme, write_transitions, write_animations, and write_global_ui for global style/UI updates. After structural edits, call validate_deck_state to confirm HTML and manifest alignment. Keep progress updates brief: when a tool finishes, briefly explain what you did and your current status.`;
 
     return { tools, systemInstruction };
 };
@@ -370,8 +431,79 @@ export const getTools = async (vibeManager: VibeManager): Promise<{ tools: OpenA
 /**
  * Executes a tool call and returns the result string.
  */
-export const executeTool = async (vibeManager: VibeManager, name: string, args: any): Promise<string> => {
+export const executeTool = async (
+    vibeManager: VibeManager,
+    name: string,
+    args: any,
+    runtimeState?: AgentRuntimeState
+): Promise<string> => {
     try {
+        if (name === 'read_task_list') {
+            const tasks = runtimeState?.tasks || [];
+            return formatResult({ success: true, tasks, mutated: false });
+        }
+
+        if (name === 'set_task_list') {
+            if (!runtimeState) {
+                return formatResult({ error: 'Task list runtime is unavailable.', mutated: false });
+            }
+
+            if (!Array.isArray(args?.tasks)) {
+                return formatResult({ error: 'Missing tasks array.', mutated: false });
+            }
+
+            const mergedMap = new Map<string, AgentTaskItem>();
+
+            for (const existing of runtimeState.tasks) {
+                mergedMap.set(existing.id, existing);
+            }
+
+            const seenIds = new Set<string>();
+
+            for (const rawTask of args.tasks) {
+                const id = String(rawTask?.id || '').trim();
+                const title = String(rawTask?.title || '').trim();
+                if (!id || !title || seenIds.has(id)) {
+                    continue;
+                }
+
+                seenIds.add(id);
+                mergedMap.set(id, {
+                    id,
+                    title,
+                    done: Boolean(rawTask?.done)
+                });
+            }
+
+            runtimeState.tasks = Array.from(mergedMap.values());
+            return formatResult({ success: true, tasks: runtimeState.tasks, mutated: false });
+        }
+
+        if (name === 'update_task_status') {
+            if (!runtimeState) {
+                return formatResult({ error: 'Task list runtime is unavailable.', mutated: false });
+            }
+
+            const id = String(args?.id || '').trim();
+            if (!id || typeof args?.done !== 'boolean') {
+                return formatResult({ error: 'Missing id or done boolean.', mutated: false });
+            }
+
+            const idx = runtimeState.tasks.findIndex((task) => task.id === id);
+            if (idx < 0) {
+                return formatResult({ error: `Task not found: ${id}`, mutated: false });
+            }
+
+            runtimeState.tasks[idx] = {
+                ...runtimeState.tasks[idx]!,
+                done: args.done
+            };
+
+            return formatResult({ success: true, task: runtimeState.tasks[idx], tasks: runtimeState.tasks, mutated: false });
+        }
+
+
+
         if (name === 'list_slides') {
             const slides = vibeManager.listSlides().map((slide) => ({
                 slide_id: slide.id,
@@ -669,7 +801,7 @@ export const executeTool = async (vibeManager: VibeManager, name: string, args: 
                     });
                 }
 
-                const raw = await executeTool(vibeManager, toolName, operation?.args || {});
+                const raw = await executeTool(vibeManager, toolName, operation?.args || {}, runtimeState);
                 let parsed: any;
                 try {
                     parsed = JSON.parse(raw);

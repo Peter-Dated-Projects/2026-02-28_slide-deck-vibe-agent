@@ -174,4 +174,46 @@ describe('Core Tools - V3 UUID and OCC behavior', () => {
         expect(writeSlideTool.function.description).toContain('slide_id only');
         expect(systemInstruction).toContain('slide_id for all write_slide operations');
     });
+
+    it('set_task_list/read_task_list/update_task_status maintains in-memory checklist', async () => {
+        const runtimeState = {
+            tasks: [
+                { id: 'discovery-purpose', title: 'Collect slide deck purpose', done: false },
+                { id: 'discovery-audience', title: 'Collect presenter audience', done: false },
+                { id: 'discovery-theme', title: 'Collect preferred theme', done: false },
+                { id: 'discovery-content', title: 'Collect source content for the deck', done: false },
+                { id: 'planning-structure', title: 'Plan slide structure and subtopics from collected content', done: false },
+                { id: 'planning-slide-tasks', title: 'Create per-slide tasks before editing', done: false }
+            ]
+        };
+
+        const setResult = await executeTool(vibeManager, 'set_task_list', {
+            tasks: [
+                { id: 'task-1', title: 'Inspect slides', done: false },
+                { id: 'task-2', title: 'Apply updates', done: false }
+            ]
+        }, runtimeState);
+
+        const setParsed = JSON.parse(setResult);
+        expect(setParsed.success).toBe(true);
+        expect(setParsed.tasks.some((task: any) => task.id === 'task-1')).toBe(true);
+        expect(setParsed.tasks.some((task: any) => task.id === 'task-2')).toBe(true);
+
+        const updateResult = await executeTool(vibeManager, 'update_task_status', {
+            id: 'task-1',
+            done: true
+        }, runtimeState);
+        const updateParsed = JSON.parse(updateResult);
+        expect(updateParsed.success).toBe(true);
+        expect(updateParsed.task).toEqual({
+            id: 'task-1',
+            title: 'Inspect slides',
+            done: true
+        });
+
+        const readResult = await executeTool(vibeManager, 'read_task_list', {}, runtimeState);
+        const readParsed = JSON.parse(readResult);
+        expect(readParsed.success).toBe(true);
+        expect(readParsed.tasks.some((task: any) => task.id === 'task-1' && task.done)).toBe(true);
+        expect(readParsed.tasks.some((task: any) => task.id === 'task-2' && !task.done)).toBe(true);
 });

@@ -3,8 +3,20 @@ import * as path from 'path';
 import * as fs from 'fs/promises';
 import * as os from 'os';
 import { VibeManager } from '../core/vibeManager';
-import { getTools, executeTool } from '../core/tools';
+import { getTools, executeTool, type AgentRuntimeState } from '../core/tools';
 import { loadDeckHtmlForProject, saveDeckHtmlForProject } from './projectDeck';
+
+const buildSystemInstructionWithTaskList = (baseInstruction: string, runtimeState: AgentRuntimeState) => {
+    if (!runtimeState.tasks.length) {
+        return `${baseInstruction}\n\nCurrent task checklist: (none yet)`;
+    }
+
+    const checklist = runtimeState.tasks
+        .map((task: AgentRuntimeState['tasks'][number]) => `${task.done ? '[x]' : '[ ]'} ${task.id}: ${task.title}`)
+        .join('\n');
+
+    return `${baseInstruction}\n\nCurrent task checklist:\n${checklist}`;
+};
 
 const createConversationVibeManager = async (conversationId: string) => {
     const res = await db.query('SELECT project_id FROM conversations WHERE id = $1', [conversationId]);
@@ -32,6 +44,7 @@ const createConversationVibeManager = async (conversationId: string) => {
 export const chatWithAgent = async (conversationId: string, messages: any[]) => {
     const { vibeManager, persist, cleanup } = await createConversationVibeManager(conversationId);
     const { tools, systemInstruction } = await getTools(vibeManager);
+    const runtimeState: AgentRuntimeState = { tasks: [] };
 
     let currentMessages = [...messages];
     let turnCount = 0;
@@ -40,7 +53,8 @@ export const chatWithAgent = async (conversationId: string, messages: any[]) => 
     try {
         while (turnCount < maxTurns) {
             turnCount++;
-            const result = await llmService.chatWithAgent(conversationId, currentMessages, tools, systemInstruction);
+            const dynamicSystemInstruction = buildSystemInstructionWithTaskList(systemInstruction, runtimeState);
+            const result = await llmService.chatWithAgent(conversationId, currentMessages, tools, dynamicSystemInstruction);
 
             if (result.stop_reason === 'tool_calls' && result.tool_calls) {
                 // Add assistant's tool calls to history
@@ -63,7 +77,7 @@ export const chatWithAgent = async (conversationId: string, messages: any[]) => 
                             args = {};
                         }
                     }
-                    const output = await executeTool(vibeManager, name, args);
+                    const output = await executeTool(vibeManager, name, args, runtimeState);
 
                     try {
                         const parsed = JSON.parse(output);
@@ -101,6 +115,7 @@ export const chatWithAgentStream = async (
 ): Promise<string> => {
     const { vibeManager, persist, cleanup } = await createConversationVibeManager(conversationId);
     const { tools, systemInstruction } = await getTools(vibeManager);
+    const runtimeState: AgentRuntimeState = { tasks: [] };
 
     try {
         if (!llmService.chatWithAgentStream) {
@@ -120,6 +135,7 @@ export const chatWithAgentStream = async (
 
         while (turnCount < maxTurns) {
             turnCount++;
+        const dynamicSystemInstruction = buildSystemInstructionWithTaskList(systemInstruction, runtimeState);
         
         let localToolCalls: any[] = [];
         let localText = '';
@@ -139,12 +155,12 @@ export const chatWithAgentStream = async (
                  // pass to frontend so it can display them
                  onChunk(token);
             } else {
-                 localText += token;
-                 onChunk(token);
+                  // Buffer text and only emit if this turn does not transition into tool calls.
+                  localText += token;
             }
         };
 
-        await llmService.chatWithAgentStream(conversationId, currentMessages, wrappedCallback, tools, systemInstruction);
+           await llmService.chatWithAgentStream(conversationId, currentMessages, wrappedCallback, tools, dynamicSystemInstruction);
 
         if (localToolCalls.length > 0) {
              currentMessages.push({
@@ -165,7 +181,7 @@ export const chatWithAgentStream = async (
                          args = {};
                      }
                  }
-                 const output = await executeTool(vibeManager, name, args);
+                 const output = await executeTool(vibeManager, name, args, runtimeState);
                  let shouldRefreshPresentation = false;
 
                  try {
@@ -193,6 +209,9 @@ export const chatWithAgentStream = async (
              }
              // Loop again to give LLM the results
         } else {
+               if (localText) {
+                  onChunk(localText);
+               }
              return localText;
         }
         }
