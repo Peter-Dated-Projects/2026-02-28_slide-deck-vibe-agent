@@ -1,16 +1,8 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'bun:test';
 import { dbService as db } from '../core/container';
 import { googleAuth } from '../controllers/auth';
 import type { Request, Response } from 'express';
 
-import { mock, spyOn } from 'bun:test';
 import { OAuth2Client } from 'google-auth-library';
-
-// Polyfill jest for bun
-const jest = {
-    fn: mock,
-    mock: mock.module
-};
 
 describe('Database Integration Tests', () => {
     let testUserId: string;
@@ -57,7 +49,7 @@ describe('Database Integration Tests', () => {
 
             // Setup google mock
             // @ts-ignore
-            spyOn(OAuth2Client.prototype, 'verifyIdToken').mockResolvedValue({
+            jest.spyOn(OAuth2Client.prototype, 'verifyIdToken').mockResolvedValue({
                 getPayload: () => ({
                     email: 'test_oauth@example.com',
                     sub: 'google-sub-12345',

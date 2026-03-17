@@ -3,55 +3,60 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Vibe Slide Engine Dashboard Template</title>
+    <title>Vibe Engine V3</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css" rel="stylesheet">
+    
     <style>
         /* --- CORE ENGINE (READ ONLY) --- */
         :root {
             --base-width: 1920px;
             --base-height: 1080px;
-            --vibe-scale: 1; /* Managed by JS */
+            --vibe-scale: 1;
         }
 
         /* <!-- VIBE_THEME_START --> */
         :root {
-            --vibe-primary: #3b82f6;
-            --vibe-secondary: #8b5cf6;
-            --vibe-bg: #0f172a;
-            --vibe-text: #f8fafc;
-            --vibe-accent: #10b981;
+            --vibe-primary: #6366f1;
+            --vibe-secondary: #ec4899;
+            --vibe-bg: #030712;
+            --vibe-text: #f9fafb;
+            --vibe-accent: #f59e0b;
             --vibe-font: 'Inter', system-ui, sans-serif;
         }
         /* <!-- VIBE_THEME_END --> */
 
-        /* --- TRANSITIONS --- */
+        /* <!-- VIBE_TRANSITIONS_START --> */
         .slide-container {
             scroll-behavior: smooth;
             perspective: 2000px;
         }
-
-        .slide {
-            transition: all 0.8s cubic-bezier(0.22, 1, 0.36, 1);
-            opacity: 1;
+        /* Defines how slides move into view - The body class controls this */
+        .vibe-transition-fade .slide {
+            transition: opacity 0.8s ease-in-out;
         }
+        /* <!-- VIBE_TRANSITIONS_END --> */
 
-        .vibe-transition-blur .slide-aspect-ratio-box {
-            animation: blurReveal 1s ease-out forwards;
+        /* <!-- VIBE_ANIMATIONS_START --> */
+        @keyframes vibe-float {
+            0% { transform: translateY(0px); }
+            50% { transform: translateY(-20px); }
+            100% { transform: translateY(0px); }
         }
-
-        @keyframes blurReveal {
-            from { opacity: 0; filter: blur(20px); transform: scale(calc(var(--vibe-scale) * 1.05)); }
-            to { opacity: 1; filter: blur(0); transform: scale(var(--vibe-scale)); }
+        .vibe-anim-float { animation: vibe-float 4s ease-in-out infinite; }
+        
+        @keyframes vibe-glow {
+            from { text-shadow: 0 0 10px var(--vibe-primary); }
+            to { text-shadow: 0 0 30px var(--vibe-primary), 0 0 10px var(--vibe-secondary); }
         }
+        .vibe-anim-glow { animation: vibe-glow 2s ease-in-out infinite alternate; }
+        /* <!-- VIBE_ANIMATIONS_END --> */
 
-        /* --- BASE STYLES --- */
         body, html {
             background-color: #000;
             margin: 0; padding: 0;
             width: 100%; height: 100%;
             overflow: hidden;
-            display: flex; justify-content: center; align-items: center;
             font-family: var(--vibe-font);
         }
 
@@ -66,58 +71,112 @@
             scroll-snap-align: start;
             display: flex; justify-content: center; align-items: center;
             background-color: var(--vibe-bg);
+            position: relative;
         }
 
         .slide-aspect-ratio-box {
             width: var(--base-width);
             height: var(--base-height);
-            background-color: var(--vibe-bg);
             color: var(--vibe-text);
             position: relative;
             flex-shrink: 0;
-            display: flex; flex-direction: column; justify-content: center;
-            padding: 80px; box-sizing: border-box;
-            transform-origin: center center;
-            backface-visibility: hidden;
             transform: scale(var(--vibe-scale));
-        }
-
-        .vibe-nav {
-            position: fixed; bottom: 30px; right: 30px;
-            display: flex; gap: 15px; z-index: 100;
-        }
-
-        .nav-btn {
-            background: rgba(0, 0, 0, 0.4); backdrop-filter: blur(12px);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            color: white; width: 60px; height: 60px; border-radius: 50%;
-            display: flex; align-items: center; justify-content: center;
-            cursor: pointer; font-size: 24px;
+            transform-origin: center center;
+            padding: 80px;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+            backface-visibility: hidden;
         }
     </style>
 </head>
-<body class="vibe-transition-blur">
+<body class="vibe-transition-fade">
+
+    <!-- <!-- VIBE_GLOBAL_UI_START --> -->
+    <div class="fixed inset-0 pointer-events-none z-50 flex flex-col justify-between p-10">
+        <!-- HEADER: Brand/Logo area -->
+        <header class="flex justify-between items-center opacity-40">
+            <div class="flex items-center gap-3">
+                <div class="w-6 h-6 rounded bg-[var(--vibe-primary)]"></div>
+                <span class="font-black text-white uppercase tracking-widest text-sm">Vibe Engine V3</span>
+            </div>
+            <div class="text-white/50 text-xs">DRAFT_VERSION_03</div>
+        </header>
+
+        <!-- FOOTER: Progress/Nav -->
+        <footer class="flex justify-between items-end">
+            <div class="text-white/20 text-xs font-mono">
+                COORD_LAT: 43.4643 / COORD_LON: -80.5204
+            </div>
+            <div class="flex gap-4 pointer-events-auto">
+                <button onclick="prevSlide()" class="w-12 h-12 rounded-xl bg-white/5 border border-white/10 text-white hover:bg-white/10 transition flex items-center justify-center">↑</button>
+                <button onclick="nextSlide()" class="w-12 h-12 rounded-xl bg-white/5 border border-white/10 text-white hover:bg-white/10 transition flex items-center justify-center">↓</button>
+            </div>
+        </footer>
+    </div>
+    <!-- <!-- VIBE_GLOBAL_UI_END --> -->
 
     <div class="slide-container" id="vibe-deck">
-        <!-- VIBE_SLIDES_CONTAINER_START -->
-        
-        <!-- VIBE_SLIDE_1_START -->
-        <section class="slide">
-            <div class="slide-aspect-ratio-box items-center text-center">
-                <h1 class="text-[120px] font-black text-[var(--vibe-primary)] leading-none mb-10">New Presentation</h1>
-                <p class="text-[48px] opacity-80 max-w-4xl">Edit Theme and Add Slides using the AI Agent</p>
+        <!-- <!-- VIBE_SLIDES_CONTAINER_START --> -->
+
+        <!-- VIBE_SLIDE_ID:550e8400-e29b-41d4-a716-446655440000_START -->
+        <section class="slide" id="slide-550e8400">
+            <div class="slide-aspect-ratio-box justify-center items-center">
+                <div class="vibe-anim-float">
+                   <h1 class="text-[140px] font-black leading-none text-transparent bg-clip-text bg-gradient-to-br from-[var(--vibe-primary)] to-[var(--vibe-secondary)]">
+                       VIBE_V3
+                   </h1>
+                </div>
+                <p class="text-[42px] mt-10 opacity-70 vibe-anim-glow">Atomic Slide System</p>
             </div>
         </section>
-        <!-- VIBE_SLIDE_1_END -->
+        <!-- VIBE_SLIDE_ID:550e8400-e29b-41d4-a716-446655440000_END -->
 
+        <!-- VIBE_SLIDE_ID:a1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d_START -->
+        <section class="slide" id="slide-a1b2c3d4">
+            <div class="slide-aspect-ratio-box">
+                <div class="grid grid-cols-2 gap-20 h-full items-center">
+                    <div>
+                        <h2 class="text-[80px] font-black leading-tight mb-8">Surgical Precision</h2>
+                        <p class="text-[32px] opacity-60 leading-relaxed mb-12">
+                            The VibeManager uses UUIDs to identify these blocks, allowing for updates without losing state.
+                        </p>
+                        <ul class="space-y-6 text-[24px]">
+                            <li class="flex items-center gap-4">
+                                <div class="w-8 h-8 rounded-full bg-[var(--vibe-secondary)] flex-shrink-0"></div>
+                                <span>No index-shifting errors</span>
+                            </li>
+                            <li class="flex items-center gap-4">
+                                <div class="w-8 h-8 rounded-full bg-[var(--vibe-secondary)] flex-shrink-0"></div>
+                                <span>Persistent slide identity</span>
+                            </li>
+                        </ul>
+                    </div>
+                    <div class="bg-gradient-to-br from-white/5 to-white/10 rounded-[40px] border border-white/10 h-[600px] flex items-center justify-center">
+                        <span class="text-[var(--vibe-secondary)] text-9xl font-black opacity-20">VIBE</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+        <!-- VIBE_SLIDE_ID:a1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d_END -->
 
-        <!-- VIBE_SLIDES_CONTAINER_END -->
+        <!-- <!-- VIBE_SLIDES_CONTAINER_END --> -->
     </div>
 
-    <nav class="vibe-nav">
-        <button class="nav-btn" onclick="prevSlide()">↑</button>
-        <button class="nav-btn" onclick="nextSlide()">↓</button>
-    </nav>
+    <!-- <!-- VIBE_MANIFEST_START --> -->
+    <script id="vibe-manifest" type="application/json">
+    {
+        "engine_version": "3.0.0",
+        "project_id": "default",
+        "theme_id": "midnight-neon",
+        "transition_style": "fade",
+        "active_slides": [
+            "550e8400-e29b-41d4-a716-446655440000",
+            "a1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d"
+        ]
+    }
+    </script>
+    <!-- <!-- VIBE_MANIFEST_END --> -->
 
     <script>
         const container = document.getElementById('vibe-deck');
@@ -133,9 +192,10 @@
         window.addEventListener('resize', updateScale);
         window.addEventListener('load', updateScale);
         window.addEventListener('keydown', (e) => {
-            if (e.key === 'ArrowDown') nextSlide();
+            if (e.key === 'ArrowDown' || e.key === ' ') nextSlide();
             if (e.key === 'ArrowUp') prevSlide();
         });
+        
         updateScale();
     </script>
 </body>

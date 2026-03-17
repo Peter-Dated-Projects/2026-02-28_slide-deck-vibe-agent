@@ -48,6 +48,8 @@ export default function ProjectsPage() {
         attemptedPreviewFallbackRef.current.delete(project.id);
       }
     }
+
+    return projects;
   }, []);
 
   const requestPreviewFallback = useCallback(
@@ -65,8 +67,33 @@ export default function ProjectsPage() {
 
       try {
         await api.post(`/projects/${projectId}/preview`);
-        await fetchProjects();
+
+        // Preview generation runs async on the backend; poll project list briefly
+        // until a thumbnail appears for this project.
+        const maxPollAttempts = 12;
+        const pollIntervalMs = 1500;
+        let previewReady = false;
+
+        for (let attempt = 0; attempt < maxPollAttempts; attempt += 1) {
+          if (attempt > 0) {
+            await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+          }
+
+          const projects = await fetchProjects();
+          const updatedProject = projects.find((project) => project.id === projectId);
+
+          if (updatedProject?.thumbnailUrl) {
+            previewReady = true;
+            break;
+          }
+        }
+
+        if (!previewReady) {
+          // Allow future retry if preview wasn't ready within the poll window.
+          attemptedPreviewFallbackRef.current.delete(projectId);
+        }
       } catch (error) {
+        attemptedPreviewFallbackRef.current.delete(projectId);
         console.error(`Failed to generate preview for project ${projectId}`, error);
       } finally {
         inFlightPreviewRequestsRef.current.delete(projectId);
@@ -209,6 +236,26 @@ export default function ProjectsPage() {
     }
   }, [creating, navigate]);
 
+  const handleDeleteProject = useCallback(
+    async (projectId: string) => {
+      const project = projectsData.find((p) => p.id === projectId);
+      const projectLabel = project?.name?.trim() || "this project";
+      const confirmed = window.confirm(`Delete ${projectLabel}? This cannot be undone.`);
+
+      if (!confirmed) {
+        return;
+      }
+
+      try {
+        await api.delete(`/projects/${projectId}`);
+        setProjectsData((prev) => prev.filter((p) => p.id !== projectId));
+      } catch (error) {
+        console.error(`Failed to delete project ${projectId}`, error);
+      }
+    },
+    [projectsData],
+  );
+
   if (loading) {
     return (
       <div className="max-w-7xl mx-auto pb-12 flex items-center justify-center min-h-[50vh]">
@@ -249,6 +296,7 @@ export default function ProjectsPage() {
                   project={project}
                   className="w-[300px] sm:w-[320px] max-h-[250px] shrink-0 snap-start"
                   onThumbnailUnavailable={requestPreviewFallback}
+                  onDelete={handleDeleteProject}
                 />
               ))}
               {/* Spacer empty div to allow scrolling past the fade overlay */}
@@ -297,6 +345,7 @@ export default function ProjectsPage() {
                     project={project}
                     className="w-full"
                     onThumbnailUnavailable={requestPreviewFallback}
+                    onDelete={handleDeleteProject}
                   />
                 </div>
               </div>
