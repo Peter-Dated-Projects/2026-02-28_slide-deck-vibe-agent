@@ -27,8 +27,6 @@ const buildSystemInstructionWithTaskList = (baseInstruction: string, runtimeStat
     return `${baseInstruction}\n\nCurrent task checklist:\n${checklist}`;
 };
 
-const shortToolCompletionMessage = (toolName: string) => `Completed task: ${toolName}.`;
-
 const createConversationVibeManager = async (conversationId: string) => {
     const res = await db.query('SELECT project_id FROM conversations WHERE id = $1', [conversationId]);
     const projectId = res.rows[0]?.project_id;
@@ -210,8 +208,6 @@ export const chatWithAgentStream = async (
                      tool_call_id: tc.id,
                      content: output
                  });
-
-                 onChunk(`${shortToolCompletionMessage(name)}\n`);
                  
                  // Optionally stream back the tool result so the UI knows it finished
                  onChunk(`\n[TOOL_RESULT]${JSON.stringify({ id: tc.id, result: output })}[/TOOL_RESULT]\n`);

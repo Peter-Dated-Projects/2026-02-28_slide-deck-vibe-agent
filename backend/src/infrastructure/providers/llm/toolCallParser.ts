@@ -16,8 +16,8 @@ export interface ParsedToolCall {
  * Attempts to extract tool calls from arbitrary text.
  * Supports multiple patterns:
  * 1. Standard JSON tool_calls array: { "tool_calls": [...] }
- * 2. Tool call objects within text
- * 3. Function-style tool calls
+ * 2. XML-style function_calls tags: <function_calls><invoke>...</invoke></function_calls>
+ * 3. XML-style tool_call tags: <tool_call><function=name><parameter=key>value</parameter></function></tool_call>
  */
 export function extractToolCallsFromText(text: string): ParsedToolCall[] {
     const toolCalls: ParsedToolCall[] = [];
@@ -102,6 +102,52 @@ export function extractToolCallsFromText(text: string): ParsedToolCall[] {
                 }
             }
         }
+    }
+
+    // Pattern 3: Look for <tool_call> tags with <function=...> and <parameter=...> format
+    const toolCallPattern = /<tool_call>([\s\S]*?)<\/tool_call>/g;
+    const toolCallMatches = text.matchAll(toolCallPattern);
+    
+    let toolCallIndex = 0;
+    for (const match of toolCallMatches) {
+        const content = match[1];
+        if (!content) {
+            toolCallIndex++;
+            continue;
+        }
+        
+        // Extract function name from <function=...> tag
+        const funcMatch = content.match(/<function=([a-zA-Z_][a-zA-Z0-9_]*)>/);
+        if (!funcMatch) {
+            toolCallIndex++;
+            continue;
+        }
+        
+        const functionName = funcMatch[1];
+        
+        // Extract all parameters from <parameter=name>value</parameter> tags
+        const paramPattern = /<parameter=([a-zA-Z_][a-zA-Z0-9_]*)>([\s\S]*?)<\/parameter>/g;
+        const paramMatches = content.matchAll(paramPattern);
+        
+        const parameters: Record<string, any> = {};
+        for (const paramMatch of paramMatches) {
+            const paramName = paramMatch[1];
+            const paramValue = paramMatch[2].trim();
+            parameters[paramName] = paramValue;
+        }
+        
+        if (functionName) {
+            toolCalls.push({
+                id: `tool_call_${toolCallIndex}`,
+                type: 'function',
+                function: {
+                    name: functionName,
+                    arguments: JSON.stringify(parameters)
+                }
+            });
+        }
+        
+        toolCallIndex++;
     }
 
     return toolCalls;
