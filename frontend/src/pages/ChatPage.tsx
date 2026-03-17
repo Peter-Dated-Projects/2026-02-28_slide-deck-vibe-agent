@@ -11,6 +11,7 @@ import { useAuth } from "../contexts/AuthContext";
 import api, { getAccessToken } from "../api";
 import { SlideRenderer, type SlideData } from "../components/SlideRenderer";
 import { ChatMessage, type ChatMessageData } from "../components/chat/ChatMessage";
+import { TaskListBar, type AgentTask } from "../components/chat/TaskListBar";
 import {
   Send,
   Loader2,
@@ -82,6 +83,94 @@ function parseStreamSnapshot(snapshot: string) {
   }
 
   return { isThinking, thinkingContent: "", content: snapshot };
+}
+
+function parseJsonSafely(value: unknown) {
+  if (typeof value !== "string") {
+    return value;
+  }
+
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
+  }
+}
+
+function normalizeTaskArray(rawTasks: unknown): AgentTask[] {
+  if (!Array.isArray(rawTasks)) {
+    return [];
+  }
+
+  const normalized: AgentTask[] = [];
+  const seen = new Set<string>();
+
+  for (const rawTask of rawTasks) {
+    if (!rawTask || typeof rawTask !== "object") {
+      continue;
+    }
+
+    const task = rawTask as Record<string, unknown>;
+    const id = String(task.id ?? "").trim();
+    const title = String(task.title ?? "").trim();
+
+    if (!id || !title || seen.has(id)) {
+      continue;
+    }
+
+    seen.add(id);
+    normalized.push({
+      id,
+      title,
+      done: Boolean(task.done),
+    });
+  }
+
+  return normalized;
+}
+
+function extractAgentTasks(messages: ChatMessageData[]): AgentTask[] {
+  let latestSnapshot: AgentTask[] = [];
+  let fallbackFromArguments: AgentTask[] = [];
+
+  for (const message of messages) {
+    if (message.role !== "assistant") {
+      continue;
+    }
+
+    for (const toolResult of message.toolResults ?? []) {
+      const parsedResultEnvelope = parseJsonSafely(toolResult?.result);
+      if (!parsedResultEnvelope || typeof parsedResultEnvelope !== "object") {
+        continue;
+      }
+
+      const parsedResult = parsedResultEnvelope as Record<string, unknown>;
+      const tasksFromResult = normalizeTaskArray(parsedResult.tasks);
+      if (tasksFromResult.length > 0) {
+        latestSnapshot = tasksFromResult;
+      }
+    }
+
+    for (const toolCall of message.toolCalls ?? []) {
+      const functionName = toolCall?.function?.name;
+      if (functionName !== "set_task_list") {
+        continue;
+      }
+
+      const parsedArgs = parseJsonSafely(toolCall?.function?.arguments);
+      if (!parsedArgs || typeof parsedArgs !== "object") {
+        continue;
+      }
+
+      const parsedObject = parsedArgs as Record<string, unknown>;
+      const tasksFromArguments = normalizeTaskArray(parsedObject.tasks);
+      if (tasksFromArguments.length > 0) {
+        fallbackFromArguments = tasksFromArguments;
+      }
+    }
+  }
+
+  return latestSnapshot.length > 0 ? latestSnapshot : fallbackFromArguments;
 }
 
 interface ConversationHistoryEntry {
@@ -207,6 +296,21 @@ const ChatPage: React.FC = () => {
     currentConversationKeyRef.current = currentConversationKey;
   }, [currentConversationKey]);
   const isCurrentConversationBusy = Boolean(conversationActivity[currentConversationKey]);
+  const agentTasks = useMemo(() => extractAgentTasks(messages), [messages]);
+
+  const adjustTextareaHeight = useCallback((element: HTMLTextAreaElement) => {
+    element.style.height = "auto";
+
+    const styles = window.getComputedStyle(element);
+    const lineHeight = Number.parseFloat(styles.lineHeight) || 20;
+    const paddingTop = Number.parseFloat(styles.paddingTop) || 0;
+    const paddingBottom = Number.parseFloat(styles.paddingBottom) || 0;
+    const maxHeight = lineHeight * 3 + paddingTop + paddingBottom;
+    const nextHeight = Math.min(element.scrollHeight, maxHeight);
+
+    element.style.height = `${nextHeight}px`;
+    element.style.overflowY = element.scrollHeight > maxHeight ? "auto" : "hidden";
+  }, []);
 
   const loadConversationHistory = useCallback(async () => {
     setIsConversationHistoryLoading(true);
@@ -482,9 +586,7 @@ const ChatPage: React.FC = () => {
   // ─────────────────────────────────────────────────────
   const handleTextareaChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setInput(e.target.value);
-    // Auto-grow: reset then set to scrollHeight
-    e.target.style.height = "auto";
-    e.target.style.height = Math.min(e.target.scrollHeight, 400) + "px";
+    adjustTextareaHeight(e.target);
   };
 
   // ─────────────────────────────────────────────────────
@@ -507,7 +609,10 @@ const ChatPage: React.FC = () => {
     if (!userText || isCurrentConversationBusy) return;
 
     setInput("");
-    if (textareaRef.current) textareaRef.current.style.height = "auto";
+    if (textareaRef.current) {
+      textareaRef.current.style.height = "auto";
+      textareaRef.current.style.overflowY = "hidden";
+    }
     userScrolledUp.current = false; // snap back to bottom for new message
 
     let requestConversationKey = currentConversationKey;
@@ -1056,7 +1161,7 @@ const ChatPage: React.FC = () => {
         {/* Message History */}
         <div
           ref={messagesContainerRef}
-          className="flex-1 overflow-y-auto p-6 space-y-1 scroll-smooth custom-scrollbar"
+          className="flex-1 overflow-y-auto p-3 space-y-1 scroll-smooth custom-scrollbar"
         >
           {historyLoading && (
             <div className="h-full flex items-center justify-center text-muted-foreground">
@@ -1082,19 +1187,22 @@ const ChatPage: React.FC = () => {
         </div>
 
         {/* Input Area */}
-        <div className="p-4 bg-card border-t border-border shrink-0">
+        <div className="relative p-2 bg-card border-t border-border shrink-0">
+          <div className="absolute left-0 right-0 bottom-full z-30">
+            <TaskListBar tasks={agentTasks} />
+          </div>
           <form onSubmit={handleFormSubmit} className="relative flex items-end gap-2">
             <textarea
               ref={textareaRef}
-              rows={3}
+              rows={1}
               value={input}
               onChange={handleTextareaChange}
               onKeyDown={handleKeyDown}
-              placeholder="Describe the slides you want to build… (Shift+Enter for newline)"
+              placeholder="Describe what to build…"
               className={cn(
                 "flex-1 bg-background border border-border rounded-xl pl-3.5 pr-3.5 py-2 text-xs text-foreground resize-none overflow-y-auto",
                 "focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 transition-all placeholder:text-muted-foreground",
-                "max-h-[400px] leading-relaxed",
+                "leading-relaxed",
               )}
             />
             <button
