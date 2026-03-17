@@ -12,8 +12,9 @@ import { GCPStorageProvider } from '../infrastructure/providers/storage/GCPStora
 import { PgDatabaseProvider } from '../infrastructure/providers/db/PgDatabaseProvider';
 import { RedisCacheProvider } from '../infrastructure/providers/cache/RedisCacheProvider';
 
-// Determine environment
-const isLocal = process.env.NODE_ENV === 'local' || process.env.NODE_ENV === 'development';
+// Default to local provider unless explicitly running in a non-local runtime.
+const runtimeEnv = process.env.NODE_ENV || 'development';
+const isLocal = runtimeEnv === 'local' || runtimeEnv === 'development' || runtimeEnv === 'test';
 
 // 1. Initialize Database Provider
 export const dbService: IDatabaseService = new PgDatabaseProvider({

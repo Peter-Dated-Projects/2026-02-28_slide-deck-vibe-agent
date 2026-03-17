@@ -89,7 +89,6 @@ export const getProjects = async (req: Request, res: Response): Promise<void> =>
             if (row.theme_data) {
                 const data = typeof row.theme_data === 'string' ? JSON.parse(row.theme_data) : row.theme_data;
                 theme = data.theme || 'Professional';
-                thumbnailUrl = thumbnailUrl || data.preview_url;
             }
             
             // Just use the latest conversation ID for the routing link instead of the first

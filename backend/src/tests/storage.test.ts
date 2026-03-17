@@ -1,4 +1,3 @@
-import { describe, it, expect, beforeAll } from 'bun:test';
 import { MinioProvider } from '../infrastructure/providers/storage/MinioProvider';
 import { CreateBucketCommand, HeadBucketCommand, S3Client } from '@aws-sdk/client-s3';
 import { config } from '../config';
@@ -40,7 +39,7 @@ describe('Storage Integration Tests (Minio)', () => {
 
     it('should generate a signed URL for the uploaded file', async () => {
         const url = await storageService.getFileUrl(testKey, 3600);
-        expect(url).toBeTypeOf('string');
+        expect(typeof url).toBe('string');
         expect(url).toContain(config.s3.endpoint);
         expect(url).toContain(config.s3.bucketName);
         expect(url).toContain('X-Amz-Signature');

@@ -65,15 +65,13 @@ export const chatWithAgent = async (conversationId: string, messages: any[]) => 
                     }
                     const output = await executeTool(vibeManager, name, args);
 
-                    if (name === 'write_slide' || name === 'write_theme') {
-                        try {
-                            const parsed = JSON.parse(output);
-                            if (parsed?.success) {
-                                await persist();
-                            }
-                        } catch {
-                            // keep going even if tool output is non-JSON
+                    try {
+                        const parsed = JSON.parse(output);
+                        if (parsed?.mutated) {
+                            await persist();
                         }
+                    } catch {
+                        // keep going even if tool output is non-JSON
                     }
 
                     // Add tool result to history
@@ -170,16 +168,14 @@ export const chatWithAgentStream = async (
                  const output = await executeTool(vibeManager, name, args);
                  let shouldRefreshPresentation = false;
 
-                 if (name === 'write_slide' || name === 'write_theme') {
-                     try {
-                         const parsed = JSON.parse(output);
-                         if (parsed?.success) {
-                             await persist();
-                             shouldRefreshPresentation = true;
-                         }
-                     } catch {
-                         // keep going even if tool output is non-JSON
+                 try {
+                     const parsed = JSON.parse(output);
+                     if (parsed?.mutated) {
+                         await persist();
+                         shouldRefreshPresentation = true;
                      }
+                 } catch {
+                     // keep going even if tool output is non-JSON
                  }
                  
                  currentMessages.push({

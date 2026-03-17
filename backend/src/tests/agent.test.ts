@@ -1,5 +1,5 @@
-import { chatWithAgent } from '../services/agent';
-import { llmService } from '../core/container';
+const { chatWithAgent } = require('../services/agent');
+const { llmService } = require('../core/container');
 
 jest.mock('../core/container', () => ({
     llmService: {
@@ -17,7 +17,45 @@ jest.mock('../core/container', () => ({
 
 jest.mock('../services/projectDeck', () => ({
     loadDeckHtmlForProject: jest.fn().mockResolvedValue({
-        html: '<html><body><section class="slide"></section></body></html>',
+        html: `<!doctype html>
+<html>
+<head>
+    <style>
+        <!-- VIBE_THEME_START -->
+        :root { --vibe-primary: #111111; }
+        <!-- VIBE_THEME_END -->
+        <!-- VIBE_TRANSITIONS_START -->
+        .slide { transition: opacity 0.3s ease; }
+        <!-- VIBE_TRANSITIONS_END -->
+        <!-- VIBE_ANIMATIONS_START -->
+        @keyframes pulse { from { opacity: 0.6; } to { opacity: 1; } }
+        <!-- VIBE_ANIMATIONS_END -->
+    </style>
+</head>
+<body>
+    <!-- <!-- VIBE_GLOBAL_UI_START --> -->
+    <nav></nav>
+    <!-- <!-- VIBE_GLOBAL_UI_END --> -->
+    <div id="vibe-deck">
+        <!-- <!-- VIBE_SLIDES_CONTAINER_START --> -->
+        <!-- VIBE_SLIDE_ID:11111111-1111-4111-8111-111111111111_START -->
+        <section class="slide"><h1>Hello</h1></section>
+        <!-- VIBE_SLIDE_ID:11111111-1111-4111-8111-111111111111_END -->
+        <!-- <!-- VIBE_SLIDES_CONTAINER_END --> -->
+    </div>
+    <!-- <!-- VIBE_MANIFEST_START --> -->
+    <script id="vibe-manifest" type="application/json">
+    {
+        "engine_version": "3.0.0",
+        "project_id": "test-project",
+        "theme_id": "default",
+        "transition_style": "fade",
+        "active_slides": ["11111111-1111-4111-8111-111111111111"]
+    }
+    </script>
+    <!-- <!-- VIBE_MANIFEST_END --> -->
+</body>
+</html>`,
         s3Key: 'test/key.html',
         cacheHit: false
     }),

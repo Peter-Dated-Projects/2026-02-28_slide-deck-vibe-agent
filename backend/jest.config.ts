@@ -2,8 +2,18 @@
 const isIntegration = process.argv.includes('integration');
 
 module.exports = {
-    preset: 'ts-jest',
     testEnvironment: 'node',
+    transform: {
+        '^.+\\.tsx?$': ['ts-jest', {
+            tsconfig: {
+                module: 'CommonJS',
+                moduleResolution: 'Node',
+                verbatimModuleSyntax: false,
+                esModuleInterop: true,
+                allowSyntheticDefaultImports: true
+            }
+        }]
+    },
     testPathIgnorePatterns: [
         '/node_modules/', 
         '/dist/',

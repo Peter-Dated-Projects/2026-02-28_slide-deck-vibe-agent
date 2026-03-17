@@ -1,5 +1,7 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import * as os from 'os';
+import { spawn } from 'child_process';
 import { chromium, type Page } from 'playwright-core';
 import sharp from 'sharp';
 import { cacheService, dbService as db, storageService } from '../core/container';
@@ -9,8 +11,8 @@ const DECK_CACHE_PREFIX = 'deck:html:';
 const PREVIEW_VIEWPORT = { width: 1920, height: 1080 };
 const PREVIEW_OUTPUT = { width: 1280, height: 720 };
 const PREVIEW_JPEG_QUALITY = 80;
-const PREVIEW_ANIMATION_MAX_WAIT_MS = 5000;
-const PREVIEW_ANIMATION_POLL_MS = 50;
+const PREVIEW_CAPTURE_DELAY_MS = 5000;
+const PREVIEW_BROWSER_LAUNCH_TIMEOUT_MS = 45000;
 const PREVIEW_CONCURRENCY_LIMIT = 1;
 const PREVIEW_DEBUG = process.env.PREVIEW_DEBUG !== 'false' && process.env.PREVIEW_DEBUG !== '0';
 
@@ -95,42 +97,57 @@ const runWithPreviewSlot = async <T>(task: () => Promise<T>): Promise<T> => {
 };
 
 const waitForVisualStability = async (page: Page): Promise<void> => {
-    // Let initial style/layout updates flush before we inspect animation state.
-    await page.waitForTimeout(PREVIEW_ANIMATION_POLL_MS * 2);
+    // Deterministic capture delay: do not poll animations/transitions.
+    await page.waitForTimeout(PREVIEW_CAPTURE_DELAY_MS);
+};
 
-    const startedAt = Date.now();
-    let hasActiveAnimations = true;
+const renderPreviewJpegViaNodeWorker = async (html: string): Promise<Buffer> => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'preview-render-'));
+    const htmlPath = path.join(tempDir, 'deck.html');
+    const outputPath = path.join(tempDir, 'preview.jpg');
+    const workerPath = path.resolve(__dirname, './previewRenderer.worker.cjs');
 
-    while (Date.now() - startedAt < PREVIEW_ANIMATION_MAX_WAIT_MS) {
-        const activeAnimationCount = await page.evaluate(() => {
-            const globalObj = globalThis as any;
-            const doc = globalObj.document;
+    await fs.writeFile(htmlPath, html, { encoding: 'utf-8' });
 
-            if (!doc || typeof doc.getAnimations !== 'function') {
-                return 0;
-            }
+    try {
+        await new Promise<void>((resolve, reject) => {
+            const child = spawn(process.env.NODE_EXECUTABLE || 'node', [workerPath, htmlPath, outputPath], {
+                stdio: ['ignore', 'pipe', 'pipe'],
+                windowsHide: true
+            });
 
-            return doc
-                .getAnimations({ subtree: true })
-                .filter((animation: any) => animation.playState === 'running' || animation.playState === 'pending')
-                .length;
+            let stderr = '';
+            child.stderr.on('data', (chunk) => {
+                stderr += chunk.toString();
+            });
+
+            child.on('error', reject);
+            child.on('close', (code) => {
+                if (code === 0) {
+                    resolve();
+                    return;
+                }
+
+                reject(new Error(`Preview worker failed with code ${code}. ${stderr.trim()}`));
+            });
         });
 
-        hasActiveAnimations = activeAnimationCount > 0;
-        if (!hasActiveAnimations) {
-            break;
-        }
-
-        await page.waitForTimeout(PREVIEW_ANIMATION_POLL_MS);
-    }
-
-    if (hasActiveAnimations) {
-        console.warn('[projectDeck] Preview capture timed out waiting for animations/transitions to settle.');
+        return await fs.readFile(outputPath);
+    } finally {
+        await fs.rm(tempDir, { recursive: true, force: true });
     }
 };
 
 const renderPreviewJpeg = async (html: string): Promise<Buffer> => {
-    const browser = await chromium.launch({ headless: true });
+    if (typeof (process as any).versions?.bun === 'string') {
+        return renderPreviewJpegViaNodeWorker(html);
+    }
+
+    const browser = await chromium.launch({
+        headless: true,
+        timeout: PREVIEW_BROWSER_LAUNCH_TIMEOUT_MS,
+        args: ['--disable-gpu', '--disable-dev-shm-usage']
+    });
 
     try {
         const context = await browser.newContext({ viewport: PREVIEW_VIEWPORT });
@@ -194,6 +211,7 @@ const refreshPreviewForProject = async (projectId: string, userId: string, html:
         });
     } catch (error) {
         console.error(`[projectDeck] Failed to refresh preview for project ${projectId}:`, error);
+        throw error;
     }
 };
 
@@ -288,5 +306,11 @@ export const saveDeckHtmlForProject = async (projectId: string, html: string): P
     const s3Key = await ensureDeckExistsForProject(projectId);
     await storageService.uploadFile(s3Key, html, 'text/html');
     await cacheService.set(getCacheKey(projectId), html, config.redis.ttlSeconds);
+
+    // Keep project cards in sync with deck edits without blocking chat/tool flow.
+    void generatePreviewForProject(projectId).catch((error) => {
+        console.error(`[projectDeck] Failed to enqueue preview refresh after save for project ${projectId}:`, error);
+    });
+
     return s3Key;
 };
