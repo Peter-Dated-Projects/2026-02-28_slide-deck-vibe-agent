@@ -68,30 +68,55 @@ export const getTools = async (vibeManager: VibeManager): Promise<{ tools: OpenA
             type: 'function',
             function: {
                 name: 'write_slide',
-                description: `Overwrite only the inner HTML content of a specific slide index. This modifies only the content inside <section class=\"slide\"> and does not replace the section wrapper itself. You MUST provide the content hash obtained from a recent read_slide call to successfully update the slide.`,
+                description: `Overwrite only the inner HTML content for one or more slide indices. This modifies only the content inside <section class=\"slide\"> and does not replace section wrappers. For each slide you write, you MUST provide the matching content hash from a recent read_slide call.`,
                 parameters: {
                     type: 'object',
                     properties: {
                         index: {
                             type: 'number',
-                            description: `The 1-based index of the slide to write (1-${slideCount})`
+                            description: `The 1-based index of a single slide to write (1-${slideCount})`
                         },
                         newHtml: {
                             type: 'string',
-                            description: `The new HTML content for the slide`
+                            description: `The new HTML content for the single slide update`
                         },
                         hash: {
                             type: 'string',
-                            description: `The content hash of the slide obtained from a recent read_slide call`
+                            description: `The content hash of the single slide obtained from a recent read_slide call`
+                        },
+                        writes: {
+                            type: 'array',
+                            description: 'Optional batch update list. Each entry requires index, newHtml, and hash from read_slide.',
+                            items: {
+                                type: 'object',
+                                properties: {
+                                    index: {
+                                        type: 'number',
+                                        description: `The 1-based index of the slide to write (1-${slideCount})`
+                                    },
+                                    newHtml: {
+                                        type: 'string',
+                                        description: 'The new HTML content for this slide'
+                                    },
+                                    hash: {
+                                        type: 'string',
+                                        description: 'The content hash for this slide obtained from a recent read_slide call'
+                                    }
+                                },
+                                required: ['index', 'newHtml', 'hash']
+                            }
                         }
                     },
-                    required: ['index', 'newHtml', 'hash']
+                    anyOf: [
+                        { required: ['index', 'newHtml', 'hash'] },
+                        { required: ['writes'] }
+                    ]
                 }
             }
         }
     ];
 
-    const systemInstruction = `You have access to ${slideCount} slides in the current presentation. The read_slide and write_slide tools only return/modify the content inside each <section class="slide"> (the section wrapper itself is preserved). read_slide can read one slide or multiple slides in one call, and returns explicit slideId/html/hash tuples for each requested slide. The read_theme and write_theme tools read/modify deck-wide theme CSS shared across the entire slide deck. Use read_slide and read_theme to inspect before modifications. To modify a slide, you MUST first read it using read_slide to obtain its content hash, then pass that hash to write_slide. To modify theme CSS, you MUST first read it using read_theme to obtain its content hash, then pass that hash to write_theme.`;
+    const systemInstruction = `You have access to ${slideCount} slides in the current presentation. The read_slide and write_slide tools only return/modify the content inside each <section class="slide"> (the section wrapper itself is preserved). read_slide can read one slide or multiple slides in one call, and returns explicit slideId/html/hash tuples for each requested slide. write_slide can write one slide or multiple slides in one call, and requires a matching hash per slide entry. The read_theme and write_theme tools read/modify deck-wide theme CSS shared across the entire slide deck. Use read_slide and read_theme to inspect before modifications. To modify a slide, you MUST first read it using read_slide to obtain its content hash, then pass that hash to write_slide. To modify theme CSS, you MUST first read it using read_theme to obtain its content hash, then pass that hash to write_theme.`;
 
     return { tools, systemInstruction };
 };
@@ -144,23 +169,74 @@ export const executeTool = async (vibeManager: VibeManager, name: string, args: 
         }
         
         if (name === 'write_slide') {
-            const index = Number(args.index);
-            if (isNaN(index)) return JSON.stringify({ error: 'Invalid slide index type' });
-            if (!args.newHtml) return JSON.stringify({ error: 'Missing newHtml' });
-            if (!args.hash) return JSON.stringify({ error: 'Missing hash. You must read the slide first to get the content hash.' });
-            
-            const currentHtml = vibeManager.getSlide(index);
-            if (!currentHtml) {
-                return JSON.stringify({ error: `Slide ${index} not found` });
+            const writesInput = Array.isArray(args.writes)
+                ? args.writes
+                : [{ index: args.index, newHtml: args.newHtml, hash: args.hash }];
+
+            if (!Array.isArray(writesInput) || writesInput.length === 0) {
+                return JSON.stringify({ error: 'Missing write request. Provide index/newHtml/hash or a non-empty writes array.' });
             }
-            
-            const currentHash = crypto.createHash('sha256').update(currentHtml).digest('hex');
-            if (currentHash !== args.hash) {
-                return JSON.stringify({ error: 'Hash mismatch. The slide has been modified since you last read it, or you provided an incorrect hash. Please call read_slide again to get the latest hash.' });
+
+            const writes: Array<{ slideId: number; success: boolean; message?: string; error?: string }> = [];
+
+            for (const write of writesInput) {
+                const index = Number(write?.index);
+                if (isNaN(index)) {
+                    writes.push({
+                        slideId: -1,
+                        success: false,
+                        error: 'Invalid slide index type'
+                    });
+                    continue;
+                }
+
+                if (!write?.newHtml) {
+                    writes.push({
+                        slideId: index,
+                        success: false,
+                        error: 'Missing newHtml'
+                    });
+                    continue;
+                }
+
+                if (!write?.hash) {
+                    writes.push({
+                        slideId: index,
+                        success: false,
+                        error: 'Missing hash. You must read the slide first to get the content hash.'
+                    });
+                    continue;
+                }
+
+                const currentHtml = vibeManager.getSlide(index);
+                if (!currentHtml) {
+                    writes.push({
+                        slideId: index,
+                        success: false,
+                        error: `Slide ${index} not found`
+                    });
+                    continue;
+                }
+
+                const currentHash = crypto.createHash('sha256').update(currentHtml).digest('hex');
+                if (currentHash !== write.hash) {
+                    writes.push({
+                        slideId: index,
+                        success: false,
+                        error: 'Hash mismatch. The slide has been modified since you last read it, or you provided an incorrect hash. Please call read_slide again to get the latest hash.'
+                    });
+                    continue;
+                }
+
+                await vibeManager.setSlide(index, write.newHtml);
+                writes.push({
+                    slideId: index,
+                    success: true,
+                    message: `Successfully updated slide ${index}`
+                });
             }
-            
-            await vibeManager.setSlide(index, args.newHtml);
-            return JSON.stringify({ success: true, message: `Successfully updated slide ${index}` });
+
+            return JSON.stringify({ writes });
         }
         
         if (name === 'read_theme') {

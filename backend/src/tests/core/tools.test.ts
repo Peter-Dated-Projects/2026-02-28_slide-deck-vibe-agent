@@ -101,8 +101,13 @@ describe('Core Tools - read/write slide OCC', () => {
 
         const parsed = JSON.parse(writeResult);
         expect(parsed).toEqual({
-            success: true,
-            message: 'Successfully updated slide 1'
+            writes: [
+                {
+                    slideId: 1,
+                    success: true,
+                    message: 'Successfully updated slide 1'
+                }
+            ]
         });
 
         const currentSlide = vibeManager.getSlide(1);
@@ -117,8 +122,14 @@ describe('Core Tools - read/write slide OCC', () => {
         });
 
         const parsed = JSON.parse(writeResult);
-        expect(parsed.error).toContain('Hash mismatch');
-        expect(parsed.error).toContain('Please call read_slide again');
+        expect(parsed.writes).toEqual([
+            {
+                slideId: 1,
+                success: false,
+                error: expect.stringContaining('Hash mismatch')
+            }
+        ]);
+        expect(parsed.writes[0].error).toContain('Please call read_slide again');
 
         const currentSlide = vibeManager.getSlide(1);
         expect(currentSlide).toBe(initialSlideInnerHtml);
@@ -131,11 +142,57 @@ describe('Core Tools - read/write slide OCC', () => {
         });
 
         const parsed = JSON.parse(writeResult);
-        expect(parsed.error).toContain('Missing hash');
-        expect(parsed.error).toContain('read the slide first');
+        expect(parsed.writes).toEqual([
+            {
+                slideId: 1,
+                success: false,
+                error: expect.stringContaining('Missing hash')
+            }
+        ]);
+        expect(parsed.writes[0].error).toContain('read the slide first');
 
         const currentSlide = vibeManager.getSlide(1);
         expect(currentSlide).toBe(initialSlideInnerHtml);
+    });
+
+    it('write_slide supports batch updates with per-slide success and failure results', async () => {
+        const readResult = await executeTool(vibeManager, 'read_slide', { indices: [1, 2] });
+        const parsedRead = JSON.parse(readResult);
+        const firstHash = parsedRead.slides[0].hash;
+
+        const writeResult = await executeTool(vibeManager, 'write_slide', {
+            writes: [
+                {
+                    index: 1,
+                    newHtml: '<h1>Batch Updated One</h1>',
+                    hash: firstHash
+                },
+                {
+                    index: 2,
+                    newHtml: '<h2>Batch Updated Two</h2>',
+                    hash: 'bad-hash'
+                }
+            ]
+        });
+
+        const parsed = JSON.parse(writeResult);
+        expect(parsed).toEqual({
+            writes: [
+                {
+                    slideId: 1,
+                    success: true,
+                    message: 'Successfully updated slide 1'
+                },
+                {
+                    slideId: 2,
+                    success: false,
+                    error: expect.stringContaining('Hash mismatch')
+                }
+            ]
+        });
+
+        expect(vibeManager.getSlide(1)).toBe('<h1>Batch Updated One</h1>');
+        expect(vibeManager.getSlide(2)).toBe(secondSlideInnerHtml);
     });
 
     it('getTools advertises write_slide hash requirements', async () => {
@@ -150,17 +207,21 @@ describe('Core Tools - read/write slide OCC', () => {
             throw new Error('write_slide tool is not registered');
         }
 
-        const params = writeSlideTool.function.parameters as { required?: string[] } | undefined;
-        if (!params?.required) {
-            throw new Error('write_slide tool parameters are missing required fields');
+        const params = writeSlideTool.function.parameters as { anyOf?: Array<{ required?: string[] }> } | undefined;
+        if (!params?.anyOf) {
+            throw new Error('write_slide tool parameters are missing anyOf requirements');
         }
 
-        const requiredParams = params.required;
-        expect(requiredParams).toEqual(['index', 'newHtml', 'hash']);
-        expect(writeSlideTool.function.description).toContain('MUST provide the content hash');
+        const requiredCombos = params.anyOf.map((entry) => entry.required ?? []);
+        expect(requiredCombos).toEqual([
+            ['index', 'newHtml', 'hash'],
+            ['writes']
+        ]);
+        expect(writeSlideTool.function.description).toContain('MUST provide the matching content hash');
         expect(writeSlideTool.function.description).toContain('inside <section class=\"slide\">');
         expect(systemInstruction).toContain('MUST first read it using read_slide');
         expect(systemInstruction).toContain('returns explicit slideId/html/hash tuples');
+        expect(systemInstruction).toContain('requires a matching hash per slide entry');
         expect(systemInstruction).toContain('only return/modify the content inside each <section class="slide">');
         expect(systemInstruction).toContain('shared across the entire slide deck');
     });
