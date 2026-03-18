@@ -16,6 +16,7 @@ import {
   Send,
   Loader2,
   Presentation,
+  Code2,
   Trash2,
   CreditCard,
   X,
@@ -30,6 +31,7 @@ import {
   subscribeConversationActivity,
   trackConversationRequest,
 } from "../lib/conversationActivity";
+import Editor from "@monaco-editor/react";
 
 // ─────────────────────────────────────────────────────
 // Utilities
@@ -275,6 +277,7 @@ const ChatPage: React.FC = () => {
   const [conversationHistory, setConversationHistory] = useState<ConversationHistoryEntry[]>([]);
   const [isConversationHistoryLoading, setIsConversationHistoryLoading] = useState(true);
   const [isConversationHistoryOpen, setIsConversationHistoryOpen] = useState(false);
+  const [rightPanelTab, setRightPanelTab] = useState<"preview" | "html">("preview");
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -763,6 +766,7 @@ const ChatPage: React.FC = () => {
       let thinkTimers: { startTime: number; endTime?: number }[] = [
         { startTime: thinkingStartedAt },
       ];
+      let thinkMode: "undecided" | "enabled" | "disabled" = "undecided";
 
       let toolCallsCache: any[] = [];
       let toolResultsCache: any[] = [];
@@ -831,6 +835,9 @@ const ChatPage: React.FC = () => {
                   const jsonStr = tokenStr.substring(12, tokenStr.length - 13);
                   const parsed = JSON.parse(jsonStr);
                   if (parsed.tool_calls) {
+                    if (thinkMode === "undecided") {
+                      thinkMode = "disabled";
+                    }
                     toolCallsCache.push(...parsed.tool_calls);
                     parsed.tool_calls.forEach((tc: any) =>
                       contentBlocks.push({ type: "tool_call", tool_call: tc }),
@@ -846,6 +853,9 @@ const ChatPage: React.FC = () => {
                   const jsonStr = cleanToken.substring(13, cleanToken.length - 14);
                   const parsed = JSON.parse(jsonStr);
                   if (parsed.id) {
+                    if (thinkMode === "undecided") {
+                      thinkMode = "disabled";
+                    }
                     toolResultsCache.push(parsed);
                     contentBlocks.push({
                       type: "tool_result",
@@ -858,6 +868,27 @@ const ChatPage: React.FC = () => {
                 requestPresentationRefresh();
               } else {
                 accumulatedText += tokenStr;
+
+                if (thinkMode === "undecided") {
+                  const trimmed = tokenStr.trim();
+                  if (trimmed.length > 0) {
+                    thinkMode = tokenStr.trimStart().startsWith("<think>") ? "enabled" : "disabled";
+                  }
+                }
+
+                if (thinkMode === "disabled") {
+                  const reconstructedBlocks: any[] = [];
+                  for (const block of contentBlocks) {
+                    if (block.type === "tool_call" || block.type === "tool_result") {
+                      reconstructedBlocks.push(block);
+                    }
+                  }
+                  if (accumulatedText.trim()) {
+                    reconstructedBlocks.push({ type: "text", text: accumulatedText });
+                  }
+                  contentBlocks = reconstructedBlocks;
+                  continue;
+                }
 
                 const numThinkTags = accumulatedText.split("<think>").length - 1;
                 while (thinkTimers.length < Math.max(1, numThinkTags)) {
@@ -1016,6 +1047,7 @@ const ChatPage: React.FC = () => {
 
   const isEmpty = messages.length === 0 && !isCurrentConversationBusy && !historyLoading;
   const activeChatLabel = conversationTitle.trim() || "New Chat";
+  const activeSlideHtml = slides[currentSlideIndex]?.rawHtml ?? "";
 
   return (
     <div className="h-screen w-screen flex bg-background text-foreground overflow-hidden font-sans">
@@ -1265,46 +1297,132 @@ const ChatPage: React.FC = () => {
           </div>
         </div>
 
-        {/* ── Dot-grid background (below top bar) ── */}
-        <div
-          className="absolute inset-x-2 bottom-2 top-16 opacity-20 pointer-events-none"
-          style={{
-            backgroundImage: "radial-gradient(circle at center, #aaa 1px, transparent 1px)",
-            backgroundSize: "24px 24px",
-          }}
-        />
+        {/* ── Right-panel view tabs ── */}
+        <div className="h-10 shrink-0 border-b border-border bg-card/80 px-2 flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() => setRightPanelTab("preview")}
+            className={cn(
+              "h-7 px-3 rounded-md text-xs font-medium transition-colors border",
+              rightPanelTab === "preview"
+                ? "bg-primary text-primary-foreground border-primary"
+                : "bg-background/70 text-muted-foreground border-border hover:text-foreground hover:bg-muted/40",
+            )}
+          >
+            <span className="inline-flex items-center gap-1.5">
+              <Presentation className="w-3.5 h-3.5" />
+              Preview
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setRightPanelTab("html")}
+            className={cn(
+              "h-7 px-3 rounded-md text-xs font-medium transition-colors border",
+              rightPanelTab === "html"
+                ? "bg-primary text-primary-foreground border-primary"
+                : "bg-background/70 text-muted-foreground border-border hover:text-foreground hover:bg-muted/40",
+            )}
+          >
+            <span className="inline-flex items-center gap-1.5">
+              <Code2 className="w-3.5 h-3.5" />
+              HTML
+            </span>
+          </button>
+        </div>
 
-        {slides.length === 0 ? (
-          <div className="absolute inset-x-2 bottom-2 top-16 flex flex-col items-center justify-center text-muted-foreground space-y-4">
-            <Presentation className="w-16 h-16 opacity-30" />
-            <p className="text-xl font-medium tracking-wide">Canvas is empty</p>
-          </div>
-        ) : (
-          <>
-            {/* Slides fill the canvas below the top bar */}
-            <div className="absolute inset-x-2 bottom-2 top-16">
-              {slides.map((slide, idx) => (
-                <div
-                  key={slide.id || idx}
-                  className={cn(
-                    "absolute inset-0 transition-all duration-700 ease-[cubic-bezier(0.23,1,0.32,1)]",
-                    idx === currentSlideIndex
-                      ? "opacity-100 translate-x-0 z-10"
-                      : idx < currentSlideIndex
-                        ? "opacity-0 -translate-x-full z-0"
-                        : "opacity-0 translate-x-full z-0",
-                  )}
-                >
-                  <SlideRenderer
-                    slide={slide}
-                    theme={slide.theme_data || slides[0]?.theme_data}
-                    isActive={idx === currentSlideIndex}
-                  />
-                </div>
-              ))}
+        <div
+          className={cn(
+            "absolute inset-x-0 bottom-0 top-24",
+            rightPanelTab === "preview" ? "opacity-100" : "opacity-0 pointer-events-none",
+          )}
+        >
+          {/* ── Dot-grid background (below top bar + tabs) ── */}
+          <div
+            className="absolute inset-x-2 bottom-2 top-0 opacity-20 pointer-events-none"
+            style={{
+              backgroundImage: "radial-gradient(circle at center, #aaa 1px, transparent 1px)",
+              backgroundSize: "24px 24px",
+            }}
+          />
+
+          {slides.length === 0 ? (
+            <div className="absolute inset-x-2 bottom-2 top-0 flex flex-col items-center justify-center text-muted-foreground space-y-4">
+              <Presentation className="w-16 h-16 opacity-30" />
+              <p className="text-xl font-medium tracking-wide">Canvas is empty</p>
             </div>
-          </>
-        )}
+          ) : (
+            <>
+              {/* Slides fill the canvas below the top bar */}
+              <div className="absolute inset-x-2 bottom-2 top-0">
+                {slides.map((slide, idx) => (
+                  <div
+                    key={slide.id || idx}
+                    className={cn(
+                      "absolute inset-0 transition-all duration-700 ease-[cubic-bezier(0.23,1,0.32,1)]",
+                      idx === currentSlideIndex
+                        ? "opacity-100 translate-x-0 z-10"
+                        : idx < currentSlideIndex
+                          ? "opacity-0 -translate-x-full z-0"
+                          : "opacity-0 translate-x-full z-0",
+                    )}
+                  >
+                    <SlideRenderer
+                      slide={slide}
+                      theme={slide.theme_data || slides[0]?.theme_data}
+                      isActive={idx === currentSlideIndex}
+                    />
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+
+        <div
+          className={cn(
+            "absolute inset-x-2 bottom-2 top-24 rounded-lg border border-border bg-[#1e1e1e] text-zinc-100 overflow-hidden flex flex-col",
+            rightPanelTab === "html" ? "opacity-100" : "opacity-0 pointer-events-none",
+          )}
+        >
+          <div className="h-9 shrink-0 border-b border-zinc-800/80 px-3 flex items-center justify-between bg-[#252526]">
+            <span className="text-[11px] uppercase tracking-[0.14em] text-zinc-400">
+              Slide HTML
+            </span>
+            <span className="text-[11px] text-zinc-500">{activeSlideHtml.length} chars</span>
+          </div>
+
+          {activeSlideHtml ? (
+            <div className="flex-1 min-h-0 overflow-auto custom-scrollbar">
+              <Editor
+                height="100%"
+                defaultLanguage="html"
+                value={activeSlideHtml}
+                theme="vs-dark"
+                options={{
+                  readOnly: true,
+                  minimap: { enabled: false },
+                  lineNumbers: "on",
+                  fontSize: 12,
+                  lineHeight: 20,
+                  wordWrap: "on",
+                  scrollBeyondLastLine: false,
+                  renderLineHighlight: "line",
+                  automaticLayout: true,
+                  tabSize: 2,
+                }}
+              />
+            </div>
+          ) : (
+            <div className="flex-1 min-h-0 flex flex-col items-center justify-center text-center px-6 text-zinc-400 space-y-2">
+              <Code2 className="h-7 w-7 opacity-70" />
+              <p className="text-sm">No generated HTML available yet.</p>
+              <p className="text-xs text-zinc-500">
+                Ask Vibe to generate or update slides to populate this editor.
+              </p>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

@@ -27,6 +27,94 @@ export class OllamaProvider implements ILLMService {
         ];
     }
 
+    private truncate(value: string, max = 240): string {
+        if (value.length <= max) return value;
+        return `${value.slice(0, max)}...`;
+    }
+
+    private summarizeMessages(messages: any[]): any[] {
+        return messages.slice(-12).map((m, idx) => {
+            const content = m?.content;
+            const contentType = Array.isArray(content) ? 'array' : typeof content;
+            const contentStr =
+                typeof content === 'string'
+                    ? content
+                    : (() => {
+                        try {
+                            return JSON.stringify(content ?? '');
+                        } catch {
+                            return String(content ?? '');
+                        }
+                    })();
+
+            const toolCalls = Array.isArray(m?.tool_calls) ? m.tool_calls : [];
+            const toolCallSummary = toolCalls.slice(0, 5).map((tc: any) => {
+                const args = tc?.function?.arguments;
+                const argsType = Array.isArray(args) ? 'array' : typeof args;
+                let argsParseOk: boolean | null = null;
+                if (typeof args === 'string') {
+                    try {
+                        JSON.parse(args);
+                        argsParseOk = true;
+                    } catch {
+                        argsParseOk = false;
+                    }
+                }
+                return {
+                    id: tc?.id,
+                    name: tc?.function?.name,
+                    argsType,
+                    argsParseOk,
+                    argsPreview: this.truncate(typeof args === 'string' ? args : JSON.stringify(args ?? {}), 180)
+                };
+            });
+
+            return {
+                idx,
+                role: m?.role,
+                contentType,
+                contentLength: contentStr.length,
+                contentPreview: this.truncate(contentStr.replace(/\s+/g, ' '), 260),
+                hasToolCalls: toolCalls.length > 0,
+                toolCallId: m?.tool_call_id ?? null,
+                toolCalls: toolCallSummary
+            };
+        });
+    }
+
+    private logOllamaRequestDebug(
+        methodName: 'chatWithAgent' | 'chatWithAgentStream',
+        conversationId: string,
+        body: any,
+        payload: string,
+        status: number,
+        statusText: string,
+        errorBody: string
+    ): void {
+        const payloadHead = payload.slice(0, 1600);
+        const payloadTail = payload.length > 1600 ? payload.slice(-1600) : '';
+        const toolNames = Array.isArray(body?.tools)
+            ? body.tools.map((t: any) => t?.function?.name).filter(Boolean)
+            : [];
+
+        console.error('[ollama-debug] request failed', {
+            methodName,
+            conversationId,
+            model: body?.model,
+            stream: body?.stream,
+            status,
+            statusText,
+            errorBody,
+            payloadBytes: payload.length,
+            messageCount: Array.isArray(body?.messages) ? body.messages.length : 0,
+            toolCount: toolNames.length,
+            toolNames,
+            recentMessages: this.summarizeMessages(Array.isArray(body?.messages) ? body.messages : []),
+            payloadHead,
+            payloadTail
+        });
+    }
+
     async chatWithAgent(
         conversationId: string, 
         messages: any[], 
@@ -43,14 +131,26 @@ export class OllamaProvider implements ILLMService {
             body.tools = tools;
         }
 
+        const payload = JSON.stringify(body);
+
         const response = await fetch(`${this.baseUrl}/api/chat`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body)
+            body: payload
         });
 
         if (!response.ok) {
-            throw new Error(`Ollama API error: ${response.statusText}`);
+            const errorBody = await response.text().catch(() => '');
+            this.logOllamaRequestDebug(
+                'chatWithAgent',
+                conversationId,
+                body,
+                payload,
+                response.status,
+                response.statusText,
+                errorBody
+            );
+            throw new Error(`Ollama API error: ${response.status} ${response.statusText}${errorBody ? ` - ${errorBody}` : ''}`);
         }
 
         const data: any = await response.json();
@@ -87,14 +187,26 @@ export class OllamaProvider implements ILLMService {
             body.tools = tools;
         }
 
+        const payload = JSON.stringify(body);
+
         const response = await fetch(`${this.baseUrl}/api/chat`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body)
+            body: payload
         });
 
         if (!response.ok) {
-            throw new Error(`Ollama API error: ${response.statusText}`);
+            const errorBody = await response.text().catch(() => '');
+            this.logOllamaRequestDebug(
+                'chatWithAgentStream',
+                conversationId,
+                body,
+                payload,
+                response.status,
+                response.statusText,
+                errorBody
+            );
+            throw new Error(`Ollama API error: ${response.status} ${response.statusText}${errorBody ? ` - ${errorBody}` : ''}`);
         }
 
         const reader = response.body!.getReader();

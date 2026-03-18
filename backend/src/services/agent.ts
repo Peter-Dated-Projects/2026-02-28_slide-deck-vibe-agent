@@ -45,6 +45,69 @@ const normalizeTaskList = (raw: unknown): AgentTaskItem[] => {
     return normalized;
 };
 
+const parseToolArguments = (raw: unknown): Record<string, unknown> => {
+    if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+        return raw as Record<string, unknown>;
+    }
+
+    if (typeof raw === 'string') {
+        try {
+            const parsed = JSON.parse(raw);
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                return parsed as Record<string, unknown>;
+            }
+        } catch {
+            // fall through to empty object
+        }
+    }
+
+    return {};
+};
+
+const sanitizeToolCalls = (toolCalls: any[]): any[] => {
+    if (!Array.isArray(toolCalls)) {
+        return [];
+    }
+
+    return toolCalls
+        .map((tc: any, index: number) => {
+            const name = tc?.function?.name;
+            if (typeof name !== 'string' || !name.trim()) {
+                return null;
+            }
+
+            return {
+                id: typeof tc?.id === 'string' && tc.id.trim() ? tc.id : `tool_call_${index}`,
+                type: tc?.type || 'function',
+                function: {
+                    name: name.trim(),
+                    index: tc?.function?.index,
+                    arguments: parseToolArguments(tc?.function?.arguments)
+                }
+            };
+        })
+        .filter(Boolean);
+};
+
+const sanitizeMessagesForLlm = (messages: any[]): any[] => {
+    return messages.map((msg: any) => {
+        const base: any = {
+            role: msg?.role,
+            content: typeof msg?.content === 'string' ? msg.content : String(msg?.content ?? '')
+        };
+
+        if (Array.isArray(msg?.tool_calls) && msg.tool_calls.length > 0) {
+            base.tool_calls = sanitizeToolCalls(msg.tool_calls);
+        }
+
+        if (typeof msg?.tool_call_id === 'string' && msg.tool_call_id.trim()) {
+            base.tool_call_id = msg.tool_call_id;
+        }
+
+        return base;
+    });
+};
+
 const loadConversationTaskList = async (conversationId: string): Promise<AgentTaskItem[]> => {
     const result = await db.query('SELECT task_list FROM conversations WHERE id = $1', [conversationId]);
     const rawTasks = result.rows[0]?.task_list;
@@ -88,35 +151,36 @@ export const chatWithAgent = async (conversationId: string, messages: any[]) => 
 
     let currentMessages = [...messages];
     let turnCount = 0;
-    const maxTurns = 50;
+    const maxTurns = 100;
 
     try {
         while (turnCount < maxTurns) {
             turnCount++;
             const dynamicSystemInstruction = buildSystemInstructionWithTaskList(systemInstruction, runtimeState);
-            const result = await llmService.chatWithAgent(conversationId, currentMessages, tools, dynamicSystemInstruction);
+            const result = await llmService.chatWithAgent(
+                conversationId,
+                sanitizeMessagesForLlm(currentMessages),
+                tools,
+                dynamicSystemInstruction
+            );
 
             if (result.stop_reason === 'tool_calls' && result.tool_calls) {
+                const safeToolCalls = sanitizeToolCalls(result.tool_calls);
+                if (safeToolCalls.length === 0) {
+                    return { content: [{ type: 'text', text: "I received malformed tool calls from the model." }], stop_reason: 'error' as any };
+                }
+
                 // Add assistant's tool calls to history
                 currentMessages.push({
                     role: 'assistant',
                     content: '',
-                    tool_calls: result.tool_calls
+                    tool_calls: safeToolCalls
                 });
 
                 // Execute all tools
-                for (const tc of result.tool_calls) {
+                for (const tc of safeToolCalls) {
                     const name = tc.function.name;
-                    let args;
-                    if (typeof tc.function.arguments === 'object' && tc.function.arguments !== null) {
-                        args = tc.function.arguments;
-                    } else {
-                        try {
-                            args = JSON.parse(tc.function.arguments || '{}');
-                        } catch (e) {
-                            args = {};
-                        }
-                    }
+                    const args = parseToolArguments(tc.function.arguments);
                     const output = await executeTool(vibeManager, name, args, runtimeState);
 
                     try {
@@ -175,7 +239,7 @@ export const chatWithAgentStream = async (
 
         let currentMessages = [...messages];
         let turnCount = 0;
-        const maxTurns = 50;
+        const maxTurns = 100;
 
         while (turnCount < maxTurns) {
             turnCount++;
@@ -204,27 +268,29 @@ export const chatWithAgentStream = async (
             }
         };
 
-           await llmService.chatWithAgentStream(conversationId, currentMessages, wrappedCallback, tools, dynamicSystemInstruction);
+           await llmService.chatWithAgentStream(
+               conversationId,
+               sanitizeMessagesForLlm(currentMessages),
+               wrappedCallback,
+               tools,
+               dynamicSystemInstruction
+           );
 
         if (localToolCalls.length > 0) {
+             const safeToolCalls = sanitizeToolCalls(localToolCalls);
+             if (safeToolCalls.length === 0) {
+                 return "I received malformed tool calls from the model.";
+             }
+
              currentMessages.push({
                  role: 'assistant',
                  content: '',
-                 tool_calls: localToolCalls
+                 tool_calls: safeToolCalls
              });
 
-             for (const tc of localToolCalls) {
+             for (const tc of safeToolCalls) {
                  const name = tc.function.name;
-                 let args;
-                 if (typeof tc.function.arguments === 'object' && tc.function.arguments !== null) {
-                     args = tc.function.arguments;
-                 } else {
-                     try {
-                         args = JSON.parse(tc.function.arguments || '{}');
-                     } catch (e) {
-                         args = {};
-                     }
-                 }
+                 const args = parseToolArguments(tc.function.arguments);
                  const output = await executeTool(vibeManager, name, args, runtimeState);
                  let shouldRefreshPresentation = false;
 

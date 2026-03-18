@@ -112,13 +112,13 @@ export class VibeManager {
     private getSlideContainerBlock(): { content: string; start: string; end: string } {
         const block = this.getMarkerBlock([
             {
+                start: '<!-- VIBE_SLIDES_CONTAINER_START -->',
+                end: '<!-- VIBE_SLIDES_CONTAINER_END -->'
+            },
+            {
                 start: '<!-- <!-- VIBE_SLIDES_CONTAINER_START --> -->',
                 end: '<!-- <!-- VIBE_SLIDES_CONTAINER_END --> -->'
             },
-            {
-                start: '<!-- VIBE_SLIDES_CONTAINER_START -->',
-                end: '<!-- VIBE_SLIDES_CONTAINER_END -->'
-            }
         ]);
 
         if (!block) {
@@ -158,39 +158,108 @@ export class VibeManager {
     }
 
     getTheme(): string {
-        return this.getBlock('<!-- VIBE_THEME_START -->', '<!-- VIBE_THEME_END -->');
+        const block = this.getMarkerBlock([
+            {
+                start: '/* <!-- VIBE_THEME_START --> */',
+                end: '/* <!-- VIBE_THEME_END --> */'
+            },
+            {
+                start: '<!-- VIBE_THEME_START -->',
+                end: '<!-- VIBE_THEME_END -->'
+            }
+        ]);
+
+        return block?.content || '';
     }
 
     async setTheme(css: string): Promise<void> {
-        await this.setBlock('<!-- VIBE_THEME_START -->', '<!-- VIBE_THEME_END -->', css);
+        await this.setMarkerBlock(
+            [
+                {
+                    start: '/* <!-- VIBE_THEME_START --> */',
+                    end: '/* <!-- VIBE_THEME_END --> */'
+                },
+                {
+                    start: '<!-- VIBE_THEME_START -->',
+                    end: '<!-- VIBE_THEME_END -->'
+                }
+            ],
+            css
+        );
     }
 
     getTransitions(): string {
-        return this.getBlock('<!-- VIBE_TRANSITIONS_START -->', '<!-- VIBE_TRANSITIONS_END -->');
+        const block = this.getMarkerBlock([
+            {
+                start: '/* <!-- VIBE_TRANSITIONS_START --> */',
+                end: '/* <!-- VIBE_TRANSITIONS_END --> */'
+            },
+            {
+                start: '<!-- VIBE_TRANSITIONS_START -->',
+                end: '<!-- VIBE_TRANSITIONS_END -->'
+            }
+        ]);
+
+        return block?.content || '';
     }
 
     async setTransitions(css: string): Promise<void> {
-        await this.setBlock('<!-- VIBE_TRANSITIONS_START -->', '<!-- VIBE_TRANSITIONS_END -->', css);
+        await this.setMarkerBlock(
+            [
+                {
+                    start: '/* <!-- VIBE_TRANSITIONS_START --> */',
+                    end: '/* <!-- VIBE_TRANSITIONS_END --> */'
+                },
+                {
+                    start: '<!-- VIBE_TRANSITIONS_START -->',
+                    end: '<!-- VIBE_TRANSITIONS_END -->'
+                }
+            ],
+            css
+        );
     }
 
     getAnimations(): string {
-        return this.getBlock('<!-- VIBE_ANIMATIONS_START -->', '<!-- VIBE_ANIMATIONS_END -->');
+        const block = this.getMarkerBlock([
+            {
+                start: '/* <!-- VIBE_ANIMATIONS_START --> */',
+                end: '/* <!-- VIBE_ANIMATIONS_END --> */'
+            },
+            {
+                start: '<!-- VIBE_ANIMATIONS_START -->',
+                end: '<!-- VIBE_ANIMATIONS_END -->'
+            }
+        ]);
+
+        return block?.content || '';
     }
 
     async setAnimations(css: string): Promise<void> {
-        await this.setBlock('<!-- VIBE_ANIMATIONS_START -->', '<!-- VIBE_ANIMATIONS_END -->', css);
+        await this.setMarkerBlock(
+            [
+                {
+                    start: '/* <!-- VIBE_ANIMATIONS_START --> */',
+                    end: '/* <!-- VIBE_ANIMATIONS_END --> */'
+                },
+                {
+                    start: '<!-- VIBE_ANIMATIONS_START -->',
+                    end: '<!-- VIBE_ANIMATIONS_END -->'
+                }
+            ],
+            css
+        );
     }
 
     getManifest(): VibeManifest {
         const manifestBlock = this.getMarkerBlock([
             {
+                start: '<!-- VIBE_MANIFEST_START -->',
+                end: '<!-- VIBE_MANIFEST_END -->'
+            },
+            {
                 start: '<!-- <!-- VIBE_MANIFEST_START --> -->',
                 end: '<!-- <!-- VIBE_MANIFEST_END --> -->'
             },
-            {
-                start: '<!-- VIBE_MANIFEST_START -->',
-                end: '<!-- VIBE_MANIFEST_END -->'
-            }
         ]);
 
         if (!manifestBlock) {
@@ -216,13 +285,13 @@ export class VibeManager {
         await this.setMarkerBlock(
             [
                 {
+                    start: '<!-- VIBE_MANIFEST_START -->',
+                    end: '<!-- VIBE_MANIFEST_END -->'
+                },
+                {
                     start: '<!-- <!-- VIBE_MANIFEST_START --> -->',
                     end: '<!-- <!-- VIBE_MANIFEST_END --> -->'
                 },
-                {
-                    start: '<!-- VIBE_MANIFEST_START -->',
-                    end: '<!-- VIBE_MANIFEST_END -->'
-                }
             ],
             `<script id="vibe-manifest" type="application/json">\n${jsonString}\n</script>`
         );
@@ -231,13 +300,13 @@ export class VibeManager {
     getGlobalUI(): string {
         const block = this.getMarkerBlock([
             {
+                start: '<!-- VIBE_GLOBAL_UI_START -->',
+                end: '<!-- VIBE_GLOBAL_UI_END -->'
+            },
+            {
                 start: '<!-- <!-- VIBE_GLOBAL_UI_START --> -->',
                 end: '<!-- <!-- VIBE_GLOBAL_UI_END --> -->'
             },
-            {
-                start: '<!-- VIBE_GLOBAL_UI_START -->',
-                end: '<!-- VIBE_GLOBAL_UI_END -->'
-            }
         ]);
 
         return block?.content || '';
@@ -247,13 +316,13 @@ export class VibeManager {
         await this.setMarkerBlock(
             [
                 {
+                    start: '<!-- VIBE_GLOBAL_UI_START -->',
+                    end: '<!-- VIBE_GLOBAL_UI_END -->'
+                },
+                {
                     start: '<!-- <!-- VIBE_GLOBAL_UI_START --> -->',
                     end: '<!-- <!-- VIBE_GLOBAL_UI_END --> -->'
                 },
-                {
-                    start: '<!-- VIBE_GLOBAL_UI_START -->',
-                    end: '<!-- VIBE_GLOBAL_UI_END -->'
-                }
             ],
             html
         );
@@ -429,10 +498,10 @@ export class VibeManager {
             return `<!-- VIBE_SLIDE_ID:${newId}_START -->\n${inner.trim()}\n<!-- VIBE_SLIDE_ID:${newId}_END -->`;
         });
 
-        this.content = this.content.replace(container.start, '<!-- <!-- VIBE_SLIDES_CONTAINER_START --> -->');
-        this.content = this.content.replace(container.end, '<!-- <!-- VIBE_SLIDES_CONTAINER_END --> -->');
+        this.content = this.content.replace(container.start, '<!-- VIBE_SLIDES_CONTAINER_START -->');
+        this.content = this.content.replace(container.end, '<!-- VIBE_SLIDES_CONTAINER_END -->');
 
-        const containerPattern = new RegExp(`(${VibeManager.escapeRegex('<!-- <!-- VIBE_SLIDES_CONTAINER_START --> -->')})[\\s\\S]*?(${VibeManager.escapeRegex('<!-- <!-- VIBE_SLIDES_CONTAINER_END --> -->')})`, 'i');
+        const containerPattern = new RegExp(`(${VibeManager.escapeRegex('<!-- VIBE_SLIDES_CONTAINER_START -->')})[\\s\\S]*?(${VibeManager.escapeRegex('<!-- VIBE_SLIDES_CONTAINER_END -->')})`, 'i');
         this.content = this.content.replace(containerPattern, `$1\n${slidesRegion}\n$2`);
 
         if (!this.content.includes('VIBE_MANIFEST_START')) {
@@ -444,14 +513,14 @@ export class VibeManager {
                 active_slides: slideIdMap.map((entry) => entry.to)
             };
 
-            const manifestBlock = `\n    <!-- <!-- VIBE_MANIFEST_START --> -->\n    <script id="vibe-manifest" type="application/json">\n${JSON.stringify(manifest, null, 4)}\n    </script>\n    <!-- <!-- VIBE_MANIFEST_END --> -->\n`;
+            const manifestBlock = `\n    <!-- VIBE_MANIFEST_START -->\n    <script id="vibe-manifest" type="application/json">\n${JSON.stringify(manifest, null, 4)}\n    </script>\n    <!-- VIBE_MANIFEST_END -->\n`;
             if (this.content.includes('</head>')) {
                 this.content = this.content.replace('</head>', `${manifestBlock}\n</head>`);
             }
         }
 
         if (!this.content.includes('VIBE_GLOBAL_UI_START')) {
-            this.content = this.content.replace(/(<body[^>]*>)/i, `$1\n    <!-- <!-- VIBE_GLOBAL_UI_START --> -->\n    <!-- <!-- VIBE_GLOBAL_UI_END --> -->\n`);
+            this.content = this.content.replace(/(<body[^>]*>)/i, `$1\n    <!-- VIBE_GLOBAL_UI_START -->\n    <!-- VIBE_GLOBAL_UI_END -->\n`);
         }
 
         await this.save();

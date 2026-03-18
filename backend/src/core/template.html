@@ -31,7 +31,7 @@
             scroll-behavior: smooth;
             perspective: 2000px;
         }
-        /* Defines how slides move into view - The body class controls this */
+        /* The body class "vibe-transition-fade" triggers this transition */
         .vibe-transition-fade .slide {
             transition: opacity 0.8s ease-in-out;
         }
@@ -92,18 +92,18 @@
 </head>
 <body class="vibe-transition-fade">
 
-    <!-- <!-- VIBE_GLOBAL_UI_START --> -->
+    <!-- VIBE_GLOBAL_UI_START -->
     <div class="fixed inset-0 pointer-events-none z-50 flex flex-col justify-between p-10">
-        <!-- HEADER: Brand/Logo area -->
+        <!-- HEADER: Global Brand Layer -->
         <header class="flex justify-between items-center opacity-40">
             <div class="flex items-center gap-3">
                 <div class="w-6 h-6 rounded bg-[var(--vibe-primary)]"></div>
                 <span class="font-black text-white uppercase tracking-widest text-sm">Vibe Engine V3</span>
             </div>
-            <div class="text-white/50 text-xs">DRAFT_VERSION_03</div>
+            <div class="text-white/50 text-xs">BUILD_2026_MAR</div>
         </header>
 
-        <!-- FOOTER: Progress/Nav -->
+        <!-- FOOTER: Global Navigation Layer -->
         <footer class="flex justify-between items-end">
             <div class="text-white/20 text-xs font-mono">
                 COORD_LAT: 43.4643 / COORD_LON: -80.5204
@@ -114,10 +114,10 @@
             </div>
         </footer>
     </div>
-    <!-- <!-- VIBE_GLOBAL_UI_END --> -->
+    <!-- VIBE_GLOBAL_UI_END -->
 
     <div class="slide-container" id="vibe-deck">
-        <!-- <!-- VIBE_SLIDES_CONTAINER_START --> -->
+        <!-- VIBE_SLIDES_CONTAINER_START -->
 
         <!-- VIBE_SLIDE_ID:550e8400-e29b-41d4-a716-446655440000_START -->
         <section class="slide" id="slide-550e8400">
@@ -160,10 +160,10 @@
         </section>
         <!-- VIBE_SLIDE_ID:a1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d_END -->
 
-        <!-- <!-- VIBE_SLIDES_CONTAINER_END --> -->
+        <!-- VIBE_SLIDES_CONTAINER_END -->
     </div>
 
-    <!-- <!-- VIBE_MANIFEST_START --> -->
+    <!-- VIBE_MANIFEST_START -->
     <script id="vibe-manifest" type="application/json">
     {
         "engine_version": "3.0.0",
@@ -176,27 +176,85 @@
         ]
     }
     </script>
-    <!-- <!-- VIBE_MANIFEST_END --> -->
+    <!-- VIBE_MANIFEST_END -->
 
     <script>
         const container = document.getElementById('vibe-deck');
-        
+        let activeSlideIndex = 0;
+        let settleTimer = null;
+        let isProgrammaticScroll = false;
+
         function updateScale() {
             const scale = Math.min(window.innerWidth / 1920, window.innerHeight / 1080);
             document.documentElement.style.setProperty('--vibe-scale', scale);
         }
 
-        function nextSlide() { container.scrollBy({ top: window.innerHeight, behavior: 'smooth' }); }
-        function prevSlide() { container.scrollBy({ top: -window.innerHeight, behavior: 'smooth' }); }
+        function getSlideCount() {
+            return container ? container.querySelectorAll('.slide').length : 0;
+        }
 
-        window.addEventListener('resize', updateScale);
-        window.addEventListener('load', updateScale);
-        window.addEventListener('keydown', (e) => {
-            if (e.key === 'ArrowDown' || e.key === ' ') nextSlide();
-            if (e.key === 'ArrowUp') prevSlide();
+        function clampSlideIndex(index) {
+            const maxIndex = Math.max(0, getSlideCount() - 1);
+            return Math.max(0, Math.min(index, maxIndex));
+        }
+
+        function goToSlide(index, behavior = 'smooth') {
+            if (!container) return;
+            const clamped = clampSlideIndex(index);
+            activeSlideIndex = clamped;
+            isProgrammaticScroll = true;
+            container.scrollTo({ top: clamped * window.innerHeight, behavior });
+            window.setTimeout(() => { isProgrammaticScroll = false; }, 450);
+        }
+
+        function nextSlide() {
+            goToSlide(activeSlideIndex + 1);
+        }
+
+        function prevSlide() {
+            goToSlide(activeSlideIndex - 1);
+        }
+
+        function settleSlideFromScroll() {
+            if (!container) return;
+            const observedIndex = Math.round(container.scrollTop / window.innerHeight);
+            const maxStepDown = activeSlideIndex + 1;
+            const maxStepUp = activeSlideIndex - 1;
+            const oneStepIndex = Math.max(maxStepUp, Math.min(maxStepDown, observedIndex));
+            goToSlide(oneStepIndex);
+        }
+
+        if (container) {
+            container.addEventListener('scroll', () => {
+                if (isProgrammaticScroll) return;
+                if (settleTimer) clearTimeout(settleTimer);
+                settleTimer = window.setTimeout(settleSlideFromScroll, 120);
+            }, { passive: true });
+        }
+
+        window.addEventListener('resize', () => {
+            updateScale();
+            goToSlide(activeSlideIndex, 'auto');
         });
-        
+
+        window.addEventListener('load', () => {
+            updateScale();
+            goToSlide(0, 'auto');
+        });
+
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowDown' || e.key === ' ') {
+                e.preventDefault();
+                nextSlide();
+            }
+            if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                prevSlide();
+            }
+        });
+
         updateScale();
+        goToSlide(0, 'auto');
     </script>
 </body>
 </html>
