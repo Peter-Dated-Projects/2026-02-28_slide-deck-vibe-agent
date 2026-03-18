@@ -766,6 +766,7 @@ const ChatPage: React.FC = () => {
       let thinkTimers: { startTime: number; endTime?: number }[] = [
         { startTime: thinkingStartedAt },
       ];
+      let thinkMode: "undecided" | "enabled" | "disabled" = "undecided";
 
       let toolCallsCache: any[] = [];
       let toolResultsCache: any[] = [];
@@ -834,6 +835,9 @@ const ChatPage: React.FC = () => {
                   const jsonStr = tokenStr.substring(12, tokenStr.length - 13);
                   const parsed = JSON.parse(jsonStr);
                   if (parsed.tool_calls) {
+                    if (thinkMode === "undecided") {
+                      thinkMode = "disabled";
+                    }
                     toolCallsCache.push(...parsed.tool_calls);
                     parsed.tool_calls.forEach((tc: any) =>
                       contentBlocks.push({ type: "tool_call", tool_call: tc }),
@@ -849,6 +853,9 @@ const ChatPage: React.FC = () => {
                   const jsonStr = cleanToken.substring(13, cleanToken.length - 14);
                   const parsed = JSON.parse(jsonStr);
                   if (parsed.id) {
+                    if (thinkMode === "undecided") {
+                      thinkMode = "disabled";
+                    }
                     toolResultsCache.push(parsed);
                     contentBlocks.push({
                       type: "tool_result",
@@ -861,6 +868,27 @@ const ChatPage: React.FC = () => {
                 requestPresentationRefresh();
               } else {
                 accumulatedText += tokenStr;
+
+                if (thinkMode === "undecided") {
+                  const trimmed = tokenStr.trim();
+                  if (trimmed.length > 0) {
+                    thinkMode = tokenStr.trimStart().startsWith("<think>") ? "enabled" : "disabled";
+                  }
+                }
+
+                if (thinkMode === "disabled") {
+                  const reconstructedBlocks: any[] = [];
+                  for (const block of contentBlocks) {
+                    if (block.type === "tool_call" || block.type === "tool_result") {
+                      reconstructedBlocks.push(block);
+                    }
+                  }
+                  if (accumulatedText.trim()) {
+                    reconstructedBlocks.push({ type: "text", text: accumulatedText });
+                  }
+                  contentBlocks = reconstructedBlocks;
+                  continue;
+                }
 
                 const numThinkTags = accumulatedText.split("<think>").length - 1;
                 while (thinkTimers.length < Math.max(1, numThinkTags)) {

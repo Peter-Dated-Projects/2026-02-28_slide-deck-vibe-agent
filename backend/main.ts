@@ -207,13 +207,7 @@ app.post('/api/chat', requireAuth, async (req: AuthRequest, res: express.Respons
                 text = JSON.stringify(raw);
             }
             
-            const msg: any = { role: row.role as string, content: text };
-            if (row.tool_calls) msg.tool_calls = row.tool_calls;
-            if (row.tool_call_id) msg.tool_call_id = row.tool_call_id;
-            if (row.tool_results) msg.tool_results = row.tool_results;
-            if (raw?.thinkTimers) msg.thinkTimers = raw.thinkTimers;
-            
-            return msg;
+            return { role: row.role as string, content: text };
         });
 
         // Call Agent
@@ -335,13 +329,7 @@ app.post('/api/chat/stream', requireAuth, async (req: AuthRequest, res: express.
             } else {
                 text = JSON.stringify(raw);
             }
-            const msg: any = { role: row.role as string, content: text };
-            if (row.tool_calls) msg.tool_calls = row.tool_calls;
-            if (row.tool_call_id) msg.tool_call_id = row.tool_call_id;
-            if (row.tool_results) msg.tool_results = row.tool_results;
-            if (raw?.thinkTimers) msg.thinkTimers = raw.thinkTimers;
-            
-            return msg;
+            return { role: row.role as string, content: text };
         });
 
         const streamedToolCalls: any[] = [];
