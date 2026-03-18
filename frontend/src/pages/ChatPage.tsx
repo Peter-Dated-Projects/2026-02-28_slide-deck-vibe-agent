@@ -246,42 +246,6 @@ function formatLastEdited(dateString: string) {
   return relativeTimeFormatter.format(diffSeconds, "second").toLowerCase();
 }
 
-function formatHtmlForEditor(input: string) {
-  const source = input.trim();
-  if (!source) {
-    return "";
-  }
-
-  const tokens = source
-    .replace(/>\s+</g, "><")
-    .replace(/</g, "\n<")
-    .replace(/\n\n+/g, "\n")
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
-
-  let depth = 0;
-  const formatted: string[] = [];
-
-  for (const token of tokens) {
-    const isClosingTag = /^<\//.test(token);
-    const isDeclaration = /^<!/.test(token) || /^<\?/.test(token);
-    const isSelfClosing = /\/>$/.test(token) || /^<[^>]+><\/[^>]+>$/.test(token);
-
-    if (isClosingTag) {
-      depth = Math.max(depth - 1, 0);
-    }
-
-    formatted.push(`${"  ".repeat(depth)}${token}`);
-
-    if (!isClosingTag && !isSelfClosing && !isDeclaration && /^<[^/!][^>]*>$/.test(token)) {
-      depth += 1;
-    }
-  }
-
-  return formatted.join("\n");
-}
-
 // ─────────────────────────────────────────────────────
 // ChatPage
 // ─────────────────────────────────────────────────────
@@ -1056,10 +1020,6 @@ const ChatPage: React.FC = () => {
   const isEmpty = messages.length === 0 && !isCurrentConversationBusy && !historyLoading;
   const activeChatLabel = conversationTitle.trim() || "New Chat";
   const activeSlideHtml = slides[currentSlideIndex]?.rawHtml ?? "";
-  const formattedHtmlPreview = useMemo(
-    () => formatHtmlForEditor(activeSlideHtml),
-    [activeSlideHtml],
-  );
 
   return (
     <div className="h-screen w-screen flex bg-background text-foreground overflow-hidden font-sans">
@@ -1404,12 +1364,12 @@ const ChatPage: React.FC = () => {
             <span className="text-[11px] text-zinc-500">{activeSlideHtml.length} chars</span>
           </div>
 
-          {formattedHtmlPreview ? (
+          {activeSlideHtml ? (
             <div className="flex-1 min-h-0 overflow-auto custom-scrollbar">
               <Editor
                 height="100%"
                 defaultLanguage="html"
-                value={formattedHtmlPreview}
+                value={activeSlideHtml}
                 theme="vs-dark"
                 options={{
                   readOnly: true,
