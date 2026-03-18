@@ -209,8 +209,8 @@ const ToolBlock: React.FC<ToolBlockProps> = ({ toolCalls, toolResults }) => {
     toolCalls.length === 1
       ? `Agent ran: ${firstToolName}`
       : allSameTool
-        ? `Called "${firstToolName}" ${toolCalls.length} times`
-        : `Called ${toolCalls.length} tools`;
+        ? `Agent ran: "${firstToolName}" ${toolCalls.length} times`
+        : `Agent ran: ${toolCalls.length} tools`;
 
   return (
     <div className="mb-1 w-full">
