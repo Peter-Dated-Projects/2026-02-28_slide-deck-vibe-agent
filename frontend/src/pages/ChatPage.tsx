@@ -1,3 +1,15 @@
+/**
+ * ---------------------------------------------------------------------------
+ * (c) 2026 Freedom, LLC.
+ * This file is part of the SlideDeckVibeAgent System.
+ *
+ * All Rights Reserved. This code is the confidential and proprietary 
+ * information of Freedom, LLC ("Confidential Information"). You shall not 
+ * disclose such Confidential Information and shall use it only in accordance 
+ * with the terms of the license agreement you entered into with Freedom, LLC.
+ * ---------------------------------------------------------------------------
+ */
+
 import React, {
   useState,
   useEffect,
@@ -32,15 +44,12 @@ import {
   trackConversationRequest,
 } from "../lib/conversationActivity";
 import Editor from "@monaco-editor/react";
-
 // ─────────────────────────────────────────────────────
 // Utilities
 // ─────────────────────────────────────────────────────
-
 function cn(...classes: (string | undefined | null | false)[]) {
   return classes.filter(Boolean).join(" ");
 }
-
 function SparklesIcon(props: React.SVGProps<SVGSVGElement>) {
   return (
     <svg
@@ -60,20 +69,16 @@ function SparklesIcon(props: React.SVGProps<SVGSVGElement>) {
     </svg>
   );
 }
-
 function generateId() {
   return Math.random().toString(36).slice(2, 10);
 }
-
 function getConversationRequestKey(conversationId?: string, projectId?: string | null) {
   return conversationId ?? `draft:${projectId ?? "global"}`;
 }
-
 function parseStreamSnapshot(snapshot: string) {
   const thinkStarts = snapshot.split("<think>").length - 1;
   const thinkEnds = snapshot.split("</think>").length - 1;
   let isThinking = thinkStarts > thinkEnds;
-
   if (!isThinking && thinkStarts === thinkEnds) {
     const stripped = snapshot.trim();
     const prefixes = ["<think", "<thin", "<thi", "<th", "<t", "<"];
@@ -83,43 +88,34 @@ function parseStreamSnapshot(snapshot: string) {
       }
     }
   }
-
   return { isThinking, thinkingContent: "", content: snapshot };
 }
-
 function parseJsonSafely(value: unknown) {
   if (typeof value !== "string") {
     return value;
   }
-
   try {
     return JSON.parse(value);
   } catch {
     return value;
   }
 }
-
 function normalizeTaskArray(rawTasks: unknown): AgentTask[] {
   if (!Array.isArray(rawTasks)) {
     return [];
   }
-
   const normalized: AgentTask[] = [];
   const seen = new Set<string>();
-
   for (const rawTask of rawTasks) {
     if (!rawTask || typeof rawTask !== "object") {
       continue;
     }
-
     const task = rawTask as Record<string, unknown>;
     const id = String(task.id ?? "").trim();
     const title = String(task.title ?? "").trim();
-
     if (!id || !title || seen.has(id)) {
       continue;
     }
-
     seen.add(id);
     normalized.push({
       id,
@@ -127,43 +123,35 @@ function normalizeTaskArray(rawTasks: unknown): AgentTask[] {
       done: Boolean(task.done),
     });
   }
-
   return normalized;
 }
-
 function extractAgentTasks(messages: ChatMessageData[]): AgentTask[] {
   let latestSnapshot: AgentTask[] = [];
   let fallbackFromArguments: AgentTask[] = [];
-
   for (const message of messages) {
     if (message.role !== "assistant") {
       continue;
     }
-
     for (const toolResult of message.toolResults ?? []) {
       const parsedResultEnvelope = parseJsonSafely(toolResult?.result);
       if (!parsedResultEnvelope || typeof parsedResultEnvelope !== "object") {
         continue;
       }
-
       const parsedResult = parsedResultEnvelope as Record<string, unknown>;
       const tasksFromResult = normalizeTaskArray(parsedResult.tasks);
       if (tasksFromResult.length > 0) {
         latestSnapshot = tasksFromResult;
       }
     }
-
     for (const toolCall of message.toolCalls ?? []) {
       const functionName = toolCall?.function?.name;
       if (functionName !== "set_task_list") {
         continue;
       }
-
       const parsedArgs = parseJsonSafely(toolCall?.function?.arguments);
       if (!parsedArgs || typeof parsedArgs !== "object") {
         continue;
       }
-
       const parsedObject = parsedArgs as Record<string, unknown>;
       const tasksFromArguments = normalizeTaskArray(parsedObject.tasks);
       if (tasksFromArguments.length > 0) {
@@ -171,10 +159,8 @@ function extractAgentTasks(messages: ChatMessageData[]): AgentTask[] {
       }
     }
   }
-
   return latestSnapshot.length > 0 ? latestSnapshot : fallbackFromArguments;
 }
-
 interface ConversationHistoryEntry {
   id: string;
   projectId: string | null;
@@ -183,11 +169,9 @@ interface ConversationHistoryEntry {
   createdAt: string;
   updatedAt: string;
 }
-
 const relativeTimeFormatter = new Intl.RelativeTimeFormat(undefined, {
   numeric: "auto",
 });
-
 function sortConversationHistory(entries: ConversationHistoryEntry[]) {
   return [...entries].sort(
     (left, right) =>
@@ -195,7 +179,6 @@ function sortConversationHistory(entries: ConversationHistoryEntry[]) {
       new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime(),
   );
 }
-
 function upsertConversationHistory(
   entries: ConversationHistoryEntry[],
   nextEntry: ConversationHistoryEntry,
@@ -204,28 +187,22 @@ function upsertConversationHistory(
     ...nextEntry,
     title: nextEntry.title.trim() || "Untitled",
   };
-
   return sortConversationHistory([
     normalizedEntry,
     ...entries.filter((entry) => entry.id !== normalizedEntry.id),
   ]);
 }
-
 function formatLastEdited(dateString: string) {
   const timestamp = new Date(dateString).getTime();
-
   if (Number.isNaN(timestamp)) {
     return "recently edited";
   }
-
   const diffMs = timestamp - Date.now();
   const diffSeconds = Math.round(diffMs / 1000);
   const absoluteSeconds = Math.abs(diffSeconds);
-
   if (absoluteSeconds < 45) {
     return "just now";
   }
-
   const units: Array<[Intl.RelativeTimeFormatUnit, number]> = [
     ["year", 60 * 60 * 24 * 365],
     ["month", 60 * 60 * 24 * 30],
@@ -234,7 +211,6 @@ function formatLastEdited(dateString: string) {
     ["hour", 60 * 60],
     ["minute", 60],
   ];
-
   for (const [unit, secondsPerUnit] of units) {
     if (absoluteSeconds >= secondsPerUnit) {
       return relativeTimeFormatter
@@ -242,21 +218,17 @@ function formatLastEdited(dateString: string) {
         .toLowerCase();
     }
   }
-
   return relativeTimeFormatter.format(diffSeconds, "second").toLowerCase();
 }
-
 // ─────────────────────────────────────────────────────
 // ChatPage
 // ─────────────────────────────────────────────────────
-
 const ChatPage: React.FC = () => {
   const { conversationId } = useParams<{ conversationId?: string }>();
   const [searchParams] = useSearchParams();
   const projectId = searchParams.get("projectId");
   const navigate = useNavigate();
   const { user, logout } = useAuth();
-
   const [messages, setMessages] = useState<ChatMessageData[]>([]);
   const [input, setInput] = useState("");
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -278,7 +250,6 @@ const ChatPage: React.FC = () => {
   const [isConversationHistoryLoading, setIsConversationHistoryLoading] = useState(true);
   const [isConversationHistoryOpen, setIsConversationHistoryOpen] = useState(false);
   const [rightPanelTab, setRightPanelTab] = useState<"preview" | "html">("preview");
-
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -300,21 +271,17 @@ const ChatPage: React.FC = () => {
   }, [currentConversationKey]);
   const isCurrentConversationBusy = Boolean(conversationActivity[currentConversationKey]);
   const agentTasks = useMemo(() => extractAgentTasks(messages), [messages]);
-
   const adjustTextareaHeight = useCallback((element: HTMLTextAreaElement) => {
     element.style.height = "auto";
-
     const styles = window.getComputedStyle(element);
     const lineHeight = Number.parseFloat(styles.lineHeight) || 20;
     const paddingTop = Number.parseFloat(styles.paddingTop) || 0;
     const paddingBottom = Number.parseFloat(styles.paddingBottom) || 0;
     const maxHeight = lineHeight * 3 + paddingTop + paddingBottom;
     const nextHeight = Math.min(element.scrollHeight, maxHeight);
-
     element.style.height = `${nextHeight}px`;
     element.style.overflowY = element.scrollHeight > maxHeight ? "auto" : "hidden";
   }, []);
-
   const loadConversationHistory = useCallback(async () => {
     setIsConversationHistoryLoading(true);
     try {
@@ -331,9 +298,7 @@ const ChatPage: React.FC = () => {
           updatedAt: entry.updatedAt,
         }),
       );
-
       setConversationHistory(sortConversationHistory(nextHistory));
-
       if (projectId) {
         const currentProjectName = nextHistory.find(
           (entry) => entry.projectId === projectId,
@@ -342,7 +307,6 @@ const ChatPage: React.FC = () => {
           setDeckTitle(currentProjectName);
         }
       }
-
       if (conversationId) {
         const currentConversation = nextHistory.find((entry) => entry.id === conversationId);
         if (currentConversation?.title?.trim()) {
@@ -355,43 +319,34 @@ const ChatPage: React.FC = () => {
       setIsConversationHistoryLoading(false);
     }
   }, [conversationId, projectId]);
-
   const visibleConversationHistory = useMemo(() => {
     if (!projectId) {
       return conversationHistory;
     }
-
     return conversationHistory.filter((entry) => entry.projectId === projectId);
   }, [conversationHistory, projectId]);
-
   useEffect(() => {
     void loadConversationHistory();
   }, [loadConversationHistory]);
-
   useEffect(() => {
     if (!conversationId) {
       setConversationTitle("New Chat");
     }
   }, [conversationId]);
-
   useEffect(() => {
     hasTriggeredExitPreviewRef.current = false;
-
     if (!projectId) {
       return;
     }
-
     const triggerPreviewGeneration = () => {
       if (hasTriggeredExitPreviewRef.current) {
         return;
       }
-
       hasTriggeredExitPreviewRef.current = true;
       const token = getAccessToken();
       if (!token) {
         return;
       }
-
       fetch(`${import.meta.env.VITE_API_URL}/projects/${projectId}/preview`, {
         method: "POST",
         headers: {
@@ -405,19 +360,15 @@ const ChatPage: React.FC = () => {
         console.error("Failed to generate project preview on exit:", error);
       });
     };
-
     const handleBeforeUnload = () => {
       triggerPreviewGeneration();
     };
-
     window.addEventListener("beforeunload", handleBeforeUnload);
-
     return () => {
       triggerPreviewGeneration();
       window.removeEventListener("beforeunload", handleBeforeUnload);
     };
   }, [projectId]);
-
   const handleResizeMouseDown = (e: React.MouseEvent) => {
     isResizing.current = true;
     startX.current = e.clientX;
@@ -425,14 +376,12 @@ const ChatPage: React.FC = () => {
     setIsResizingState(true);
     document.body.style.cursor = "col-resize";
     document.body.style.userSelect = "none";
-
     const onMouseMove = (ev: MouseEvent) => {
       if (!isResizing.current) return;
       const delta = ev.clientX - startX.current;
       const newWidth = Math.min(550, Math.max(350, startWidth.current + delta));
       setSidebarWidth(newWidth);
     };
-
     const onMouseUp = () => {
       isResizing.current = false;
       setIsResizingState(false);
@@ -441,16 +390,13 @@ const ChatPage: React.FC = () => {
       document.removeEventListener("mousemove", onMouseMove);
       document.removeEventListener("mouseup", onMouseUp);
     };
-
     document.addEventListener("mousemove", onMouseMove);
     document.addEventListener("mouseup", onMouseUp);
   };
-
   const scrollToBottom = useCallback(() => {
     if (userScrolledUp.current) return;
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, []);
-
   // Detect manual upward scroll — stop auto-scrolling while user is reading
   useEffect(() => {
     const container = messagesContainerRef.current;
@@ -462,24 +408,20 @@ const ChatPage: React.FC = () => {
     container.addEventListener("scroll", onScroll, { passive: true });
     return () => container.removeEventListener("scroll", onScroll);
   }, []);
-
   useEffect(() => {
     scrollToBottom();
   }, [messages, scrollToBottom]);
-
   // ─────────────────────────────────────────────────────
   // Load message history when conversation already exists
   // ─────────────────────────────────────────────────────
   useEffect(() => {
     if (!conversationId) return;
-
     const liveMessages = liveConversationMessagesRef.current[conversationId];
     if (liveMessages && getConversationActivitySnapshot()[conversationId]) {
       setMessages(liveMessages);
       setHistoryLoading(false);
       return;
     }
-
     setHistoryLoading(true);
     Promise.all([
       api.get(`/conversations/${conversationId}/messages`),
@@ -524,7 +466,6 @@ const ChatPage: React.FC = () => {
         setHistoryLoading(false);
       });
   }, [conversationId, projectId]);
-
   // ─────────────────────────────────────────────────────
   // Debounced title save
   // ─────────────────────────────────────────────────────
@@ -536,9 +477,7 @@ const ChatPage: React.FC = () => {
         : conversationId
           ? api.patch(`/conversations/${conversationId}/title`, { title: deckTitle.trim() })
           : null;
-
       if (!request) return;
-
       request
         .then(() => {
           if (!projectId) {
@@ -560,7 +499,6 @@ const ChatPage: React.FC = () => {
     }, 600);
     return () => clearTimeout(timer);
   }, [conversationId, deckTitle, projectId]);
-
   // ─────────────────────────────────────────────────────
   // Slide fetching
   // ─────────────────────────────────────────────────────
@@ -583,7 +521,6 @@ const ChatPage: React.FC = () => {
       console.error("Failed to fetch presentation:", error);
     }
   };
-
   // ─────────────────────────────────────────────────────
   // Auto-grow textarea height
   // ─────────────────────────────────────────────────────
@@ -591,7 +528,6 @@ const ChatPage: React.FC = () => {
     setInput(e.target.value);
     adjustTextareaHeight(e.target);
   };
-
   // ─────────────────────────────────────────────────────
   // Keyboard handler: Enter sends, Shift+Enter newline
   // ─────────────────────────────────────────────────────
@@ -603,24 +539,20 @@ const ChatPage: React.FC = () => {
       }
     }
   };
-
   // ─────────────────────────────────────────────────────
   // Send message
   // ─────────────────────────────────────────────────────
   const submitMessage = async () => {
     const userText = input.trim();
     if (!userText || isCurrentConversationBusy) return;
-
     setInput("");
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
       textareaRef.current.style.overflowY = "hidden";
     }
     userScrolledUp.current = false; // snap back to bottom for new message
-
     let requestConversationKey = currentConversationKey;
     let stopTrackingConversation: (() => void) | null = null;
-
     const setMessagesForConversationKey = (
       key: string,
       updater: ChatMessageData[] | ((previous: ChatMessageData[]) => ChatMessageData[]),
@@ -630,26 +562,20 @@ const ChatPage: React.FC = () => {
         (currentConversationKeyRef.current === key ? messages : []);
       const next = typeof updater === "function" ? updater(previous) : updater;
       liveConversationMessagesRef.current[key] = next;
-
       if (currentConversationKeyRef.current === key) {
         setMessages(next);
       }
-
       return next;
     };
-
     const switchConversationTracking = (nextKey: string) => {
       if (requestConversationKey === nextKey && stopTrackingConversation) {
         return;
       }
-
       stopTrackingConversation?.();
       requestConversationKey = nextKey;
       stopTrackingConversation = trackConversationRequest(nextKey);
     };
-
     switchConversationTracking(requestConversationKey);
-
     // 1. Append user message immediately
     const userMsg: ChatMessageData = {
       id: generateId(),
@@ -657,7 +583,6 @@ const ChatPage: React.FC = () => {
       content: userText,
     };
     setMessagesForConversationKey(requestConversationKey, (prev) => [...prev, userMsg]);
-
     // 2. Insert thinking placeholder
     const assistantId = generateId();
     const thinkingStartedAt = Date.now();
@@ -672,17 +597,14 @@ const ChatPage: React.FC = () => {
         thinkingContent: "",
       },
     ]);
-
     let doneConvId = conversationId ?? null;
     let resolvedConversationId = conversationId ?? null;
-
     const startConversationTracking = (
       nextConversationId: string,
       nextProjectId?: string | null,
       nextTitle?: string,
     ) => {
       const shouldUpdateHistory = !nextConversationId.startsWith("draft:");
-
       if (stopTrackingConversation && resolvedConversationId === nextConversationId) {
         if (shouldUpdateHistory) {
           setConversationHistory((prev) =>
@@ -703,11 +625,9 @@ const ChatPage: React.FC = () => {
         }
         return;
       }
-
       resolvedConversationId = nextConversationId;
       const previousConversationKey = requestConversationKey;
       switchConversationTracking(nextConversationId);
-
       if (previousConversationKey !== nextConversationId) {
         const pendingMessages = liveConversationMessagesRef.current[previousConversationKey];
         if (pendingMessages) {
@@ -715,7 +635,6 @@ const ChatPage: React.FC = () => {
           delete liveConversationMessagesRef.current[previousConversationKey];
         }
       }
-
       if (shouldUpdateHistory) {
         setConversationHistory((prev) =>
           upsertConversationHistory(prev, {
@@ -734,14 +653,11 @@ const ChatPage: React.FC = () => {
         );
       }
     };
-
     try {
       startConversationTracking(currentConversationKey, projectId, deckTitle);
-
       const payload: Record<string, string> = { message: userText };
       if (conversationId) payload.conversationId = conversationId;
       if (projectId) payload.projectId = projectId;
-
       const token = getAccessToken();
       const response = await fetch(`${import.meta.env.VITE_API_URL}/chat/stream`, {
         method: "POST",
@@ -752,11 +668,9 @@ const ChatPage: React.FC = () => {
         credentials: "include",
         body: JSON.stringify(payload),
       });
-
       if (!response.ok || !response.body) {
         throw new Error(`Stream request failed: ${response.status}`);
       }
-
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
@@ -767,7 +681,6 @@ const ChatPage: React.FC = () => {
         { startTime: thinkingStartedAt },
       ];
       let thinkMode: "undecided" | "enabled" | "disabled" = "undecided";
-
       let toolCallsCache: any[] = [];
       let toolResultsCache: any[] = [];
       const requestPresentationRefresh = () => {
@@ -775,17 +688,14 @@ const ChatPage: React.FC = () => {
           fetchPresentation(projectId);
         }
       };
-
       const attemptUpdateState = () => {
         // Deep copy the blocks because they might still mutate
         const snapshotBlocks = JSON.parse(JSON.stringify(contentBlocks));
         const snapshotTimers = JSON.parse(JSON.stringify(thinkTimers));
-
         const isThinkingActive =
           contentBlocks.length > 0 &&
           contentBlocks[contentBlocks.length - 1].type === "think" &&
           !contentBlocks[contentBlocks.length - 1].endTime;
-
         setMessagesForConversationKey(requestConversationKey, (prev) =>
           prev.map((m) =>
             m.id === assistantId
@@ -801,43 +711,53 @@ const ChatPage: React.FC = () => {
           ),
         );
       };
-
       // Flush pending tokens to React state at most every 50ms
       const flushInterval = setInterval(() => {
         if (!pendingTokens) return;
         pendingTokens = false;
         attemptUpdateState();
       }, 50);
-
       try {
         outer: while (true) {
           const { done, value } = await reader.read();
           if (done) break;
-
           buffer += decoder.decode(value, { stream: true });
           const parts = buffer.split("\n\n");
           buffer = parts.pop() ?? "";
-
           for (const part of parts) {
             const eventMatch = part.match(/^event: (\w+)/);
             const dataMatch = part.match(/^data: (.+)$/m);
             if (!dataMatch) continue;
-
             const eventName = eventMatch?.[1] ?? "message";
             const data = JSON.parse(dataMatch[1]);
-
-            if (eventName === "token") {
+            if (eventName === "tool_calls") {
+              pendingTokens = true;
+              if (Array.isArray(data.tool_calls)) {
+                toolCallsCache.push(...data.tool_calls);
+                data.tool_calls.forEach((tc: any) =>
+                  contentBlocks.push({ type: "tool_call", tool_call: tc }),
+                );
+              }
+            } else if (eventName === "tool_result") {
+              pendingTokens = true;
+              if (data?.id) {
+                toolResultsCache.push({ id: data.id, result: data.result });
+                contentBlocks.push({
+                  type: "tool_result",
+                  id: data.id,
+                  result: data.result,
+                });
+              }
+            } else if (eventName === "presentation_updated") {
+              requestPresentationRefresh();
+            } else if (eventName === "token" || eventName === "token_text") {
               const tokenStr = data.token;
               pendingTokens = true;
-
               if (tokenStr.startsWith("[TOOL_CALLS]") && tokenStr.endsWith("[/TOOL_CALLS]")) {
                 try {
                   const jsonStr = tokenStr.substring(12, tokenStr.length - 13);
                   const parsed = JSON.parse(jsonStr);
                   if (parsed.tool_calls) {
-                    if (thinkMode === "undecided") {
-                      thinkMode = "disabled";
-                    }
                     toolCallsCache.push(...parsed.tool_calls);
                     parsed.tool_calls.forEach((tc: any) =>
                       contentBlocks.push({ type: "tool_call", tool_call: tc }),
@@ -853,9 +773,6 @@ const ChatPage: React.FC = () => {
                   const jsonStr = cleanToken.substring(13, cleanToken.length - 14);
                   const parsed = JSON.parse(jsonStr);
                   if (parsed.id) {
-                    if (thinkMode === "undecided") {
-                      thinkMode = "disabled";
-                    }
                     toolResultsCache.push(parsed);
                     contentBlocks.push({
                       type: "tool_result",
@@ -868,14 +785,12 @@ const ChatPage: React.FC = () => {
                 requestPresentationRefresh();
               } else {
                 accumulatedText += tokenStr;
-
                 if (thinkMode === "undecided") {
                   const trimmed = tokenStr.trim();
                   if (trimmed.length > 0) {
                     thinkMode = tokenStr.trimStart().startsWith("<think>") ? "enabled" : "disabled";
                   }
                 }
-
                 if (thinkMode === "disabled") {
                   const reconstructedBlocks: any[] = [];
                   for (const block of contentBlocks) {
@@ -889,16 +804,13 @@ const ChatPage: React.FC = () => {
                   contentBlocks = reconstructedBlocks;
                   continue;
                 }
-
                 const numThinkTags = accumulatedText.split("<think>").length - 1;
                 while (thinkTimers.length < Math.max(1, numThinkTags)) {
                   thinkTimers.push({ startTime: Date.now() });
                 }
-
                 const newTextThinkBlocks: any[] = [];
                 let remaining = accumulatedText;
                 let thinkIdx = 0;
-
                 while (remaining) {
                   const startIdx = remaining.indexOf("<think>");
                   if (startIdx === -1) {
@@ -911,7 +823,6 @@ const ChatPage: React.FC = () => {
                     if (textBefore.trim())
                       newTextThinkBlocks.push({ type: "text", text: textBefore });
                   }
-
                   const endIdx = remaining.indexOf("</think>", startIdx);
                   if (endIdx === -1) {
                     const timer = thinkTimers[thinkIdx];
@@ -937,7 +848,6 @@ const ChatPage: React.FC = () => {
                     thinkIdx++;
                   }
                 }
-
                 let textThinkCursor = 0;
                 const reconstructedBlocks: any[] = [];
                 for (let b of contentBlocks) {
@@ -964,11 +874,9 @@ const ChatPage: React.FC = () => {
                   data.projectId ?? projectId ?? null,
                   data.title ?? "New Chat",
                 );
-
                 if (data.title?.trim()) {
                   setConversationTitle(data.title);
                 }
-
                 if (data.projectName?.trim()) {
                   setDeckTitle(data.projectName);
                 }
@@ -985,14 +893,12 @@ const ChatPage: React.FC = () => {
         clearInterval(flushInterval);
         attemptUpdateState();
       }
-
       // Navigate to conversation URL on first message
       if (!conversationId && doneConvId) {
         navigate(`/chat/${doneConvId}${projectId ? `?projectId=${projectId}` : ""}`, {
           replace: true,
         });
       }
-
       // Refetch slides
       if (projectId) fetchPresentation(projectId);
     } catch (error: any) {
@@ -1017,12 +923,10 @@ const ChatPage: React.FC = () => {
       await loadConversationHistory();
     }
   };
-
   const handleFormSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     submitMessage();
   };
-
   const handleDeleteAccount = async () => {
     if (
       !window.confirm(
@@ -1040,15 +944,12 @@ const ChatPage: React.FC = () => {
       setIsDeleting(false);
     }
   };
-
   // ─────────────────────────────────────────────────────
   // Render
   // ─────────────────────────────────────────────────────
-
   const isEmpty = messages.length === 0 && !isCurrentConversationBusy && !historyLoading;
   const activeChatLabel = conversationTitle.trim() || "New Chat";
   const activeSlideHtml = slides[currentSlideIndex]?.rawHtml ?? "";
-
   return (
     <div className="h-screen w-screen flex bg-background text-foreground overflow-hidden font-sans">
       {/* Full-screen overlay during resize to capture events over iframes */}
@@ -1072,7 +973,6 @@ const ChatPage: React.FC = () => {
           >
             <Home className="w-4 h-4 text-primary" />
           </button>
-
           {/* Editable deck title */}
           <div className="relative flex-1 min-w-0 flex items-center group">
             <input
@@ -1097,7 +997,6 @@ const ChatPage: React.FC = () => {
               <Pencil className="w-3 h-3 text-muted-foreground opacity-0 group-hover:opacity-60 transition-opacity absolute right-1.5 pointer-events-none" />
             )}
           </div>
-
           {/* New Chat button */}
           <button
             onClick={() => {
@@ -1112,7 +1011,6 @@ const ChatPage: React.FC = () => {
             <Plus className="w-4 h-4" />
           </button>
         </div>
-
         <div className="relative shrink-0">
           <button
             type="button"
@@ -1131,7 +1029,6 @@ const ChatPage: React.FC = () => {
             </span>
             <span className="truncate text-xs font-semibold">{activeChatLabel}</span>
           </button>
-
           {isConversationHistoryOpen && (
             <div className="absolute left-0 right-0 top-full z-30 border-b border-border bg-white shadow-sm">
               <div className="max-h-56 overflow-y-auto custom-scrollbar">
@@ -1146,7 +1043,6 @@ const ChatPage: React.FC = () => {
                   visibleConversationHistory.map((entry) => {
                     const isActiveConversation = entry.id === conversationId;
                     const status = conversationActivity[entry.id] ? "busy" : "idle";
-
                     return (
                       <button
                         key={entry.id}
@@ -1191,7 +1087,6 @@ const ChatPage: React.FC = () => {
             </div>
           )}
         </div>
-
         {/* Message History */}
         <div
           ref={messagesContainerRef}
@@ -1203,7 +1098,6 @@ const ChatPage: React.FC = () => {
               <span className="text-sm">Loading conversation…</span>
             </div>
           )}
-
           {isEmpty && (
             <div className="h-full flex flex-col items-center justify-center text-center space-y-4 text-muted-foreground mt-12">
               <div className="w-16 h-16 rounded-2xl bg-muted flex items-center justify-center border border-border">
@@ -1214,13 +1108,10 @@ const ChatPage: React.FC = () => {
               </p>
             </div>
           )}
-
           {!historyLoading && messages.map((m) => <ChatMessage key={m.id} message={m} />)}
-
           <div ref={messagesEndRef} />
           <div aria-hidden="true" className="h-[30%] min-h-20" />
         </div>
-
         {/* Input Area */}
         <div className="relative p-2 bg-card border-t border-border shrink-0">
           <div className="absolute left-0 right-0 bottom-full z-30">
@@ -1257,7 +1148,6 @@ const ChatPage: React.FC = () => {
           </p>
         </div>
       </div>
-
       {/* ── Resize Handle ── */}
       <div
         onMouseDown={handleResizeMouseDown}
@@ -1266,7 +1156,6 @@ const ChatPage: React.FC = () => {
       >
         <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-0.5 bg-border group-hover:bg-primary/50 transition-colors" />
       </div>
-
       {/*
         =========================================
         RIGHT PANEL: SLIDE RENDERER CANVAS
@@ -1296,7 +1185,6 @@ const ChatPage: React.FC = () => {
             {showSettings && renderSettingsModal()}
           </div>
         </div>
-
         {/* ── Right-panel view tabs ── */}
         <div className="h-10 shrink-0 border-b border-border bg-card/80 px-2 flex items-center gap-1">
           <button
@@ -1330,7 +1218,6 @@ const ChatPage: React.FC = () => {
             </span>
           </button>
         </div>
-
         <div
           className={cn(
             "absolute inset-x-0 bottom-0 top-24",
@@ -1345,7 +1232,6 @@ const ChatPage: React.FC = () => {
               backgroundSize: "24px 24px",
             }}
           />
-
           {slides.length === 0 ? (
             <div className="absolute inset-x-2 bottom-2 top-0 flex flex-col items-center justify-center text-muted-foreground space-y-4">
               <Presentation className="w-16 h-16 opacity-30" />
@@ -1378,7 +1264,6 @@ const ChatPage: React.FC = () => {
             </>
           )}
         </div>
-
         <div
           className={cn(
             "absolute inset-x-2 bottom-2 top-24 rounded-lg border border-border bg-[#1e1e1e] text-zinc-100 overflow-hidden flex flex-col",
@@ -1391,7 +1276,6 @@ const ChatPage: React.FC = () => {
             </span>
             <span className="text-[11px] text-zinc-500">{activeSlideHtml.length} chars</span>
           </div>
-
           {activeSlideHtml ? (
             <div className="flex-1 min-h-0 overflow-auto custom-scrollbar">
               <Editor
@@ -1426,7 +1310,6 @@ const ChatPage: React.FC = () => {
       </div>
     </div>
   );
-
   function renderSettingsModal() {
     if (!user) return null;
     return (
@@ -1440,7 +1323,6 @@ const ChatPage: React.FC = () => {
             <X className="w-5 h-5" />
           </button>
         </div>
-
         <div className="flex items-center gap-4 mb-6">
           {user.profile_picture ? (
             <img
@@ -1458,7 +1340,6 @@ const ChatPage: React.FC = () => {
             <div className="text-[13px] text-muted-foreground">{user.email}</div>
           </div>
         </div>
-
         <div className="space-y-3 mb-6 bg-muted/20 rounded-lg p-3 border border-border">
           <div className="flex justify-between text-[13px]">
             <span className="text-muted-foreground">Age:</span>
@@ -1475,7 +1356,6 @@ const ChatPage: React.FC = () => {
             <span className="text-foreground capitalize">{user.settings?.theme || "Light"}</span>
           </div>
         </div>
-
         <div className="space-y-2">
           <button className="w-full flex items-center justify-center gap-2 bg-muted hover:bg-muted/80 text-foreground py-2.5 rounded-lg transition-colors text-sm font-medium border border-border">
             <CreditCard className="w-4 h-4" />
@@ -1498,5 +1378,4 @@ const ChatPage: React.FC = () => {
     );
   }
 };
-
 export default ChatPage;

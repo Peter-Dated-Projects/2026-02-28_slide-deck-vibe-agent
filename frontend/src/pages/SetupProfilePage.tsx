@@ -1,21 +1,29 @@
+/**
+ * ---------------------------------------------------------------------------
+ * (c) 2026 Freedom, LLC.
+ * This file is part of the SlideDeckVibeAgent System.
+ *
+ * All Rights Reserved. This code is the confidential and proprietary 
+ * information of Freedom, LLC ("Confidential Information"). You shall not 
+ * disclose such Confidential Information and shall use it only in accordance 
+ * with the terms of the license agreement you entered into with Freedom, LLC.
+ * ---------------------------------------------------------------------------
+ */
+
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../api';
-
 const SetupProfilePage: React.FC = () => {
   const { user, loginWithGoogle, refreshUser } = useAuth();
   const navigate = useNavigate();
-
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [phone, setPhone] = useState('');
   const [field, setField] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-
   const [timeLeft, setTimeLeft] = useState(120); // 2 minutes
-
   const fields = [
     'Business',
     'Finance',
@@ -25,7 +33,6 @@ const SetupProfilePage: React.FC = () => {
     'Marketing',
     'Other'
   ];
-
   // Timer Effect
   React.useEffect(() => {
     if (timeLeft <= 0) {
@@ -37,14 +44,11 @@ const SetupProfilePage: React.FC = () => {
       });
       return;
     }
-
     const timer = setInterval(() => {
       setTimeLeft(prev => prev - 1);
     }, 1000);
-
     return () => clearInterval(timer);
   }, [timeLeft]);
-
   // Before Unload Effect
   React.useEffect(() => {
       const handleBeforeUnload = () => {
@@ -53,21 +57,17 @@ const SetupProfilePage: React.FC = () => {
           // Fallback relies on the backend completely
           navigator.sendBeacon(`${api.defaults.baseURL}/auth/logout`);
       };
-      
       window.addEventListener('beforeunload', handleBeforeUnload);
       return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, []);
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!firstName || !lastName || !field) {
       setError('First name, last name, and field are required.');
       return;
     }
-
     setIsLoading(true);
     setError('');
-
     try {
       // Need a way to update auth context user - we'll navigate and let App route handle, 
       // or we can force a page reload to grab fresh context if context lacks a setter.
@@ -78,7 +78,6 @@ const SetupProfilePage: React.FC = () => {
         phone,
         field
       });
-
       // We can securely navigate and refresh context without risking a race condition 
       // or reloading the entire generic app context unnecessarily
       await refreshUser();
@@ -89,22 +88,18 @@ const SetupProfilePage: React.FC = () => {
       setIsLoading(false);
     }
   };
-
   if (!user) {
       return null;
   }
-
   // Format time for display
   const minutes = Math.floor(timeLeft / 60);
   const seconds = timeLeft % 60;
   const timeString = `${minutes}:${seconds.toString().padStart(2, '0')}`;
-
   return (
     <div className="min-h-screen flex items-center justify-center bg-background p-4 relative overflow-hidden">
       {/* Dynamic Background Elements */}
       <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-primary/20 rounded-full blur-[100px] animate-pulse"></div>
       <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-secondary/20 rounded-full blur-[100px] animate-pulse" style={{ animationDelay: '2s' }}></div>
-
       <div className="w-full max-w-md bg-card/50 backdrop-blur-xl p-8 rounded-2xl shadow-2xl border border-white/5 relative z-10 transition-all duration-300 hover:shadow-primary/10">
         <div className="mb-8 text-center">
           <h1 className="text-3xl font-bold bg-gradient-to-r from-primary to-primary/70 bg-clip-text text-transparent mb-2">Complete Your Profile</h1>
@@ -116,7 +111,6 @@ const SetupProfilePage: React.FC = () => {
             Session expires in {timeString}
           </div>
         </div>
-
         {error && (
           <div className="mb-6 p-4 bg-destructive/10 border border-destructive/20 text-destructive text-sm rounded-lg flex items-center">
             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
@@ -125,7 +119,6 @@ const SetupProfilePage: React.FC = () => {
             {error}
           </div>
         )}
-
         <form onSubmit={handleSubmit} className="space-y-6">
           <div className="group">
             <label className="block text-sm font-medium text-foreground mb-1.5 transition-colors group-focus-within:text-primary">Email</label>
@@ -136,7 +129,6 @@ const SetupProfilePage: React.FC = () => {
               className="w-full px-4 py-3 rounded-xl bg-background/50 border border-white/10 text-muted-foreground cursor-not-allowed focus:outline-none"
             />
           </div>
-
           <div className="grid grid-cols-2 gap-4">
             <div className="group">
               <label className="block text-sm font-medium text-foreground mb-1.5 transition-colors group-focus-within:text-primary">First Name <span className="text-destructive">*</span></label>
@@ -160,7 +152,6 @@ const SetupProfilePage: React.FC = () => {
               />
             </div>
           </div>
-
           <div className="group">
             <label className="block text-sm font-medium text-foreground mb-1.5 transition-colors group-focus-within:text-primary">Phone (Optional)</label>
             <input
@@ -171,7 +162,6 @@ const SetupProfilePage: React.FC = () => {
               placeholder="+1 (555) 000-0000"
             />
           </div>
-
           <div className="group">
             <label className="block text-sm font-medium text-foreground mb-1.5 transition-colors group-focus-within:text-primary">Professional Field <span className="text-destructive">*</span></label>
             <div className="relative">
@@ -192,7 +182,6 @@ const SetupProfilePage: React.FC = () => {
               </div>
             </div>
           </div>
-
           <button
             type="submit"
             disabled={isLoading || !firstName || !lastName || !field}
@@ -215,5 +204,4 @@ const SetupProfilePage: React.FC = () => {
     </div>
   );
 };
-
 export default SetupProfilePage;

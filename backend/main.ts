@@ -1,3 +1,15 @@
+/**
+ * ---------------------------------------------------------------------------
+ * (c) 2026 Freedom, LLC.
+ * This file is part of the SlideDeckVibeAgent System.
+ *
+ * All Rights Reserved. This code is the confidential and proprietary 
+ * information of Freedom, LLC ("Confidential Information"). You shall not 
+ * disclose such Confidential Information and shall use it only in accordance 
+ * with the terms of the license agreement you entered into with Freedom, LLC.
+ * ---------------------------------------------------------------------------
+ */
+
 import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
@@ -9,11 +21,8 @@ import { dbService as db } from './src/core/container';
 import { chatWithAgent, chatWithAgentStream } from './src/services/agent';
 import { loadDeckHtmlForProject } from './src/services/projectDeck';
 import { config } from './src/config';
-
 const app = express();
-
 const getTitleFromFirstRequest = (message: string) => message.trim().slice(0, 150);
-
 const updateTitleFromFirstRequestIfNeeded = async (
     conversationId: string,
     message: string
@@ -22,22 +31,18 @@ const updateTitleFromFirstRequestIfNeeded = async (
         'SELECT 1 FROM messages WHERE conversation_id = $1 LIMIT 1',
         [conversationId]
     );
-
     if (existingMessageResult.rows.length > 0) {
         return;
     }
-
     const nextTitle = getTitleFromFirstRequest(message);
     if (!nextTitle) {
         return;
     }
-
     await db.query(
         'UPDATE conversations SET title = $1, updated_at = NOW() WHERE id = $2',
         [nextTitle, conversationId]
     );
 };
-
 const touchConversationActivity = async (conversationId: string) => {
     await db.query(
         `
@@ -58,25 +63,44 @@ const touchConversationActivity = async (conversationId: string) => {
         [conversationId]
     );
 };
-
+const normalizeAssistantContentBlocks = (blocks: any[]): any[] => {
+    if (!Array.isArray(blocks) || blocks.length === 0) {
+        return blocks;
+    }
+    const hasTextBlock = blocks.some((block: any) => {
+        if (block?.type !== 'text') return false;
+        const value = typeof block?.text === 'string' ? block.text : block?.content;
+        return typeof value === 'string' && value.trim().length > 0;
+    });
+    if (hasTextBlock) {
+        return blocks;
+    }
+    // If model only produced think/tool blocks, promote the final think text into a visible text block.
+    for (let i = blocks.length - 1; i >= 0; i--) {
+        const block = blocks[i];
+        if (block?.type !== 'think') continue;
+        const thinkText = typeof block?.text === 'string' ? block.text : block?.content;
+        if (typeof thinkText === 'string' && thinkText.trim().length > 0) {
+            return [...blocks, { type: 'text', text: thinkText.trim() }];
+        }
+    }
+    return blocks;
+};
 app.use(cors({
   origin: process.env.FRONTEND_URL,
   credentials: true
 }));
 app.use(express.json());
 app.use(cookieParser());
-
 // Auth Routes
 app.post('/api/auth/google', authController.googleAuth);
 app.post('/api/auth/refresh', authController.refreshToken);
 app.post('/api/auth/logout', authController.logout);
-
 // User Routes
 app.get('/api/user/me', requireAuth, userController.getMe);
 app.put('/api/user/me', requireAuth, userController.updateMe);
 app.patch('/api/user/profile', requireAuth, userController.updateProfile);
 app.delete('/api/user/me', requireAuth, userController.deleteUser);
-
 // Project Routes
 app.get('/api/projects', requireAuth, projectController.getProjects);
 app.post('/api/projects', requireAuth, projectController.createProject);
@@ -87,7 +111,6 @@ app.get('/api/conversations', requireAuth, async (req: AuthRequest, res: express
     try {
         const userId = req.user!.userId;
         const projectId = typeof req.query.projectId === 'string' ? req.query.projectId : null;
-
         const query = projectId
             ? `
                 SELECT
@@ -115,14 +138,11 @@ app.get('/api/conversations', requireAuth, async (req: AuthRequest, res: express
                 WHERE c.user_id = $1
                 ORDER BY c.updated_at DESC, c.created_at DESC
             `;
-
         const params = projectId ? [userId, projectId] : [userId];
-
         const result = await db.query(
             query,
             params
         );
-
         const conversations = result.rows.map((row: any) => ({
             id: row.id,
             projectId: row.projectId,
@@ -131,28 +151,23 @@ app.get('/api/conversations', requireAuth, async (req: AuthRequest, res: express
             createdAt: row.createdAt,
             updatedAt: row.updatedAt,
         }));
-
         res.json({ conversations });
     } catch (error) {
         console.error('Error fetching conversations:', error);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
-
 // Agent Chat Route
 app.post('/api/chat', requireAuth, async (req: AuthRequest, res: express.Response): Promise<void> => {
     try {
         const { message, conversationId } = req.body;
         const userId = req.user!.userId;
-
         if (!message) {
             res.status(400).json({ error: 'Message is required' });
             return;
         }
-
         let currentConvId = conversationId;
         const incomingProjectId = req.body.projectId;
-
         // Create conversation if it doesn't exist
         if (!currentConvId) {
             // If projectId is provided, link to it; otherwise require it to be created via /api/projects
@@ -165,29 +180,24 @@ app.post('/api/chat', requireAuth, async (req: AuthRequest, res: express.Respons
                 [userId, incomingProjectId, getTitleFromFirstRequest(message)]
             );
             currentConvId = convResult.rows[0].id;
-            
             // Add conversation to project array
             await db.query(
                 'UPDATE projects SET conversation_ids = array_append(conversation_ids, $1::UUID) WHERE id = $2',
                 [currentConvId, incomingProjectId]
             );
         }
-
         await updateTitleFromFirstRequestIfNeeded(currentConvId, message);
-
         // Save user message
         await db.query(
             'INSERT INTO messages (conversation_id, role, content) VALUES ($1, $2, $3)',
             [currentConvId, 'user', JSON.stringify({ text: message })]
         );
         await touchConversationActivity(currentConvId);
-
         // Fetch conversation history
         const historyResult = await db.query(
             'SELECT role, content, tool_calls, tool_call_id, tool_results FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC',
             [currentConvId]
         );
-        
         let messagesContext: any[] = historyResult.rows.map((row: any) => {
             const raw = row.content;
             let text: string;
@@ -206,13 +216,10 @@ app.post('/api/chat', requireAuth, async (req: AuthRequest, res: express.Respons
             } else {
                 text = JSON.stringify(raw);
             }
-            
             return { role: row.role as string, content: text };
         });
-
         // Call Agent
         let agentResponse = await chatWithAgent(currentConvId, messagesContext);
-        
         // Save Final Assistant Response
         if (agentResponse.content && agentResponse.content.length > 0) {
              await db.query(
@@ -221,43 +228,35 @@ app.post('/api/chat', requireAuth, async (req: AuthRequest, res: express.Respons
             );
             await touchConversationActivity(currentConvId);
         }
-
         res.json({
              conversationId: currentConvId,
              response: agentResponse.content
         });
-
     } catch (error) {
         console.error('Chat error:', error);
         res.status(500).json({ error: 'Internal server error processing chat' });
     }
 });
-
 // ── Streaming Chat Route (SSE) ──────────────────────────────────────────────
 app.post('/api/chat/stream', requireAuth, async (req: AuthRequest, res: express.Response): Promise<void> => {
     const { message, conversationId } = req.body;
     const userId = req.user!.userId;
-
     if (!message) {
         res.status(400).json({ error: 'Message is required' });
         return;
     }
-
     // SSE headers — disable buffering so tokens arrive immediately
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('X-Accel-Buffering', 'no'); // disable nginx buffering if proxied
     res.flushHeaders();
-
     const send = (event: string, data: string) => {
         res.write(`event: ${event}\ndata: ${data}\n\n`);
     };
-
     try {
         let currentConvId = conversationId;
         const incomingProjectId = req.body.projectId;
-
         // Create conversation if needed
         if (!currentConvId) {
             if (!incomingProjectId) {
@@ -270,16 +269,13 @@ app.post('/api/chat/stream', requireAuth, async (req: AuthRequest, res: express.
                 [userId, incomingProjectId, getTitleFromFirstRequest(message)]
             );
             currentConvId = convResult.rows[0].id;
-            
             // Add conversation to project array
             await db.query(
                 'UPDATE projects SET conversation_ids = array_append(conversation_ids, $1::UUID) WHERE id = $2',
                 [currentConvId, incomingProjectId]
             );
         }
-
         await updateTitleFromFirstRequestIfNeeded(currentConvId, message);
-
         const conversationMetaResult = await db.query(
             `
                 SELECT
@@ -299,20 +295,17 @@ app.post('/api/chat/stream', requireAuth, async (req: AuthRequest, res: express.
             title: conversationMeta?.title ?? 'New Chat',
             projectName: conversationMeta?.project_name ?? 'Untitled Project'
         }));
-
         // Save user message
         await db.query(
             'INSERT INTO messages (conversation_id, role, content) VALUES ($1, $2, $3)',
             [currentConvId, 'user', JSON.stringify({ text: message })]
         );
         await touchConversationActivity(currentConvId);
-
         // Fetch conversation history
         const historyResult = await db.query(
             'SELECT role, content, tool_calls, tool_call_id, tool_results FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC',
             [currentConvId]
         );
-
         const messagesContext: any[] = historyResult.rows.map((row: any) => {
             const raw = row.content;
             let text: string;
@@ -331,13 +324,11 @@ app.post('/api/chat/stream', requireAuth, async (req: AuthRequest, res: express.
             }
             return { role: row.role as string, content: text };
         });
-
         const streamedToolCalls: any[] = [];
         const streamedToolResults: any[] = [];
         let contentBlocks: any[] = [];
         let accumulatedText = "";
         const thinkTimers: { startTime: number; endTime?: number }[] = [];
-
         // Stream tokens to client
         const fullText = await chatWithAgentStream(currentConvId, messagesContext, (token) => {
             if (token.startsWith('[TOOL_CALLS]') && token.endsWith('[/TOOL_CALLS]')) {
@@ -347,9 +338,11 @@ app.post('/api/chat/stream', requireAuth, async (req: AuthRequest, res: express.
                     if (Array.isArray(parsed.tool_calls)) {
                         streamedToolCalls.push(...parsed.tool_calls);
                         parsed.tool_calls.forEach((tc: any) => contentBlocks.push({ type: 'tool_call', tool_call: tc }));
+                        send('tool_calls', JSON.stringify({ tool_calls: parsed.tool_calls }));
                     }
                 } catch {
                     // Keep streaming even if one metadata chunk is malformed.
+                    send('token_text', JSON.stringify({ token }));
                 }
             } else {
                 const cleanToken = token.trim();
@@ -360,22 +353,23 @@ app.post('/api/chat/stream', requireAuth, async (req: AuthRequest, res: express.
                         if (parsed?.id) {
                             streamedToolResults.push(parsed);
                             contentBlocks.push({ type: 'tool_result', id: parsed.id, result: parsed.result });
+                            send('tool_result', JSON.stringify({ id: parsed.id, result: parsed.result }));
                         }
                     } catch {
                         // Keep streaming even if one metadata chunk is malformed.
+                        send('token_text', JSON.stringify({ token }));
                     }
+                } else if (token === '[PRESENTATION_UPDATED]') {
+                    send('presentation_updated', JSON.stringify({ updated: true }));
                 } else {
                     // It's a text token. Coalesce into the latest text block or think block
                     accumulatedText += token;
-                    
                     // The simplest and most robust chronological interleave parser is string-splitting `accumulatedText` in its entirety,
                     // but we must preserve the `tool_call` and `tool_result` blocks that were interleaved.
                     // To do this, we can maintain an array of ONLY the `text` and `think` blocks, and re-generate it fully from `accumulatedText` every tick!
-                    
                     const newTextThinkBlocks: any[] = [];
                     let remaining = accumulatedText;
                     let thinkIdx = 0;
-                    
                     while (remaining) {
                         const startIdx = remaining.indexOf("<think>");
                         if (startIdx === -1) {
@@ -386,7 +380,6 @@ app.post('/api/chat/stream', requireAuth, async (req: AuthRequest, res: express.
                             const textBefore = remaining.slice(0, startIdx);
                             if (textBefore.trim()) newTextThinkBlocks.push({ type: "text", text: textBefore });
                         }
-                        
                         // We are now at a `<think>` tag. Check if there's a closing tag.
                         const endIdx = remaining.indexOf("</think>", startIdx);
                         if (endIdx === -1) {
@@ -412,14 +405,11 @@ app.post('/api/chat/stream', requireAuth, async (req: AuthRequest, res: express.
                             thinkIdx++;
                         }
                     }
-                    
                     // We successfully parsed `newTextThinkBlocks` from `accumulatedText`.
                     // But `contentBlocks` already has elements in it! Some of those might be `tool_call` or `tool_result`!
                     // What do we do? We REPLACE all `text` and `think` blocks in `contentBlocks` with our newly parsed `newTextThinkBlocks`, keeping `tool_` blocks where they were.
-                    
                     let textThinkCursor = 0;
                     const reconstructedBlocks: any[] = [];
-                    
                     // To do this chronologically: We stream out `contentBlocks`.
                     for (let b of contentBlocks) {
                         if (b.type === 'tool_call' || b.type === 'tool_result') {
@@ -437,40 +427,35 @@ app.post('/api/chat/stream', requireAuth, async (req: AuthRequest, res: express.
                         reconstructedBlocks.push(newTextThinkBlocks[textThinkCursor]);
                         textThinkCursor++;
                     }
-                    
                     contentBlocks = reconstructedBlocks;
+                    send('token_text', JSON.stringify({ token }));
                 }
             }
-            send('token', JSON.stringify({ token }));
         });
-
         // Persist full response and tool metadata
         if (fullText || streamedToolCalls.length > 0 || streamedToolResults.length > 0) {
-            
+            const normalizedContentBlocks = normalizeAssistantContentBlocks(contentBlocks);
             // To guarantee perfect DB storage, we will re-parse the final `accumulatedText` one last time,
             // meticulously interleaving the stored tool calls. 
             // Wait, we lost the tool call chronological positions if we don't save them.
             // But `contentBlocks` already HAS the chronological positions from the stream!
             // Let's just clean up any hanging trailing blocks.
-            
             // Re-parse the entire sequence based on the finalized `contentBlocks`.
             // The issue is `parseContentBlocks` logic on the frontend handles full strings perfectly.
             // Let's run a robust parser over the final `accumulatedText` here, 
             // and simply insert the `streamedToolCalls` and `streamedToolResults` at the correct indexes (which `contentBlocks` knows).
-
             await db.query(
                 'INSERT INTO messages (conversation_id, role, content, tool_calls, tool_results) VALUES ($1, $2, $3, $4, $5)',
                 [
                     currentConvId,
                     'assistant',
-                    JSON.stringify(contentBlocks),
+                    JSON.stringify(normalizedContentBlocks),
                     streamedToolCalls.length > 0 ? JSON.stringify(streamedToolCalls) : null,
                     streamedToolResults.length > 0 ? JSON.stringify(streamedToolResults) : null,
                 ]
             );
             await touchConversationActivity(currentConvId);
         }
-
         // Signal completion
         send('done', JSON.stringify({ conversationId: currentConvId }));
         res.end();
@@ -480,13 +465,11 @@ app.post('/api/chat/stream', requireAuth, async (req: AuthRequest, res: express.
         res.end();
     }
 });
-
 // Conversation Message History Route (Protected)
 app.get('/api/conversations/:conversationId/messages', requireAuth, async (req: AuthRequest, res: express.Response): Promise<void> => {
     try {
         const { conversationId } = req.params;
         const userId = req.user!.userId;
-
         // Verify ownership and fetch title
         const convResult = await db.query(
             `
@@ -504,17 +487,14 @@ app.get('/api/conversations/:conversationId/messages', requireAuth, async (req: 
             res.status(404).json({ error: 'Conversation not found' });
             return;
         }
-
         const messagesResult = await db.query(
             'SELECT id, role, content, tool_calls, tool_results, created_at FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC',
             [conversationId]
         );
-
         const messages = messagesResult.rows.map((row: any) => {
             // content is stored as JSONB
             const rawContent = row.content;
             let displayContent: any;
-            
             if (typeof rawContent === 'string') {
                 displayContent = rawContent;
             } else if (rawContent?.text) {
@@ -526,7 +506,6 @@ app.get('/api/conversations/:conversationId/messages', requireAuth, async (req: 
             } else {
                 displayContent = "";
             }
-
             return {
                 id: row.id,
                 role: row.role,
@@ -537,7 +516,6 @@ app.get('/api/conversations/:conversationId/messages', requireAuth, async (req: 
                 createdAt: row.created_at,
             };
         });
-
         res.json({
             messages,
             title: convResult.rows[0].title ?? 'Untitled',
@@ -548,19 +526,16 @@ app.get('/api/conversations/:conversationId/messages', requireAuth, async (req: 
         res.status(500).json({ error: 'Error fetching conversation messages' });
     }
 });
-
 // Update Conversation Title Route (Protected)
 app.patch('/api/conversations/:conversationId/title', requireAuth, async (req: AuthRequest, res: express.Response): Promise<void> => {
     try {
         const { conversationId } = req.params;
         const { title } = req.body;
         const userId = req.user!.userId;
-
         if (!title || typeof title !== 'string') {
             res.status(400).json({ error: 'title is required' });
             return;
         }
-
         const check = await db.query(
             'SELECT user_id FROM conversations WHERE id = $1',
             [conversationId]
@@ -569,7 +544,6 @@ app.patch('/api/conversations/:conversationId/title', requireAuth, async (req: A
             res.status(404).json({ error: 'Conversation not found' });
             return;
         }
-
         await db.query(
             'UPDATE conversations SET title = $1, updated_at = NOW() WHERE id = $2',
             [title.trim(), conversationId]
@@ -583,33 +557,27 @@ app.patch('/api/conversations/:conversationId/title', requireAuth, async (req: A
             `,
             [conversationId]
         );
-
         res.json({ title: title.trim() });
     } catch (error) {
         console.error('Error updating conversation title:', error);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
-
 // Presentation Data Route (Protected)
 app.get('/api/presentation/:projectId', requireAuth, async (req: AuthRequest, res: express.Response): Promise<void> => {
      try {
          const { projectId } = req.params;
          const userId = req.user!.userId;
-
          const projResult = await db.query(
              'SELECT p.id FROM projects p JOIN conversations c ON c.id = ANY(p.conversation_ids) WHERE p.id = $1 AND c.user_id = $2 LIMIT 1', 
              [projectId, userId]
          );
-         
          if (projResult.rows.length === 0) {
              res.status(404).json({ error: 'Presentation not found' });
              return;
          }
-
          const { html, cacheHit } = await loadDeckHtmlForProject(projectId as string);
          const dbResult = await db.query('SELECT minio_object_key, theme_data FROM projects WHERE id = $1', [projectId]);
-         
          res.json({
              slides: dbResult.rows,
              html,
@@ -620,12 +588,9 @@ app.get('/api/presentation/:projectId', requireAuth, async (req: AuthRequest, re
          res.status(500).json({ error: 'Error fetching presentation' });
      }
 });
-
-
 if (require.main === module) {
     app.listen(config.port, () => {
       console.log(`Backend server running on port ${config.port}`);
     });
 }
-
 export default app;

@@ -1,3 +1,17 @@
+<!--
+/**
+ * ---------------------------------------------------------------------------
+ * (c) 2026 Freedom, LLC.
+ * This file is part of the SlideDeckVibeAgent System.
+ *
+ * All Rights Reserved. This code is the confidential and proprietary 
+ * information of Freedom, LLC ("Confidential Information"). You shall not 
+ * disclose such Confidential Information and shall use it only in accordance 
+ * with the terms of the license agreement you entered into with Freedom, LLC.
+ * ---------------------------------------------------------------------------
+ */
+-->
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -6,7 +20,6 @@
     <title>Vibe Engine V3</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css" rel="stylesheet">
-    
     <style>
         /* --- CORE ENGINE (READ ONLY) --- */
         :root {
@@ -14,7 +27,6 @@
             --base-height: 1080px;
             --vibe-scale: 1;
         }
-
         /* <!-- VIBE_THEME_START --> */
         :root {
             --vibe-primary: #6366f1;
@@ -25,7 +37,6 @@
             --vibe-font: 'Inter', system-ui, sans-serif;
         }
         /* <!-- VIBE_THEME_END --> */
-
         /* <!-- VIBE_TRANSITIONS_START --> */
         .slide-container {
             scroll-behavior: smooth;
@@ -36,7 +47,6 @@
             transition: opacity 0.8s ease-in-out;
         }
         /* <!-- VIBE_TRANSITIONS_END --> */
-
         /* <!-- VIBE_ANIMATIONS_START --> */
         @keyframes vibe-float {
             0% { transform: translateY(0px); }
@@ -44,14 +54,12 @@
             100% { transform: translateY(0px); }
         }
         .vibe-anim-float { animation: vibe-float 4s ease-in-out infinite; }
-        
         @keyframes vibe-glow {
             from { text-shadow: 0 0 10px var(--vibe-primary); }
             to { text-shadow: 0 0 30px var(--vibe-primary), 0 0 10px var(--vibe-secondary); }
         }
         .vibe-anim-glow { animation: vibe-glow 2s ease-in-out infinite alternate; }
         /* <!-- VIBE_ANIMATIONS_END --> */
-
         body, html {
             background-color: #000;
             margin: 0; padding: 0;
@@ -59,13 +67,11 @@
             overflow: hidden;
             font-family: var(--vibe-font);
         }
-
         .slide-container {
             width: 100vw; height: 100vh;
             scroll-snap-type: y mandatory;
             overflow-y: auto; overflow-x: hidden;
         }
-
         .slide {
             width: 100vw; height: 100vh;
             scroll-snap-align: start;
@@ -73,7 +79,6 @@
             background-color: var(--vibe-bg);
             position: relative;
         }
-
         .slide-aspect-ratio-box {
             width: var(--base-width);
             height: var(--base-height);
@@ -91,7 +96,6 @@
     </style>
 </head>
 <body class="vibe-transition-fade">
-
     <!-- VIBE_GLOBAL_UI_START -->
     <div class="fixed inset-0 pointer-events-none z-50 flex flex-col justify-between p-10">
         <!-- HEADER: Global Brand Layer -->
@@ -102,7 +106,6 @@
             </div>
             <div class="text-white/50 text-xs">BUILD_2026_MAR</div>
         </header>
-
         <!-- FOOTER: Global Navigation Layer -->
         <footer class="flex justify-between items-end">
             <div class="text-white/20 text-xs font-mono">
@@ -115,10 +118,8 @@
         </footer>
     </div>
     <!-- VIBE_GLOBAL_UI_END -->
-
     <div class="slide-container" id="vibe-deck">
         <!-- VIBE_SLIDES_CONTAINER_START -->
-
         <!-- VIBE_SLIDE_ID:550e8400-e29b-41d4-a716-446655440000_START -->
         <section class="slide" id="slide-550e8400">
             <div class="slide-aspect-ratio-box justify-center items-center">
@@ -131,7 +132,6 @@
             </div>
         </section>
         <!-- VIBE_SLIDE_ID:550e8400-e29b-41d4-a716-446655440000_END -->
-
         <!-- VIBE_SLIDE_ID:a1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d_START -->
         <section class="slide" id="slide-a1b2c3d4">
             <div class="slide-aspect-ratio-box">
@@ -159,10 +159,8 @@
             </div>
         </section>
         <!-- VIBE_SLIDE_ID:a1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d_END -->
-
         <!-- VIBE_SLIDES_CONTAINER_END -->
     </div>
-
     <!-- VIBE_MANIFEST_START -->
     <script id="vibe-manifest" type="application/json">
     {
@@ -177,27 +175,22 @@
     }
     </script>
     <!-- VIBE_MANIFEST_END -->
-
     <script>
         const container = document.getElementById('vibe-deck');
         let activeSlideIndex = 0;
         let settleTimer = null;
         let isProgrammaticScroll = false;
-
         function updateScale() {
             const scale = Math.min(window.innerWidth / 1920, window.innerHeight / 1080);
             document.documentElement.style.setProperty('--vibe-scale', scale);
         }
-
         function getSlideCount() {
             return container ? container.querySelectorAll('.slide').length : 0;
         }
-
         function clampSlideIndex(index) {
             const maxIndex = Math.max(0, getSlideCount() - 1);
             return Math.max(0, Math.min(index, maxIndex));
         }
-
         function goToSlide(index, behavior = 'smooth') {
             if (!container) return;
             const clamped = clampSlideIndex(index);
@@ -206,15 +199,12 @@
             container.scrollTo({ top: clamped * window.innerHeight, behavior });
             window.setTimeout(() => { isProgrammaticScroll = false; }, 450);
         }
-
         function nextSlide() {
             goToSlide(activeSlideIndex + 1);
         }
-
         function prevSlide() {
             goToSlide(activeSlideIndex - 1);
         }
-
         function settleSlideFromScroll() {
             if (!container) return;
             const observedIndex = Math.round(container.scrollTop / window.innerHeight);
@@ -223,7 +213,6 @@
             const oneStepIndex = Math.max(maxStepUp, Math.min(maxStepDown, observedIndex));
             goToSlide(oneStepIndex);
         }
-
         if (container) {
             container.addEventListener('scroll', () => {
                 if (isProgrammaticScroll) return;
@@ -231,17 +220,14 @@
                 settleTimer = window.setTimeout(settleSlideFromScroll, 120);
             }, { passive: true });
         }
-
         window.addEventListener('resize', () => {
             updateScale();
             goToSlide(activeSlideIndex, 'auto');
         });
-
         window.addEventListener('load', () => {
             updateScale();
             goToSlide(0, 'auto');
         });
-
         window.addEventListener('keydown', (e) => {
             if (e.key === 'ArrowDown' || e.key === ' ') {
                 e.preventDefault();
@@ -252,7 +238,6 @@
                 prevSlide();
             }
         });
-
         updateScale();
         goToSlide(0, 'auto');
     </script>

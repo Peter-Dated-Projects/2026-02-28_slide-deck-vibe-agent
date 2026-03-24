@@ -1,3 +1,15 @@
+/**
+ * ---------------------------------------------------------------------------
+ * (c) 2026 Freedom, LLC.
+ * This file is part of the SlideDeckVibeAgent System.
+ *
+ * All Rights Reserved. This code is the confidential and proprietary 
+ * information of Freedom, LLC ("Confidential Information"). You shall not 
+ * disclose such Confidential Information and shall use it only in accordance 
+ * with the terms of the license agreement you entered into with Freedom, LLC.
+ * ---------------------------------------------------------------------------
+ */
+
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { ChevronDown, ChevronRight, Brain, Copy, Check } from "lucide-react";
 import ReactMarkdown from "react-markdown";
@@ -5,11 +17,9 @@ import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 // Import a highlight.js theme (GitHub Dark — works well on both light and dark UI)
 import "highlight.js/styles/github-dark-dimmed.css";
-
 // ─────────────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────────────
-
 export interface ChatMessageData {
   id: string;
   role: "user" | "assistant";
@@ -29,19 +39,15 @@ export interface ChatMessageData {
   /** Array of tool results corresponding to tool calls */
   toolResults?: any[];
 }
-
 // ─────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────
-
 function cn(...classes: (string | undefined | null | false)[]) {
   return classes.filter(Boolean).join(" ");
 }
-
 function parseContentBlocks(content: string) {
   const blocks: { type: "text" | "think"; content: string }[] = [];
   let remaining = content;
-
   while (remaining) {
     const startIdx = remaining.indexOf("<think>");
     if (startIdx === -1) {
@@ -63,11 +69,9 @@ function parseContentBlocks(content: string) {
   }
   return blocks;
 }
-
 // ─────────────────────────────────────────────────────
 // ThinkingBlock sub-component
 // ─────────────────────────────────────────────────────
-
 interface ThinkingBlockProps {
   isThinking: boolean;
   thinkingContent?: string;
@@ -76,7 +80,6 @@ interface ThinkingBlockProps {
   startTime?: number;
   endTime?: number;
 }
-
 const ThinkingBlock: React.FC<ThinkingBlockProps> = ({
   isThinking,
   thinkingContent,
@@ -86,7 +89,6 @@ const ThinkingBlock: React.FC<ThinkingBlockProps> = ({
   endTime,
 }) => {
   const [expanded, setExpanded] = useState(false);
-
   const calculateElapsed = useCallback(() => {
     // New behavior:
     if (startTime) {
@@ -102,9 +104,7 @@ const ThinkingBlock: React.FC<ThinkingBlockProps> = ({
     }
     return 0;
   }, [startTime, endTime, isThinking, thinkingTime, thinkingStartedAt]);
-
   const [elapsed, setElapsed] = useState(calculateElapsed());
-
   useEffect(() => {
     if (isThinking && (startTime || thinkingStartedAt) && !endTime && thinkingTime === undefined) {
       const id = setInterval(() => {
@@ -115,13 +115,11 @@ const ThinkingBlock: React.FC<ThinkingBlockProps> = ({
       setElapsed(calculateElapsed());
     }
   }, [isThinking, startTime, endTime, thinkingStartedAt, thinkingTime, calculateElapsed]);
-
   const label = isThinking
     ? `Agent thinking for ${elapsed}s…`
     : elapsed > 0
       ? `Agent thought for ${elapsed}s`
       : `Agent thought`;
-
   return (
     <div className="mb-1 w-full">
       {/* Toggle row */}
@@ -149,7 +147,6 @@ const ThinkingBlock: React.FC<ThinkingBlockProps> = ({
           <ChevronRight className="w-2.5 h-2.5 flex-shrink-0 text-muted-foreground" />
         )}
       </button>
-
       {/* Expanded thinking content */}
       {expanded && (
         <div
@@ -171,19 +168,15 @@ const ThinkingBlock: React.FC<ThinkingBlockProps> = ({
     </div>
   );
 };
-
 // ─────────────────────────────────────────────────────
 // ToolBlock sub-component
 // ─────────────────────────────────────────────────────
-
 interface ToolBlockProps {
   toolCalls: any[];
   toolResults?: any[];
 }
-
 const ToolBlock: React.FC<ToolBlockProps> = ({ toolCalls, toolResults }) => {
   const [expanded, setExpanded] = useState(false);
-
   const formatValue = (value: unknown) => {
     if (value === undefined || value === null) return "(none)";
     if (typeof value === "string") {
@@ -200,9 +193,7 @@ const ToolBlock: React.FC<ToolBlockProps> = ({ toolCalls, toolResults }) => {
       return String(value);
     }
   };
-
   if (!toolCalls || toolCalls.length === 0) return null;
-
   const firstToolName = toolCalls[0]?.function?.name || "tool";
   const allSameTool = toolCalls.every((toolCall) => (toolCall?.function?.name || "tool") === firstToolName);
   const title =
@@ -211,7 +202,6 @@ const ToolBlock: React.FC<ToolBlockProps> = ({ toolCalls, toolResults }) => {
       : allSameTool
         ? `Agent ran: "${firstToolName}" ${toolCalls.length} times`
         : `Agent ran: ${toolCalls.length} tools`;
-
   return (
     <div className="mb-1 w-full">
       <button
@@ -244,7 +234,6 @@ const ToolBlock: React.FC<ToolBlockProps> = ({ toolCalls, toolResults }) => {
           <ChevronRight className="w-2.5 h-2.5 flex-shrink-0 text-muted-foreground" />
         )}
       </button>
-
       {expanded && (
         <div className="mt-1.5 ml-2 pl-3 border-l-2 border-blue-400/40 text-[10px] leading-relaxed text-muted-foreground transition-all duration-200 space-y-2">
           {toolCalls.map((tc, idx) => {
@@ -274,12 +263,10 @@ const ToolBlock: React.FC<ToolBlockProps> = ({ toolCalls, toolResults }) => {
     </div>
   );
 };
-
 // ─────────────────────────────────────────────────────
 // MarkdownContent — renders assistant markdown safely
 // Compatible with react-markdown v9
 // ─────────────────────────────────────────────────────
-
 /* eslint-disable @typescript-eslint/no-explicit-any */
 const mdComponents = {
   // Code: inline (no className) vs fenced block (has language-* className)
@@ -359,7 +346,6 @@ const mdComponents = {
   ),
 };
 /* eslint-enable @typescript-eslint/no-explicit-any */
-
 const MarkdownContent: React.FC<{ content: string }> = ({ content }) => (
   <div className="chat-markdown break-words [overflow-wrap:anywhere]">
     <ReactMarkdown
@@ -371,24 +357,19 @@ const MarkdownContent: React.FC<{ content: string }> = ({ content }) => (
     </ReactMarkdown>
   </div>
 );
-
 // ─────────────────────────────────────────────────────
 // ChatMessage component
 // ─────────────────────────────────────────────────────
-
 interface ChatMessageProps {
   message: ChatMessageData;
 }
-
 export const ChatMessage: React.FC<ChatMessageProps> = React.memo(({ message }) => {
   const isUser = message.role === "user";
   const hasThinking = message.thinkingStartedAt !== undefined || message.thinkingTime !== undefined;
-
   // Context menu state (assistant only)
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [copied, setCopied] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
-
   const handleContextMenu = useCallback(
     (e: React.MouseEvent) => {
       if (isUser) return;
@@ -397,7 +378,6 @@ export const ChatMessage: React.FC<ChatMessageProps> = React.memo(({ message }) 
     },
     [isUser],
   );
-
   const handleCopy = useCallback(() => {
     const textToCopy =
       typeof message.content === "string"
@@ -409,7 +389,6 @@ export const ChatMessage: React.FC<ChatMessageProps> = React.memo(({ message }) 
     });
     setMenu(null);
   }, [message.content]);
-
   // Dismiss on outside click or Escape
   useEffect(() => {
     if (!menu) return;
@@ -428,7 +407,6 @@ export const ChatMessage: React.FC<ChatMessageProps> = React.memo(({ message }) 
       document.removeEventListener("keydown", onKeyDown);
     };
   }, [menu]);
-
   return (
     <div className={cn("flex w-full", isUser ? "justify-end" : "justify-start")}>
       {/* Context menu portal */}
@@ -451,7 +429,6 @@ export const ChatMessage: React.FC<ChatMessageProps> = React.memo(({ message }) 
           </button>
         </div>
       )}
-
       <div
         onContextMenu={handleContextMenu}
         className={cn(
@@ -470,7 +447,6 @@ export const ChatMessage: React.FC<ChatMessageProps> = React.memo(({ message }) 
           message.toolCalls.length > 0 && (
             <ToolBlock toolCalls={message.toolCalls} toolResults={message.toolResults} />
           )}
-
         {/* Message content */}
         {message.content && (
           <>
@@ -489,7 +465,6 @@ export const ChatMessage: React.FC<ChatMessageProps> = React.memo(({ message }) 
                   } else if (Array.isArray(message.content)) {
                     blocks = message.content;
                   }
-
                   // Empty stream edge case support
                   if (blocks.length === 0) {
                     const elements = [];
@@ -507,27 +482,21 @@ export const ChatMessage: React.FC<ChatMessageProps> = React.memo(({ message }) 
                     );
                     return elements;
                   }
-
                   let thinkIdx = 0;
                   const renderedElements: React.ReactNode[] = [];
-
                   for (let i = 0; i < blocks.length; i++) {
                     const block = blocks[i];
-
                     if (block.type === "think") {
                       // If the block itself has timers from the new DB schema, use them directly
                       let timerStartTime =
                         block.startTime || message.thinkTimers?.[thinkIdx]?.startTime;
                       let timerEndTime = block.endTime || message.thinkTimers?.[thinkIdx]?.endTime;
-
                       if (i === 0 && message.thinkingStartedAt) {
                         timerStartTime = message.thinkingStartedAt;
                       }
-
                       const isLastThinkBlock = i === blocks.length - 1;
                       const currentlyThinking =
                         isLastThinkBlock && message.isThinking && !timerEndTime;
-
                       renderedElements.push(
                         <ThinkingBlock
                           key={`think-${i}`}
@@ -546,7 +515,6 @@ export const ChatMessage: React.FC<ChatMessageProps> = React.memo(({ message }) 
                       const segmentToolCalls: any[] = [];
                       const segmentToolResults: any[] = [];
                       let j = i;
-
                       while (
                         j < blocks.length &&
                         (blocks[j].type === "tool_call" || blocks[j].type === "tool_result")
@@ -558,13 +526,10 @@ export const ChatMessage: React.FC<ChatMessageProps> = React.memo(({ message }) 
                         }
                         j++;
                       }
-
                       const groupedBySequentialTool: { toolCalls: any[]; toolResults: any[] }[] = [];
                       let currentGroupName: string | null = null;
-
                       for (const toolCall of segmentToolCalls) {
                         const toolName = toolCall?.function?.name ?? "tool";
-
                         if (currentGroupName === toolName && groupedBySequentialTool.length > 0) {
                           groupedBySequentialTool[groupedBySequentialTool.length - 1].toolCalls.push(
                             toolCall,
@@ -574,18 +539,15 @@ export const ChatMessage: React.FC<ChatMessageProps> = React.memo(({ message }) 
                           currentGroupName = toolName;
                         }
                       }
-
                       if (groupedBySequentialTool.length > 0) {
                         for (let groupIdx = 0; groupIdx < groupedBySequentialTool.length; groupIdx++) {
                           const group = groupedBySequentialTool[groupIdx];
                           const groupCallIds = new Set(
                             group.toolCalls.map((toolCall) => toolCall?.id).filter(Boolean),
                           );
-
                           group.toolResults = segmentToolResults.filter((toolResult) =>
                             groupCallIds.has(toolResult.id),
                           );
-
                           renderedElements.push(
                             <ToolBlock
                               key={`toolgroup-${i}-${groupIdx}`}
@@ -595,7 +557,6 @@ export const ChatMessage: React.FC<ChatMessageProps> = React.memo(({ message }) 
                           );
                         }
                       }
-
                       // Skip the loop forward by the coalesced amount
                       i = j - 1;
                     } else {
@@ -607,7 +568,6 @@ export const ChatMessage: React.FC<ChatMessageProps> = React.memo(({ message }) 
                       );
                     }
                   }
-
                   return renderedElements;
                 })()}
               </div>

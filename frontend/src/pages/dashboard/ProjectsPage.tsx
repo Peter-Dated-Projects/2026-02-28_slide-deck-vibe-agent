@@ -1,19 +1,28 @@
+/**
+ * ---------------------------------------------------------------------------
+ * (c) 2026 Freedom, LLC.
+ * This file is part of the SlideDeckVibeAgent System.
+ *
+ * All Rights Reserved. This code is the confidential and proprietary 
+ * information of Freedom, LLC ("Confidential Information"). You shall not 
+ * disclose such Confidential Information and shall use it only in accordance 
+ * with the terms of the license agreement you entered into with Freedom, LLC.
+ * ---------------------------------------------------------------------------
+ */
+
 import React, { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { ProjectCard, ProjectData } from "../../components/dashboard/ProjectCard";
 import { ChevronLeft, ChevronRight, Plus, Loader2 } from "lucide-react";
 import api from "../../api";
-
 export default function ProjectsPage() {
   const navigate = useNavigate();
   const [currentPage, setCurrentPage] = useState(1);
   const containerRef = useRef<HTMLDivElement>(null);
   const [columns, setColumns] = useState(4); // Default to 4
-
   // Setup ResizeObserver to calculate columns dynamically
   useEffect(() => {
     if (!containerRef.current) return;
-
     const observer = new ResizeObserver((entries) => {
       for (const entry of entries) {
         const width = entry.contentRect.width;
@@ -23,71 +32,56 @@ export default function ProjectsPage() {
         setColumns(cols);
       }
     });
-
     observer.observe(containerRef.current);
     return () => observer.disconnect();
   }, []);
-
   const itemsPerPage = Math.min(20, columns * 4);
-
   const [projectsData, setProjectsData] = useState<ProjectData[]>([]);
   const [loading, setLoading] = useState(true);
   const inFlightPreviewRequestsRef = useRef<Set<string>>(new Set());
   const attemptedPreviewFallbackRef = useRef<Set<string>>(new Set());
   const refreshBurstIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const refreshBurstTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
   const fetchProjects = useCallback(async () => {
     const response = await api.get("/projects");
     const projects: ProjectData[] = response.data.projects || [];
     setProjectsData(projects);
-
     // Reset fallback markers once a valid thumbnail arrives.
     for (const project of projects) {
       if (project.thumbnailUrl) {
         attemptedPreviewFallbackRef.current.delete(project.id);
       }
     }
-
     return projects;
   }, []);
-
   const requestPreviewFallback = useCallback(
     async (projectId: string) => {
       if (inFlightPreviewRequestsRef.current.has(projectId)) {
         return;
       }
-
       if (attemptedPreviewFallbackRef.current.has(projectId)) {
         return;
       }
-
       attemptedPreviewFallbackRef.current.add(projectId);
       inFlightPreviewRequestsRef.current.add(projectId);
-
       try {
         await api.post(`/projects/${projectId}/preview`);
-
         // Preview generation runs async on the backend; poll project list briefly
         // until a thumbnail appears for this project.
         const maxPollAttempts = 12;
         const pollIntervalMs = 1500;
         let previewReady = false;
-
         for (let attempt = 0; attempt < maxPollAttempts; attempt += 1) {
           if (attempt > 0) {
             await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
           }
-
           const projects = await fetchProjects();
           const updatedProject = projects.find((project) => project.id === projectId);
-
           if (updatedProject?.thumbnailUrl) {
             previewReady = true;
             break;
           }
         }
-
         if (!previewReady) {
           // Allow future retry if preview wasn't ready within the poll window.
           attemptedPreviewFallbackRef.current.delete(projectId);
@@ -101,7 +95,6 @@ export default function ProjectsPage() {
     },
     [fetchProjects],
   );
-
   useEffect(() => {
     const loadProjects = async () => {
       try {
@@ -114,22 +107,18 @@ export default function ProjectsPage() {
     };
     void loadProjects();
   }, [fetchProjects]);
-
   useEffect(() => {
     if (loading) return;
-
     const clearRefreshBurst = () => {
       if (refreshBurstIntervalRef.current) {
         clearInterval(refreshBurstIntervalRef.current);
         refreshBurstIntervalRef.current = null;
       }
-
       if (refreshBurstTimeoutRef.current) {
         clearTimeout(refreshBurstTimeoutRef.current);
         refreshBurstTimeoutRef.current = null;
       }
     };
-
     const refreshProjectsSilently = async () => {
       try {
         await fetchProjects();
@@ -137,28 +126,22 @@ export default function ProjectsPage() {
         console.error("Failed to refresh projects", error);
       }
     };
-
     const startRefreshBurst = () => {
       clearRefreshBurst();
       void refreshProjectsSilently();
-
       refreshBurstIntervalRef.current = setInterval(() => {
         void refreshProjectsSilently();
       }, 2500);
-
       refreshBurstTimeoutRef.current = setTimeout(() => {
         clearRefreshBurst();
       }, 10000);
     };
-
     const handleFocus = () => {
       startRefreshBurst();
     };
-
     const handlePageShow = () => {
       startRefreshBurst();
     };
-
     const handleVisibilityChange = () => {
       if (document.visibilityState === "visible") {
         startRefreshBurst();
@@ -166,12 +149,10 @@ export default function ProjectsPage() {
         clearRefreshBurst();
       }
     };
-
     startRefreshBurst();
     window.addEventListener("focus", handleFocus);
     window.addEventListener("pageshow", handlePageShow);
     document.addEventListener("visibilitychange", handleVisibilityChange);
-
     return () => {
       clearRefreshBurst();
       window.removeEventListener("focus", handleFocus);
@@ -179,18 +160,15 @@ export default function ProjectsPage() {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, [fetchProjects, loading]);
-
   // Derived state
   const recentProjects = useMemo(() => {
     const threeDaysAgo = new Date();
     threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
-
     return projectsData
       .filter((p) => new Date(p.updatedAt) >= threeDaysAgo)
       .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
       .slice(0, 5); // Keep top 5 most recent max
   }, [projectsData]);
-
   const sortedAllProjects = useMemo(() => {
     return [...projectsData].sort(
       (a, b) =>
@@ -198,29 +176,23 @@ export default function ProjectsPage() {
         new Date(a.createdAt || a.updatedAt).getTime(),
     );
   }, [projectsData]);
-
   const totalPages = Math.ceil(sortedAllProjects.length / itemsPerPage);
-
   // Adjust current page if total pages decreases
   useEffect(() => {
     if (currentPage > totalPages && totalPages > 0) {
       setCurrentPage(totalPages);
     }
   }, [totalPages, currentPage]);
-
   const paginatedProjects = useMemo(() => {
     const startIndex = (currentPage - 1) * itemsPerPage;
     return sortedAllProjects.slice(startIndex, startIndex + itemsPerPage);
   }, [sortedAllProjects, currentPage, itemsPerPage]);
-
   const handlePageChange = (newPage: number) => {
     if (newPage >= 1 && newPage <= totalPages) {
       setCurrentPage(newPage);
     }
   };
-
   const [creating, setCreating] = useState(false);
-
   const handleCreateProject = useCallback(async () => {
     if (creating) return;
     setCreating(true);
@@ -235,17 +207,14 @@ export default function ProjectsPage() {
       setCreating(false);
     }
   }, [creating, navigate]);
-
   const handleDeleteProject = useCallback(
     async (projectId: string) => {
       const project = projectsData.find((p) => p.id === projectId);
       const projectLabel = project?.name?.trim() || "this project";
       const confirmed = window.confirm(`Delete ${projectLabel}? This cannot be undone.`);
-
       if (!confirmed) {
         return;
       }
-
       try {
         await api.delete(`/projects/${projectId}`);
         setProjectsData((prev) => prev.filter((p) => p.id !== projectId));
@@ -255,7 +224,6 @@ export default function ProjectsPage() {
     },
     [projectsData],
   );
-
   if (loading) {
     return (
       <div className="max-w-7xl mx-auto pb-12 flex items-center justify-center min-h-[50vh]">
@@ -263,7 +231,6 @@ export default function ProjectsPage() {
       </div>
     );
   }
-
   return (
     <div className="max-w-7xl mx-auto pb-12">
       <div className="flex items-center justify-between mb-8">
@@ -284,7 +251,6 @@ export default function ProjectsPage() {
           <span>New Project</span>
         </button>
       </div>
-
       {recentProjects.length > 0 && (
         <section className="mb-12">
           <h2 className="text-lg font-semibold text-foreground mb-4">Recents</h2>
@@ -307,7 +273,6 @@ export default function ProjectsPage() {
           </div>
         </section>
       )}
-
       <section>
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold text-foreground">All Projects</h2>
@@ -315,7 +280,6 @@ export default function ProjectsPage() {
             {sortedAllProjects.length} Total
           </span>
         </div>
-
         {projectsData.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-center border-2 border-dashed border-white/10 rounded-xl">
             <h3 className="text-xl font-medium text-foreground mb-2">No Projects</h3>
@@ -352,7 +316,6 @@ export default function ProjectsPage() {
             ))}
           </div>
         )}
-
         {/* Pagination Controls */}
         {totalPages > 1 && (
           <div className="flex items-center justify-center gap-2 mt-8">
@@ -386,7 +349,6 @@ export default function ProjectsPage() {
                     </button>
                   );
                 }
-
                 // Render ellipses
                 if (pageNum === currentPage - 2 || pageNum === currentPage + 2) {
                   return (
@@ -395,7 +357,6 @@ export default function ProjectsPage() {
                     </span>
                   );
                 }
-
                 return null;
               })}
             </div>

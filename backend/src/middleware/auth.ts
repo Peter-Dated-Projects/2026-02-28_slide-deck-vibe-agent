@@ -1,27 +1,33 @@
+/**
+ * ---------------------------------------------------------------------------
+ * (c) 2026 Freedom, LLC.
+ * This file is part of the SlideDeckVibeAgent System.
+ *
+ * All Rights Reserved. This code is the confidential and proprietary 
+ * information of Freedom, LLC ("Confidential Information"). You shall not 
+ * disclose such Confidential Information and shall use it only in accordance 
+ * with the terms of the license agreement you entered into with Freedom, LLC.
+ * ---------------------------------------------------------------------------
+ */
+
 import type { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { config } from '../config';
-
 export interface AuthRequest extends Request {
   user?: {
     userId: string;
   };
 }
-
 export const requireAuth = (req: AuthRequest, res: Response, next: NextFunction): void => {
   const authHeader = req.headers.authorization;
-
   if (!authHeader?.startsWith('Bearer ')) {
     res.status(401).json({ error: 'No token provided' });
     return;
   }
-
   const token = authHeader.split(' ')[1] as string;
-
   try {
     const secret = config.auth.jwtSecret || 'secret';
     const decoded = jwt.verify(token, secret) as unknown as { userId: string };
-    
     // We add the user to the request object so subsequent handlers have access
     req.user = decoded;
     next();

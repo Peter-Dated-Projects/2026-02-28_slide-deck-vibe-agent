@@ -1,25 +1,32 @@
+/**
+ * ---------------------------------------------------------------------------
+ * (c) 2026 Freedom, LLC.
+ * This file is part of the SlideDeckVibeAgent System.
+ *
+ * All Rights Reserved. This code is the confidential and proprietary 
+ * information of Freedom, LLC ("Confidential Information"). You shall not 
+ * disclose such Confidential Information and shall use it only in accordance 
+ * with the terms of the license agreement you entered into with Freedom, LLC.
+ * ---------------------------------------------------------------------------
+ */
+
 import React, { useMemo, useState } from "react";
 import { CheckSquare, Square, ChevronDown, ChevronUp } from "lucide-react";
-
 export interface AgentTask {
   id: string;
   title: string;
   done: boolean;
 }
-
 interface TaskListBarProps {
   tasks: AgentTask[];
 }
-
 export const TaskListBar: React.FC<TaskListBarProps> = ({ tasks }) => {
   const [isOpen, setIsOpen] = useState(false);
-
   const { total, remaining } = useMemo(() => {
     const totalCount = tasks.length;
     const remainingCount = tasks.reduce((count, task) => count + (task.done ? 0 : 1), 0);
     return { total: totalCount, remaining: remainingCount };
   }, [tasks]);
-
   return (
     <div className="relative">
       {isOpen && (
@@ -47,7 +54,6 @@ export const TaskListBar: React.FC<TaskListBarProps> = ({ tasks }) => {
           )}
         </div>
       )}
-
       <button
         type="button"
         onClick={() => setIsOpen((value) => !value)}

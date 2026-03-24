@@ -1,24 +1,31 @@
+/**
+ * ---------------------------------------------------------------------------
+ * (c) 2026 Freedom, LLC.
+ * This file is part of the SlideDeckVibeAgent System.
+ *
+ * All Rights Reserved. This code is the confidential and proprietary 
+ * information of Freedom, LLC ("Confidential Information"). You shall not 
+ * disclose such Confidential Information and shall use it only in accordance 
+ * with the terms of the license agreement you entered into with Freedom, LLC.
+ * ---------------------------------------------------------------------------
+ */
+
 import React from 'react';
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import GoogleAuthWrapper from '../components/GoogleAuthWrapper';
 import { Sparkles } from 'lucide-react';
-
 const LoginPage: React.FC = () => {
   const { isAuthenticated, isLoading } = useAuth();
-
   if (isLoading) {
     return <div className="h-screen w-screen flex items-center justify-center bg-background text-foreground">Loading...</div>;
   }
-
   if (isAuthenticated) {
     return <Navigate to="/dashboard/projects" replace />;
   }
-
   return (
     <div className="min-h-screen bg-background flex flex-col justify-center py-12 sm:px-6 lg:px-8 relative overflow-hidden">
         {/* Background Gradients Removed per user request */}
-
       <div className="sm:mx-auto sm:w-full sm:max-w-md relative z-10">
         <div className="flex justify-center mb-6">
             <div className="bg-primary/10 p-4 rounded-2xl border border-primary/20">
@@ -32,14 +39,12 @@ const LoginPage: React.FC = () => {
           Generate stunning, web-native <br /> presentations hands-free, instantly.
         </p>
       </div>
-
   <div className="mt-10 sm:mx-auto sm:w-full sm:max-w-md relative z-10">
         <div className="bg-card/50 backdrop-blur-xl py-12 px-4 shadow-card rounded-2xl sm:px-10 border border-border mx-4 sm:mx-0">
             <div className="flex flex-col items-center justify-center space-y-8">
                  <div className="text-center space-y-2">
                      <p className="text-sm text-muted-foreground">Sign in to sync your presentations</p>
                  </div>
-                 
                  <div className="w-full flex justify-center scale-110">
                     <GoogleAuthWrapper />
                  </div>
@@ -49,5 +54,4 @@ const LoginPage: React.FC = () => {
     </div>
   );
 };
-
 export default LoginPage;

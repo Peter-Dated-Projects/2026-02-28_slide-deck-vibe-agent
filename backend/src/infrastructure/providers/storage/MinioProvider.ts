@@ -1,11 +1,21 @@
+/**
+ * ---------------------------------------------------------------------------
+ * (c) 2026 Freedom, LLC.
+ * This file is part of the SlideDeckVibeAgent System.
+ *
+ * All Rights Reserved. This code is the confidential and proprietary 
+ * information of Freedom, LLC ("Confidential Information"). You shall not 
+ * disclose such Confidential Information and shall use it only in accordance 
+ * with the terms of the license agreement you entered into with Freedom, LLC.
+ * ---------------------------------------------------------------------------
+ */
+
 import { S3Client, PutObjectCommand, GetObjectCommand, HeadBucketCommand, CreateBucketCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import type { IStorageService } from "../../../core/interfaces/IStorageService";
-
 export class MinioProvider implements IStorageService {
     private s3Client: S3Client;
     private bucketName: string;
-
     constructor(config: { endpoint: string, accessKey: string, secretKey: string, bucketName: string }) {
         this.s3Client = new S3Client({
             endpoint: config.endpoint,
@@ -18,7 +28,6 @@ export class MinioProvider implements IStorageService {
         });
         this.bucketName = config.bucketName;
     }
-
     private async ensureBucketExists(): Promise<void> {
         try {
             await this.s3Client.send(new HeadBucketCommand({ Bucket: this.bucketName }));
@@ -32,7 +41,6 @@ export class MinioProvider implements IStorageService {
             }
         }
     }
-
     async uploadFile(key: string, body: string | Buffer, contentType: string) {
         await this.ensureBucketExists();
         const command = new PutObjectCommand({
@@ -43,7 +51,6 @@ export class MinioProvider implements IStorageService {
         });
         return await this.s3Client.send(command);
     }
-
     async getFileUrl(key: string, expiresIn = 3600) {
         const command = new GetObjectCommand({
             Bucket: this.bucketName,
@@ -51,7 +58,6 @@ export class MinioProvider implements IStorageService {
         });
         return await getSignedUrl(this.s3Client, command, { expiresIn });
     }
-
     async getFileContent(key: string): Promise<string> {
         const command = new GetObjectCommand({
             Bucket: this.bucketName,

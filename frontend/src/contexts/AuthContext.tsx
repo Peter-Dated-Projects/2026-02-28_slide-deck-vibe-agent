@@ -1,13 +1,23 @@
+/**
+ * ---------------------------------------------------------------------------
+ * (c) 2026 Freedom, LLC.
+ * This file is part of the SlideDeckVibeAgent System.
+ *
+ * All Rights Reserved. This code is the confidential and proprietary 
+ * information of Freedom, LLC ("Confidential Information"). You shall not 
+ * disclose such Confidential Information and shall use it only in accordance 
+ * with the terms of the license agreement you entered into with Freedom, LLC.
+ * ---------------------------------------------------------------------------
+ */
+
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import axios from 'axios';
 import api, { setAccessToken } from '../api';
-
 export interface UserSettings {
   theme: 'light' | 'night';
   billing: any;
   registered_domains: string[];
 }
-
 export interface User {
   id: string;
   email: string;
@@ -22,7 +32,6 @@ export interface User {
   settings: UserSettings;
   created_at: string;
 }
-
 interface AuthContextType {
   user: User | null;
   isAuthenticated: boolean;
@@ -31,13 +40,10 @@ interface AuthContextType {
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
 }
-
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
-
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-
   // Initial check to see if we have a valid session via the HTTPOnly refresh token
   useEffect(() => {
     const checkAuthStatus = async () => {
@@ -47,9 +53,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           {},
           { withCredentials: true }
         );
-        
         setAccessToken(response.data.accessToken);
-
         // Fetch real user info
         const userResponse = await api.get('/user/me');
         setUser(userResponse.data.user);
@@ -60,9 +64,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setIsLoading(false);
       }
     };
-
     checkAuthStatus();
-
     // Listen to our custom unauthorized event from the Axios interceptor
     const handleUnauthorized = () => {
       setUser(null);
@@ -71,7 +73,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     window.addEventListener('auth:unauthorized', handleUnauthorized);
     return () => window.removeEventListener('auth:unauthorized', handleUnauthorized);
   }, []);
-
   const refreshUser = async () => {
     try {
       const userResponse = await api.get('/user/me');
@@ -80,7 +81,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.error('Failed to refresh user', error);
     }
   };
-
   const loginWithGoogle = async (credential: string) => {
     setIsLoading(true);
     try {
@@ -94,7 +94,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setIsLoading(false);
     }
   };
-
   const logout = async () => {
     try {
       await api.post('/auth/logout');
@@ -105,14 +104,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setUser(null);
     }
   };
-
   return (
     <AuthContext.Provider value={{ user, isAuthenticated: !!user, isLoading, loginWithGoogle, logout, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );
 };
-
 export const useAuth = () => {
   const context = useContext(AuthContext);
   if (context === undefined) {
