@@ -1,21 +1,30 @@
+/**
+ * ---------------------------------------------------------------------------
+ * (c) 2026 Freedom, LLC.
+ * This file is part of the SlideDeckVibeAgent System.
+ *
+ * All Rights Reserved. This code is the confidential and proprietary 
+ * information of Freedom, LLC ("Confidential Information"). You shall not 
+ * disclose such Confidential Information and shall use it only in accordance 
+ * with the terms of the license agreement you entered into with Freedom, LLC.
+ * ---------------------------------------------------------------------------
+ */
+
 import type { ILLMService } from "../../../core/interfaces/ILLMService";
 import type { IDatabaseService } from "../../../core/interfaces/IDatabaseService";
 import type { IStorageService } from "../../../core/interfaces/IStorageService";
 import { extractToolCallsFromText } from "./toolCallParser";
-
 export class OllamaProvider implements ILLMService {
     private baseUrl: string;
     private model: string;
     private dbService: IDatabaseService;
     private storageService: IStorageService;
-
     constructor(baseUrl: string, model: string, dbService: IDatabaseService, storageService: IStorageService) {
         this.baseUrl = baseUrl;
         this.model = model;
         this.dbService = dbService;
         this.storageService = storageService;
     }
-
     private buildMessages(messages: any[], systemInstruction?: string) {
         const instruction = systemInstruction || "You are Vibe Agent, an expert frontend engineer creating beautiful web-native presentations. You communicate directly with the user to understand their slide deck needs. Keep slides modern, interactive, and visually stunning.";
         return [
@@ -26,12 +35,10 @@ export class OllamaProvider implements ILLMService {
             ...messages
         ];
     }
-
     private truncate(value: string, max = 240): string {
         if (value.length <= max) return value;
         return `${value.slice(0, max)}...`;
     }
-
     private summarizeMessages(messages: any[]): any[] {
         return messages.slice(-12).map((m, idx) => {
             const content = m?.content;
@@ -46,7 +53,6 @@ export class OllamaProvider implements ILLMService {
                             return String(content ?? '');
                         }
                     })();
-
             const toolCalls = Array.isArray(m?.tool_calls) ? m.tool_calls : [];
             const toolCallSummary = toolCalls.slice(0, 5).map((tc: any) => {
                 const args = tc?.function?.arguments;
@@ -68,7 +74,6 @@ export class OllamaProvider implements ILLMService {
                     argsPreview: this.truncate(typeof args === 'string' ? args : JSON.stringify(args ?? {}), 180)
                 };
             });
-
             return {
                 idx,
                 role: m?.role,
@@ -81,7 +86,6 @@ export class OllamaProvider implements ILLMService {
             };
         });
     }
-
     private logOllamaRequestDebug(
         methodName: 'chatWithAgent' | 'chatWithAgentStream',
         conversationId: string,
@@ -96,7 +100,6 @@ export class OllamaProvider implements ILLMService {
         const toolNames = Array.isArray(body?.tools)
             ? body.tools.map((t: any) => t?.function?.name).filter(Boolean)
             : [];
-
         console.error('[ollama-debug] request failed', {
             methodName,
             conversationId,
@@ -114,7 +117,6 @@ export class OllamaProvider implements ILLMService {
             payloadTail
         });
     }
-
     async chatWithAgent(
         conversationId: string, 
         messages: any[], 
@@ -126,19 +128,15 @@ export class OllamaProvider implements ILLMService {
             messages: this.buildMessages(messages, systemInstruction),
             stream: false
         };
-        
         if (tools && tools.length > 0) {
             body.tools = tools;
         }
-
         const payload = JSON.stringify(body);
-
         const response = await fetch(`${this.baseUrl}/api/chat`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: payload
         });
-
         if (!response.ok) {
             const errorBody = await response.text().catch(() => '');
             this.logOllamaRequestDebug(
@@ -152,9 +150,7 @@ export class OllamaProvider implements ILLMService {
             );
             throw new Error(`Ollama API error: ${response.status} ${response.statusText}${errorBody ? ` - ${errorBody}` : ''}`);
         }
-
         const data: any = await response.json();
-        
         // Handle tool calls if present
         if (data.message?.tool_calls && data.message.tool_calls.length > 0) {
              return {
@@ -163,13 +159,11 @@ export class OllamaProvider implements ILLMService {
                  stop_reason: 'tool_calls'
              };
         }
-        
         return {
             content: [{ type: 'text', text: data.message?.content }],
             stop_reason: 'end_turn'
         };
     }
-
     async chatWithAgentStream(
         conversationId: string,
         messages: any[],
@@ -182,19 +176,15 @@ export class OllamaProvider implements ILLMService {
             messages: this.buildMessages(messages, systemInstruction),
             stream: true
         };
-        
         if (tools && tools.length > 0) {
             body.tools = tools;
         }
-
         const payload = JSON.stringify(body);
-
         const response = await fetch(`${this.baseUrl}/api/chat`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: payload
         });
-
         if (!response.ok) {
             const errorBody = await response.text().catch(() => '');
             this.logOllamaRequestDebug(
@@ -208,25 +198,21 @@ export class OllamaProvider implements ILLMService {
             );
             throw new Error(`Ollama API error: ${response.status} ${response.statusText}${errorBody ? ` - ${errorBody}` : ''}`);
         }
-
         const reader = response.body!.getReader();
         const decoder = new TextDecoder();
         let fullText = '';
         let isThinking = false;
         let accumulatedThinking = '';
         let toolCallsCollected: any[] = [];
-
         while (true) {
             const { done, value } = await reader.read();
             if (done) break;
-
             // Ollama streams NDJSON — each chunk may contain multiple lines
             const lines = decoder.decode(value, { stream: true }).split('\n');
             for (const line of lines) {
                 if (!line.trim()) continue;
                 try {
                     const json: any = JSON.parse(line);
-                    
                     const thinkingToken: string = json.message?.thinking ?? '';
                     if (thinkingToken) {
                         if (!isThinking) {
@@ -239,7 +225,6 @@ export class OllamaProvider implements ILLMService {
                         fullText += thinkingToken;
                         accumulatedThinking += thinkingToken;
                     }
-
                     const token: string = json.message?.content ?? '';
                     if (token) {
                         if (isThinking) {
@@ -248,7 +233,6 @@ export class OllamaProvider implements ILLMService {
                             if (extractedToolCalls.length > 0) {
                                 toolCallsCollected.push(...extractedToolCalls);
                             }
-                            
                             onChunk('</think>');
                             fullText += '</think>';
                             isThinking = false;
@@ -257,14 +241,12 @@ export class OllamaProvider implements ILLMService {
                         onChunk(token);
                         fullText += token;
                     }
-                    
                     // Ollama streaming tool calls (handled similarly to standard content)
                     // Note: Ollama usually returns tool calls in a single non-streamed chunk at the end,
                     // but we handle the structure if it streams it.
                     if (json.message?.tool_calls) {
                          toolCallsCollected.push(...json.message.tool_calls);
                     }
-                    
                     if (json.done) {
                         if (isThinking) {
                             // Extract tool calls from final thinking block
@@ -272,17 +254,14 @@ export class OllamaProvider implements ILLMService {
                             if (extractedToolCalls.length > 0) {
                                 toolCallsCollected.push(...extractedToolCalls);
                             }
-                            
                             onChunk('</think>');
                             fullText += '</think>';
                         }
-                        
                         // Emit all collected tool calls at the end
                         if (toolCallsCollected.length > 0) {
                             const tcStr = JSON.stringify({ type: 'tool_calls', tool_calls: toolCallsCollected });
                             onChunk(`[TOOL_CALLS]${tcStr}[/TOOL_CALLS]`);
                         }
-                        
                         return fullText;
                     }
                 } catch {
@@ -290,13 +269,11 @@ export class OllamaProvider implements ILLMService {
                 }
             }
         }
-
         // Final check: emit any collected tool calls
         if (toolCallsCollected.length > 0) {
             const tcStr = JSON.stringify({ type: 'tool_calls', tool_calls: toolCallsCollected });
             onChunk(`[TOOL_CALLS]${tcStr}[/TOOL_CALLS]`);
         }
-
         return fullText;
     }
 }

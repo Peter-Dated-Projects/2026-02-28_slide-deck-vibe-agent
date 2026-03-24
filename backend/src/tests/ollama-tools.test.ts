@@ -1,13 +1,23 @@
 /**
+ * ---------------------------------------------------------------------------
+ * (c) 2026 Freedom, LLC.
+ * This file is part of the SlideDeckVibeAgent System.
+ *
+ * All Rights Reserved. This code is the confidential and proprietary 
+ * information of Freedom, LLC ("Confidential Information"). You shall not 
+ * disclose such Confidential Information and shall use it only in accordance 
+ * with the terms of the license agreement you entered into with Freedom, LLC.
+ * ---------------------------------------------------------------------------
+ */
+
+/**
  * Ollama Tool Calling Integration Test (Jest)
  *
  * Verifies that Ollama can trigger a locally-defined dummy tool call.
  * The tool is NOT a real production tool — it's a one-time echo function defined here only.
  * Requires OLLAMA_MODEL_KEY in .env.test. OLLAMA_BASE_URL defaults to http://localhost:11434.
  */
-
 import '../config';
-
 // One-time dummy tool for testing purposes only
 const DUMMY_TOOL = {
     type: 'function',
@@ -26,18 +36,15 @@ const DUMMY_TOOL = {
         }
     }
 };
-
 describe('Ollama LLM - Tool Calling', () => {
     let baseUrl: string;
     let model: string;
-
     beforeAll(() => {
         const modelKey = process.env.OLLAMA_MODEL_KEY;
         if (!modelKey) throw new Error('OLLAMA_MODEL_KEY is not set in .env.test');
         model = modelKey;
         baseUrl = process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
     });
-
     it('should trigger the echo_test dummy tool call', async () => {
         const response = await fetch(`${baseUrl}/api/chat`, {
             method: 'POST',
@@ -58,18 +65,13 @@ describe('Ollama LLM - Tool Calling', () => {
                 stream: false
             })
         });
-
         expect(response.ok).toBe(true);
-
         const data: any = await response.json();
         const toolCalls = data.message?.tool_calls;
-
         expect(toolCalls).toBeDefined();
         expect(toolCalls.length).toBeGreaterThan(0);
-
         const toolName = toolCalls[0].function?.name;
         expect(toolName).toBe('echo_test');
-
         const args = toolCalls[0].function?.arguments;
         expect(args).toBeDefined();
     }, 120_000);

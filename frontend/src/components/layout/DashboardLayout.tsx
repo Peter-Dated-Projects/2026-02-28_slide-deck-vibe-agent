@@ -1,7 +1,18 @@
+/**
+ * ---------------------------------------------------------------------------
+ * (c) 2026 Freedom, LLC.
+ * This file is part of the SlideDeckVibeAgent System.
+ *
+ * All Rights Reserved. This code is the confidential and proprietary 
+ * information of Freedom, LLC ("Confidential Information"). You shall not 
+ * disclose such Confidential Information and shall use it only in accordance 
+ * with the terms of the license agreement you entered into with Freedom, LLC.
+ * ---------------------------------------------------------------------------
+ */
+
 import React from 'react';
 import { Outlet } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
-
 export const DashboardLayout: React.FC = () => {
   return (
     <div className="min-h-screen bg-background flex">
@@ -12,7 +23,6 @@ export const DashboardLayout: React.FC = () => {
           <div className="absolute -top-[20%] -left-[10%] w-[50%] h-[50%] rounded-full bg-primary/5 blur-[120px] mix-blend-multiply opacity-50 dark:mix-blend-screen" />
           <div className="absolute top-[20%] -right-[10%] w-[50%] h-[50%] rounded-full bg-accent/5 blur-[120px] mix-blend-multiply opacity-50 dark:mix-blend-screen" />
         </div>
-        
         <main className="flex-1 relative z-10 w-full p-6 md:p-8">
           <Outlet />
         </main>

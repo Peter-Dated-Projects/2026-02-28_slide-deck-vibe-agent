@@ -1,7 +1,18 @@
+/**
+ * ---------------------------------------------------------------------------
+ * (c) 2026 Freedom, LLC.
+ * This file is part of the SlideDeckVibeAgent System.
+ *
+ * All Rights Reserved. This code is the confidential and proprietary 
+ * information of Freedom, LLC ("Confidential Information"). You shall not 
+ * disclose such Confidential Information and shall use it only in accordance 
+ * with the terms of the license agreement you entered into with Freedom, LLC.
+ * ---------------------------------------------------------------------------
+ */
+
 import React from "react";
 import { Package, Pencil, Trash2 } from "lucide-react";
 import { Link } from "react-router-dom";
-
 export interface ProjectData {
   id: string;
   name: string;
@@ -11,7 +22,6 @@ export interface ProjectData {
   theme?: string;
   latest_conversation_id?: string;
 }
-
 interface ProjectCardProps {
   project: ProjectData;
   onEdit?: (id: string) => void;
@@ -19,7 +29,6 @@ interface ProjectCardProps {
   onThumbnailUnavailable?: (id: string) => void;
   className?: string;
 }
-
 export const ProjectCard: React.FC<ProjectCardProps> = ({
   project,
   onEdit,
@@ -30,68 +39,56 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
   const missingThumbnailRequestedRef = React.useRef(false);
   const [menu, setMenu] = React.useState<{ x: number; y: number } | null>(null);
   const menuRef = React.useRef<HTMLDivElement>(null);
-
   React.useEffect(() => {
     if (!project.thumbnailUrl && onThumbnailUnavailable && !missingThumbnailRequestedRef.current) {
       missingThumbnailRequestedRef.current = true;
       onThumbnailUnavailable(project.id);
     }
   }, [project.id, project.thumbnailUrl, onThumbnailUnavailable]);
-
   React.useEffect(() => {
     if (project.thumbnailUrl) {
       missingThumbnailRequestedRef.current = false;
     }
   }, [project.thumbnailUrl]);
-
   const handleThumbnailError = () => {
     onThumbnailUnavailable?.(project.id);
   };
-
   const handleContextMenu = (e: React.MouseEvent) => {
     if (!onDelete) return;
     e.preventDefault();
     e.stopPropagation();
     setMenu({ x: e.clientX, y: e.clientY });
   };
-
   const handleMenuDelete = () => {
     if (!onDelete) return;
     onDelete(project.id);
     setMenu(null);
   };
-
   React.useEffect(() => {
     if (!menu) return;
-
     const onPointerDown = (e: PointerEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
         setMenu(null);
       }
     };
-
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         setMenu(null);
       }
     };
-
     document.addEventListener("pointerdown", onPointerDown);
     document.addEventListener("keydown", onKeyDown);
-
     return () => {
       document.removeEventListener("pointerdown", onPointerDown);
       document.removeEventListener("keydown", onKeyDown);
     };
   }, [menu]);
-
   // Mock format date
   const dateStr = new Date(project.updatedAt).toLocaleDateString(undefined, {
     month: "short",
     day: "numeric",
     year: "numeric",
   });
-
   return (
     <div
       onContextMenu={handleContextMenu}
@@ -116,7 +113,6 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
           </button>
         </div>
       )}
-
       <Link
         to={`/chat/${project.latest_conversation_id}?projectId=${project.id}`}
         className="block flex-1"
@@ -136,7 +132,6 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
               <span className="text-xs font-medium tracking-wide">NO PREVIEW</span>
             </div>
           )}
-
           {/* Theme Badge Overlay */}
           {project.theme && (
             <div className="absolute top-3 left-3 px-2.5 py-0.5 rounded-full border border-background/20 bg-background/50 backdrop-blur-md text-foreground text-[10px] font-semibold tracking-wider uppercase shadow-sm">
@@ -145,7 +140,6 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
           )}
         </div>
       </Link>
-
       {/* Card Info Footer */}
       <div className="p-4 flex items-start justify-between gap-4 border-t border-border/50 bg-card">
         <Link
@@ -157,7 +151,6 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
           </h3>
           <p className="text-xs text-muted-foreground mt-1 truncate">Edited {dateStr}</p>
         </Link>
-
         {/* Actions (visible on hover) */}
         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
           {onEdit && (

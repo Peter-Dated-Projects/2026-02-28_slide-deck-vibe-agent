@@ -1,19 +1,26 @@
-import axios from 'axios';
+/**
+ * ---------------------------------------------------------------------------
+ * (c) 2026 Freedom, LLC.
+ * This file is part of the SlideDeckVibeAgent System.
+ *
+ * All Rights Reserved. This code is the confidential and proprietary 
+ * information of Freedom, LLC ("Confidential Information"). You shall not 
+ * disclose such Confidential Information and shall use it only in accordance 
+ * with the terms of the license agreement you entered into with Freedom, LLC.
+ * ---------------------------------------------------------------------------
+ */
 
+import axios from 'axios';
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL,
   withCredentials: true, // Crucial for sending/receiving HttpOnly cookies
 });
-
 // A variable to hold the in-memory access token
 let accessToken: string | null = null;
-
 export const setAccessToken = (token: string | null) => {
   accessToken = token;
 };
-
 export const getAccessToken = () => accessToken;
-
 // Request interceptor to add the access token to headers
 api.interceptors.request.use(
   (config) => {
@@ -24,17 +31,14 @@ api.interceptors.request.use(
   },
   (error) => Promise.reject(error)
 );
-
 // Response interceptor to handle 401s and token refresh
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config;
-
     // If error is 401 and we haven't already tried to refresh
     if (error.response?.status === 401 && !originalRequest._retry) {
       originalRequest._retry = true;
-
       try {
         // Attempt to refresh token using the HttpOnly cookie
         const refreshResponse = await axios.post(
@@ -42,12 +46,9 @@ api.interceptors.response.use(
           {},
           { withCredentials: true }
         );
-
         const newAccessToken = refreshResponse.data.accessToken;
-        
         // Update in-memory token
         setAccessToken(newAccessToken);
-
         // Update the failed request's header and retry
         originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
         return api(originalRequest);
@@ -59,9 +60,7 @@ api.interceptors.response.use(
         return Promise.reject(refreshError);
       }
     }
-
     return Promise.reject(error);
   }
 );
-
 export default api;

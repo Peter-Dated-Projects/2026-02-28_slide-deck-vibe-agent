@@ -1,9 +1,19 @@
+/**
+ * ---------------------------------------------------------------------------
+ * (c) 2026 Freedom, LLC.
+ * This file is part of the SlideDeckVibeAgent System.
+ *
+ * All Rights Reserved. This code is the confidential and proprietary 
+ * information of Freedom, LLC ("Confidential Information"). You shall not 
+ * disclose such Confidential Information and shall use it only in accordance 
+ * with the terms of the license agreement you entered into with Freedom, LLC.
+ * ---------------------------------------------------------------------------
+ */
+
 import dotenv from 'dotenv';
 import path from 'path';
-
 // Load env vars based on NODE_ENV
 const nodeEnv = process.env.NODE_ENV || 'development';
-
 if (nodeEnv !== 'production') {
     const currentEnv = nodeEnv === 'test' ? 'test' : 'local';
     const envPath = path.resolve(process.cwd(), `../.env.${currentEnv}`);
@@ -12,7 +22,6 @@ if (nodeEnv !== 'production') {
     const envPath = path.resolve(process.cwd(), `../.env.production`);
     dotenv.config({ path: envPath });
 }
-
 const requireEnv = (key: string): string => {
     const value = process.env[key];
     if (!value) {
@@ -21,7 +30,6 @@ const requireEnv = (key: string): string => {
     }
     return value;
 };
-
 export const config = {
   port: process.env.PORT || 3001,
   db: {

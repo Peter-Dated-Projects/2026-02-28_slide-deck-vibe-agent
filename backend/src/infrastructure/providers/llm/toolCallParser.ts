@@ -1,8 +1,19 @@
 /**
+ * ---------------------------------------------------------------------------
+ * (c) 2026 Freedom, LLC.
+ * This file is part of the SlideDeckVibeAgent System.
+ *
+ * All Rights Reserved. This code is the confidential and proprietary 
+ * information of Freedom, LLC ("Confidential Information"). You shall not 
+ * disclose such Confidential Information and shall use it only in accordance 
+ * with the terms of the license agreement you entered into with Freedom, LLC.
+ * ---------------------------------------------------------------------------
+ */
+
+/**
  * Utility to parse and extract tool calls from text content,
  * including those that may appear within thinking blocks or other text.
  */
-
 export interface ParsedToolCall {
     id: string;
     type: 'function';
@@ -11,7 +22,6 @@ export interface ParsedToolCall {
         arguments: string; // JSON string
     };
 }
-
 /**
  * Attempts to extract tool calls from arbitrary text.
  * Supports multiple patterns:
@@ -21,11 +31,9 @@ export interface ParsedToolCall {
  */
 export function extractToolCallsFromText(text: string): ParsedToolCall[] {
     const toolCalls: ParsedToolCall[] = [];
-
     // Pattern 1: Look for JSON structures that contain tool_calls
     const jsonPattern = /"\$?tool_calls"\s*:\s*\[([\s\S]*?)\]/g;
     const jsonMatches = text.matchAll(jsonPattern);
-    
     for (const match of jsonMatches) {
         try {
             // Reconstruct the tool_calls array
@@ -46,19 +54,15 @@ export function extractToolCallsFromText(text: string): ParsedToolCall[] {
             // Continue if parsing fails
         }
     }
-
     // Pattern 2: Look for function_calls XML-style tags
     const xmlPattern = /<function_calls>([\s\S]*?)<\/function_calls>/g;
     const xmlMatches = text.matchAll(xmlPattern);
-    
     for (const match of xmlMatches) {
         const content = match[1];
         if (!content) continue;
-        
         // Extract invoke blocks
         const invokePattern = /<invoke[\s\S]*?>([\s\S]*?)<\/invoke>/g;
         const invokeMatches = content.matchAll(invokePattern);
-        
         let invokeIndex = 0;
         for (const invokeMatch of invokeMatches) {
             const invokeContent = invokeMatch[1];
@@ -66,7 +70,6 @@ export function extractToolCallsFromText(text: string): ParsedToolCall[] {
                 invokeIndex++;
                 continue;
             }
-            
             // Try to parse as JSON
             try {
                 const toolCall = JSON.parse(invokeContent);
@@ -79,7 +82,6 @@ export function extractToolCallsFromText(text: string): ParsedToolCall[] {
                 // Try to extract tool name and args from text
                 const toolNameMatch = invokeContent.match(/tool_name["\s]*[:=]["\s]*(['"]?)([^'"]+)\1/i);
                 const argsMatch = invokeContent.match(/arguments["\s]*[:=]["\s]*['"]?({[\s\S]*?})['"]?/);
-                
                 if (toolNameMatch && argsMatch) {
                     try {
                         const name = toolNameMatch[2];
@@ -103,11 +105,9 @@ export function extractToolCallsFromText(text: string): ParsedToolCall[] {
             }
         }
     }
-
     // Pattern 3: Look for <tool_call> tags with <function=...> and <parameter=...> format
     const toolCallPattern = /<tool_call>([\s\S]*?)<\/tool_call>/g;
     const toolCallMatches = text.matchAll(toolCallPattern);
-    
     let toolCallIndex = 0;
     for (const match of toolCallMatches) {
         const content = match[1];
@@ -115,20 +115,16 @@ export function extractToolCallsFromText(text: string): ParsedToolCall[] {
             toolCallIndex++;
             continue;
         }
-        
         // Extract function name from <function=...> tag
         const funcMatch = content.match(/<function=([a-zA-Z_][a-zA-Z0-9_]*)>/);
         if (!funcMatch) {
             toolCallIndex++;
             continue;
         }
-        
         const functionName = funcMatch[1];
-        
         // Extract all parameters from <parameter=name>value</parameter> tags
         const paramPattern = /<parameter=([a-zA-Z_][a-zA-Z0-9_]*)>([\s\S]*?)<\/parameter>/g;
         const paramMatches = content.matchAll(paramPattern);
-        
         const parameters: Record<string, any> = {};
         for (const paramMatch of paramMatches) {
             const paramName = paramMatch[1];
@@ -136,11 +132,9 @@ export function extractToolCallsFromText(text: string): ParsedToolCall[] {
             if (!paramName || rawParamValue === undefined) {
                 continue;
             }
-
             const paramValue = rawParamValue.trim();
             parameters[paramName] = paramValue;
         }
-        
         if (functionName) {
             toolCalls.push({
                 id: `tool_call_${toolCallIndex}`,
@@ -151,25 +145,19 @@ export function extractToolCallsFromText(text: string): ParsedToolCall[] {
                 }
             });
         }
-        
         toolCallIndex++;
     }
-
     return toolCalls;
 }
-
 /**
  * Normalizes a parsed tool call object to our standard format
  */
 function normalizeToolCall(obj: any, index: number): ParsedToolCall | null {
     if (!obj) return null;
-
     // Handle different tool call structures
     const id = obj.id || obj.index !== undefined ? `tool_call_${obj.index}` : `tool_call_${index}`;
-    
     let name = '';
     let args = '';
-    
     // Extract function name and arguments
     if (obj.function) {
         name = obj.function.name || '';
@@ -187,7 +175,6 @@ function normalizeToolCall(obj: any, index: number): ParsedToolCall | null {
             ? obj.arguments
             : JSON.stringify(obj.arguments || {});
     }
-
     if (name) {
         return {
             id,
@@ -195,6 +182,5 @@ function normalizeToolCall(obj: any, index: number): ParsedToolCall | null {
             function: { name, arguments: args }
         };
     }
-
     return null;
 }

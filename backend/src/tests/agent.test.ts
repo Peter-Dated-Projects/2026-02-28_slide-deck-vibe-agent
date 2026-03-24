@@ -1,6 +1,17 @@
+/**
+ * ---------------------------------------------------------------------------
+ * (c) 2026 Freedom, LLC.
+ * This file is part of the SlideDeckVibeAgent System.
+ *
+ * All Rights Reserved. This code is the confidential and proprietary 
+ * information of Freedom, LLC ("Confidential Information"). You shall not 
+ * disclose such Confidential Information and shall use it only in accordance 
+ * with the terms of the license agreement you entered into with Freedom, LLC.
+ * ---------------------------------------------------------------------------
+ */
+
 const { chatWithAgent } = require('../services/agent');
 const { llmService } = require('../core/container');
-
 jest.mock('../core/container', () => ({
     llmService: {
         chatWithAgent: jest.fn().mockResolvedValue({
@@ -14,7 +25,6 @@ jest.mock('../core/container', () => ({
         })
     }
 }));
-
 jest.mock('../services/projectDeck', () => ({
     loadDeckHtmlForProject: jest.fn().mockResolvedValue({
         html: `<!doctype html>
@@ -61,16 +71,13 @@ jest.mock('../services/projectDeck', () => ({
     }),
     saveDeckHtmlForProject: jest.fn().mockResolvedValue('test/key.html')
 }));
-
 describe('Agent Services', () => {
     it('should proxy chatWithAgent correctly', async () => {
         const messages = [{ role: 'user', content: 'Hello' }];
         const result = await chatWithAgent('conv_123', messages);
-
         expect(result.stop_reason).toBe('end_turn');
         expect(result.content[0].text).toBe('Hello!');
         expect(llmService.chatWithAgent).toHaveBeenCalledTimes(1);
-
         const [conversationId, sentMessages, tools, systemInstruction] = (llmService.chatWithAgent as jest.Mock).mock.calls[0];
         expect(conversationId).toBe('conv_123');
         expect(sentMessages).toEqual(messages);

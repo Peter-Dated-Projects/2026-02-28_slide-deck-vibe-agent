@@ -1,13 +1,22 @@
+/**
+ * ---------------------------------------------------------------------------
+ * (c) 2026 Freedom, LLC.
+ * This file is part of the SlideDeckVibeAgent System.
+ *
+ * All Rights Reserved. This code is the confidential and proprietary 
+ * information of Freedom, LLC ("Confidential Information"). You shall not 
+ * disclose such Confidential Information and shall use it only in accordance 
+ * with the terms of the license agreement you entered into with Freedom, LLC.
+ * ---------------------------------------------------------------------------
+ */
+
 import type { Request, Response } from 'express';
 import { cacheService, dbService as db, storageService } from '../core/container';
 import { config } from '../config';
 import { ensureDeckExistsForProject, generatePreviewForProject } from '../services/projectDeck';
-
 const PROJECTS_CACHE_PREFIX = 'projects:list:';
 const PROJECTS_CACHE_TTL_SECONDS = Math.max(5, Math.min(config.redis.ttlSeconds, 30));
-
 const getProjectsCacheKey = (userId: string): string => `${PROJECTS_CACHE_PREFIX}${userId}`;
-
 const invalidateProjectsCache = async (userId: string): Promise<void> => {
     try {
         await cacheService.del(getProjectsCacheKey(userId));
@@ -15,7 +24,6 @@ const invalidateProjectsCache = async (userId: string): Promise<void> => {
         console.warn(`[projectController] Failed to invalidate projects cache for user ${userId}:`, error);
     }
 };
-
 export const getProjects = async (req: Request, res: Response): Promise<void> => {
     try {
         const userId = (req as any).user?.userId;
@@ -23,7 +31,6 @@ export const getProjects = async (req: Request, res: Response): Promise<void> =>
             res.status(401).json({ error: 'Unauthorized' });
             return;
         }
-
         const cacheKey = getProjectsCacheKey(userId);
         try {
             const cachedPayload = await cacheService.get(cacheKey);
@@ -35,7 +42,6 @@ export const getProjects = async (req: Request, res: Response): Promise<void> =>
         } catch (error) {
             console.warn(`[projectController] Failed to read projects cache for user ${userId}:`, error);
         }
-
         // Fetch projects, and rely on the latest conversation dynamically.
         // Or if we just rely on `projects` being the top layer.
         // In the new schema:
@@ -55,18 +61,14 @@ export const getProjects = async (req: Request, res: Response): Promise<void> =>
             WHERE c.user_id = $1
             ORDER BY p.created_at DESC
         `;
-
         const result = await db.query(query, [userId]);
-
         const projects = await Promise.all(result.rows.map(async (row: any) => {
             let theme = 'Professional';
             let thumbnailUrl: string | undefined;
             let resolvedName = typeof row.project_name === 'string' ? row.project_name.trim() : '';
-
             if (!resolvedName) {
                 resolvedName = `Project ${String(row.id).slice(0, 8)}`;
             }
-
             if (!row.project_name) {
                 await db.query(
                     `
@@ -77,7 +79,6 @@ export const getProjects = async (req: Request, res: Response): Promise<void> =>
                     [row.id, resolvedName]
                 );
             }
-
             if (row.preview_url) {
                 try {
                     thumbnailUrl = await storageService.getFileUrl(row.preview_url);
@@ -85,15 +86,12 @@ export const getProjects = async (req: Request, res: Response): Promise<void> =>
                     console.error(`[projectController] Failed to sign preview URL for project ${row.id}:`, error);
                 }
             }
-
             if (row.theme_data) {
                 const data = typeof row.theme_data === 'string' ? JSON.parse(row.theme_data) : row.theme_data;
                 theme = data.theme || 'Professional';
             }
-            
             // Just use the latest conversation ID for the routing link instead of the first
             const latestConversationId = row.conversation_ids[row.conversation_ids.length - 1];
-            
             return {
                 id: row.id,
                 name: resolvedName,
@@ -104,20 +102,17 @@ export const getProjects = async (req: Request, res: Response): Promise<void> =>
                 latest_conversation_id: latestConversationId
             };
         }));
-
         try {
             await cacheService.set(cacheKey, JSON.stringify(projects), PROJECTS_CACHE_TTL_SECONDS);
         } catch (error) {
             console.warn(`[projectController] Failed to set projects cache for user ${userId}:`, error);
         }
-
         res.json({ projects });
     } catch (error) {
         console.error('Error fetching projects:', error);
         res.status(500).json({ error: 'Internal server error' });
     }
 };
-
 export const createProject = async (req: Request, res: Response): Promise<void> => {
     try {
         const userId = (req as any).user?.userId;
@@ -125,10 +120,8 @@ export const createProject = async (req: Request, res: Response): Promise<void> 
             res.status(401).json({ error: 'Unauthorized' });
             return;
         }
-
         const defaultTitle = 'New Chat';
         const defaultProjectName = 'Untitled Project';
-
         // 1. Create project first (we need to generate its UUID upfront, or return it)
         // Wait, project needs `minio_object_key`. We'll just generate the DB id first.
         const projResult = await db.query(
@@ -136,14 +129,12 @@ export const createProject = async (req: Request, res: Response): Promise<void> 
              ['temp']
         );
         const projectId = projResult.rows[0].id;
-        
         // 2. Create conversation record
         const convResult = await db.query(
             'INSERT INTO conversations (user_id, project_id, title) VALUES ($1, $2, $3) RETURNING id, title, created_at, updated_at',
             [userId, projectId, defaultTitle]
         );
         const conversation = convResult.rows[0];
-        
         // 3. Update project with the conversation ID
         await db.query(
                `
@@ -155,11 +146,9 @@ export const createProject = async (req: Request, res: Response): Promise<void> 
                `,
                [conversation.id, projectId, defaultProjectName]
         );
-
         // 4. Ensure the project deck is seeded from backend/src/core/template.html in S3 and cached.
         await ensureDeckExistsForProject(projectId, userId);
         await invalidateProjectsCache(userId);
-
         res.status(201).json({
             project: {
                 id: projectId,
@@ -176,92 +165,76 @@ export const createProject = async (req: Request, res: Response): Promise<void> 
         res.status(500).json({ error: 'Internal server error' });
     }
 };
-
 export const generateProjectPreview = async (req: Request, res: Response): Promise<void> => {
     try {
         const userId = (req as any).user?.userId;
         const rawProjectId = req.params.projectId;
         const projectId = Array.isArray(rawProjectId) ? rawProjectId[0] : rawProjectId;
-
         if (!userId) {
             res.status(401).json({ error: 'Unauthorized' });
             return;
         }
-
         if (!projectId) {
             res.status(400).json({ error: 'Project ID is required' });
             return;
         }
-
         const ownerCheck = await db.query(
             'SELECT 1 FROM conversations WHERE project_id = $1 AND user_id = $2 LIMIT 1',
             [projectId, userId]
         );
-
         if (ownerCheck.rows.length === 0) {
             res.status(404).json({ error: 'Project not found' });
             return;
         }
-
         if (process.env.PREVIEW_DEBUG !== 'false' && process.env.PREVIEW_DEBUG !== '0') {
             console.info('[projectController][debug] Preview request accepted', {
                 projectId,
                 userId
             });
         }
-
         // Fire-and-forget: preview generation can be expensive and should not block the request.
         void generatePreviewForProject(projectId, userId).catch((error) => {
             console.error(`Error generating project preview for project ${projectId}:`, error);
         }).finally(() => {
             void invalidateProjectsCache(userId);
         });
-
         res.status(202).json({ success: true });
     } catch (error) {
         console.error('Error generating project preview:', error);
         res.status(500).json({ error: 'Internal server error' });
     }
 };
-
 export const updateProjectName = async (req: Request, res: Response): Promise<void> => {
     try {
         const userId = (req as any).user?.userId;
         const rawProjectId = req.params.projectId;
         const projectId = Array.isArray(rawProjectId) ? rawProjectId[0] : rawProjectId;
         const { name } = req.body;
-
         if (!userId) {
             res.status(401).json({ error: 'Unauthorized' });
             return;
         }
-
         if (!projectId) {
             res.status(400).json({ error: 'Project ID is required' });
             return;
         }
-
         if (typeof name !== 'string') {
             res.status(400).json({ error: 'name is required' });
             return;
         }
-
         const trimmedName = name.trim();
         if (!trimmedName) {
             res.status(400).json({ error: 'name is required' });
             return;
         }
-
         const ownership = await db.query(
             'SELECT 1 FROM conversations WHERE project_id = $1 AND user_id = $2 LIMIT 1',
             [projectId, userId]
         );
-
         if (ownership.rows.length === 0) {
             res.status(404).json({ error: 'Project not found' });
             return;
         }
-
         await db.query(
             `
                 UPDATE projects
@@ -272,45 +245,36 @@ export const updateProjectName = async (req: Request, res: Response): Promise<vo
             `,
             [projectId, trimmedName]
         );
-
         await invalidateProjectsCache(userId);
-
         res.json({ name: trimmedName });
     } catch (error) {
         console.error('Error updating project name:', error);
         res.status(500).json({ error: 'Internal server error' });
     }
 };
-
 export const deleteProject = async (req: Request, res: Response): Promise<void> => {
     try {
         const userId = (req as any).user?.userId;
         const rawProjectId = req.params.projectId;
         const projectId = Array.isArray(rawProjectId) ? rawProjectId[0] : rawProjectId;
-
         if (!userId) {
             res.status(401).json({ error: 'Unauthorized' });
             return;
         }
-
         if (!projectId) {
             res.status(400).json({ error: 'Project ID is required' });
             return;
         }
-
         const ownership = await db.query(
             'SELECT 1 FROM conversations WHERE project_id = $1 AND user_id = $2 LIMIT 1',
             [projectId, userId]
         );
-
         if (ownership.rows.length === 0) {
             res.status(404).json({ error: 'Project not found' });
             return;
         }
-
         await db.query('DELETE FROM projects WHERE id = $1', [projectId]);
         await invalidateProjectsCache(userId);
-
         res.status(204).send();
     } catch (error) {
         console.error('Error deleting project:', error);

@@ -1,16 +1,25 @@
+/**
+ * ---------------------------------------------------------------------------
+ * (c) 2026 Freedom, LLC.
+ * This file is part of the SlideDeckVibeAgent System.
+ *
+ * All Rights Reserved. This code is the confidential and proprietary 
+ * information of Freedom, LLC ("Confidential Information"). You shall not 
+ * disclose such Confidential Information and shall use it only in accordance 
+ * with the terms of the license agreement you entered into with Freedom, LLC.
+ * ---------------------------------------------------------------------------
+ */
+
 import React from 'react';
 import { NavLink } from 'react-router-dom';
 import { LayoutGrid, FileText, Settings, User } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
-
 const navigation = [
   { name: 'Projects', href: '/dashboard/projects', icon: LayoutGrid },
   { name: 'Settings', href: '/dashboard/settings', icon: Settings },
 ];
-
 export const Sidebar: React.FC = () => {
   const { user } = useAuth();
-
   return (
     <aside className="w-[300px] h-screen fixed top-0 left-0 bg-card/50 backdrop-blur-3xl border-r border-border flex flex-col p-4 shadow-card z-50">
       <div className="flex items-center gap-3 px-2 py-4 mb-6">
@@ -21,7 +30,6 @@ export const Sidebar: React.FC = () => {
           Vibe Agent
         </span>
       </div>
-
       <nav className="flex-1 space-y-2">
         {navigation.map((item) => {
           const Icon = item.icon;
@@ -51,7 +59,6 @@ export const Sidebar: React.FC = () => {
           );
         })}
       </nav>
-
       <div className="mt-auto pt-4 border-t border-border">
         <NavLink
           to="/dashboard/profile"

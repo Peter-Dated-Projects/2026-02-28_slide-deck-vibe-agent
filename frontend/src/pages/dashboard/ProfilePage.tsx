@@ -1,22 +1,29 @@
+/**
+ * ---------------------------------------------------------------------------
+ * (c) 2026 Freedom, LLC.
+ * This file is part of the SlideDeckVibeAgent System.
+ *
+ * All Rights Reserved. This code is the confidential and proprietary 
+ * information of Freedom, LLC ("Confidential Information"). You shall not 
+ * disclose such Confidential Information and shall use it only in accordance 
+ * with the terms of the license agreement you entered into with Freedom, LLC.
+ * ---------------------------------------------------------------------------
+ */
+
 import React from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { User, Mail, Calendar, Edit3, Briefcase, ChevronRight } from 'lucide-react';
 import { Link } from 'react-router-dom';
-
 export default function ProfilePage() {
   const { user } = useAuth();
-  
   if (!user) return null;
-
   const joinDate = user.created_at ? new Date(user.created_at).toLocaleDateString(undefined, { month: 'long', year: 'numeric' }) : 'Unknown';
-
   return (
     <div className="max-w-4xl pb-12">
       <div className="mb-10">
         <h1 className="text-2xl font-bold tracking-tight text-foreground md:text-3xl">Profile</h1>
         <p className="text-sm text-muted-foreground mt-1">Manage your public profile and personal details.</p>
       </div>
-
       <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
         {/* Left Column - Card Summary */}
         <div className="md:col-span-1 space-y-6">
@@ -30,13 +37,10 @@ export default function ProfilePage() {
                 </div>
               )}
             </div>
-            
             <h2 className="text-xl font-bold text-foreground">{user.name}</h2>
-            
             {user.field && (
               <p className="text-sm font-medium text-primary mt-1">{user.field}</p>
             )}
-            
             <div className="mt-6 w-full space-y-3 pt-6 border-t border-border/50">
               <div className="flex items-center text-sm text-muted-foreground">
                 <Mail className="h-4 w-4 mr-3" />
@@ -49,7 +53,6 @@ export default function ProfilePage() {
             </div>
           </div>
         </div>
-
         {/* Right Column - Details */}
         <div className="md:col-span-2 space-y-8">
           <section className="bg-card/50 backdrop-blur-xl border border-border rounded-xl shadow-sm overflow-hidden">
@@ -82,7 +85,6 @@ export default function ProfilePage() {
               </div>
             </div>
           </section>
-
           {/* Shortcuts */}
           <section className="bg-card/50 backdrop-blur-xl border border-border rounded-xl shadow-sm overflow-hidden">
             <div className="divide-y divide-border/50">

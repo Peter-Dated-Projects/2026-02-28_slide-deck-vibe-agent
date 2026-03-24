@@ -1,5 +1,16 @@
-@import "tailwindcss";
+/**
+ * ---------------------------------------------------------------------------
+ * (c) 2026 Freedom, LLC.
+ * This file is part of the SlideDeckVibeAgent System.
+ *
+ * All Rights Reserved. This code is the confidential and proprietary 
+ * information of Freedom, LLC ("Confidential Information"). You shall not 
+ * disclose such Confidential Information and shall use it only in accordance 
+ * with the terms of the license agreement you entered into with Freedom, LLC.
+ * ---------------------------------------------------------------------------
+ */
 
+@import "tailwindcss";
 @theme {
   --color-background: hsl(var(--background));
   --color-foreground: hsl(var(--foreground));
@@ -20,15 +31,12 @@
   --color-border: hsl(var(--border));
   --color-input: hsl(var(--input));
   --color-ring: hsl(var(--ring));
-  
   --radius-lg: var(--radius);
   --radius-md: calc(var(--radius) - 2px);
   --radius-sm: calc(var(--radius) - 4px);
-  
   --shadow-card: var(--shadow-card-var);
   --shadow-card-hover: var(--shadow-card-hover-var);
 }
-
 @layer base {
   :root {
     --background: 0 0% 100%;
@@ -54,15 +62,12 @@
     --shadow-card-var: 0 1px 3px 0 hsl(0 0% 0% / 0.1), 0 1px 2px -1px hsl(0 0% 0% / 0.1);
     --shadow-card-hover-var: 0 4px 6px -1px hsl(0 0% 0% / 0.1), 0 2px 4px -2px hsl(0 0% 0% / 0.1);
   }
-
   * {
     border-color: var(--color-border);
   }
-
   button {
     cursor: pointer;
   }
-
   body {
     background-color: var(--color-background);
     color: var(--color-foreground);

@@ -1,13 +1,23 @@
+/**
+ * ---------------------------------------------------------------------------
+ * (c) 2026 Freedom, LLC.
+ * This file is part of the SlideDeckVibeAgent System.
+ *
+ * All Rights Reserved. This code is the confidential and proprietary 
+ * information of Freedom, LLC ("Confidential Information"). You shall not 
+ * disclose such Confidential Information and shall use it only in accordance 
+ * with the terms of the license agreement you entered into with Freedom, LLC.
+ * ---------------------------------------------------------------------------
+ */
+
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { LogOut, Moon, Sun, Monitor, CreditCard, Globe } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-
 export default function SettingsPage() {
   const { logout } = useAuth();
   const navigate = useNavigate();
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('system');
-
   // Simply mock the theme setting for now
   useEffect(() => {
     const root = window.document.documentElement;
@@ -19,19 +29,16 @@ export default function SettingsPage() {
       root.classList.add(theme);
     }
   }, [theme]);
-
   const handleLogout = async () => {
     await logout();
     navigate('/login');
   };
-
   return (
     <div className="max-w-4xl pb-12">
       <div className="mb-10">
         <h1 className="text-2xl font-bold tracking-tight text-foreground md:text-3xl">Settings</h1>
         <p className="text-sm text-muted-foreground mt-1">Manage your account preferences and application settings.</p>
       </div>
-
       <div className="space-y-8">
         {/* Appearance Section */}
         <section className="bg-card/50 backdrop-blur-xl border border-border rounded-xl shadow-sm overflow-hidden">
@@ -52,7 +59,6 @@ export default function SettingsPage() {
                 </div>
                 <span className="text-sm font-medium text-foreground">Light</span>
               </button>
-              
               <button
                 onClick={() => setTheme('dark')}
                 className={`flex-1 flex flex-col items-center justify-center gap-3 p-4 rounded-xl border-2 transition-all ${
@@ -64,7 +70,6 @@ export default function SettingsPage() {
                 </div>
                 <span className="text-sm font-medium text-foreground">Dark</span>
               </button>
-              
               <button
                 onClick={() => setTheme('system')}
                 className={`flex-1 flex flex-col items-center justify-center gap-3 p-4 rounded-xl border-2 transition-all ${
@@ -79,7 +84,6 @@ export default function SettingsPage() {
             </div>
           </div>
         </section>
-
         {/* Billing Section (Placeholder) */}
         <section className="bg-card/50 backdrop-blur-xl border border-border rounded-xl shadow-sm overflow-hidden" id="billing">
           <div className="px-6 py-5 border-b border-border/50 bg-muted/20">
@@ -103,7 +107,6 @@ export default function SettingsPage() {
             </div>
           </div>
         </section>
-
         {/* Domains Section (Placeholder) */}
         <section className="bg-card/50 backdrop-blur-xl border border-border rounded-xl shadow-sm overflow-hidden" id="domains">
           <div className="px-6 py-5 border-b border-border/50 bg-muted/20">
@@ -123,7 +126,6 @@ export default function SettingsPage() {
             </button>
           </div>
         </section>
-
         {/* Danger Zone */}
         <section className="bg-card/50 backdrop-blur-xl border border-destructive/20 rounded-xl shadow-sm overflow-hidden">
           <div className="px-6 py-5 border-b border-destructive/10 bg-destructive/5 text-destructive">

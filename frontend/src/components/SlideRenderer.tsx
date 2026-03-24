@@ -1,16 +1,25 @@
+/**
+ * ---------------------------------------------------------------------------
+ * (c) 2026 Freedom, LLC.
+ * This file is part of the SlideDeckVibeAgent System.
+ *
+ * All Rights Reserved. This code is the confidential and proprietary 
+ * information of Freedom, LLC ("Confidential Information"). You shall not 
+ * disclose such Confidential Information and shall use it only in accordance 
+ * with the terms of the license agreement you entered into with Freedom, LLC.
+ * ---------------------------------------------------------------------------
+ */
+
 import React, { useRef, useEffect, useState } from "react";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
-
 // Utility for Tailwind class merging
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
-
 // Internal slide resolution (all content is authored at 1920×1080)
 const SLIDE_W = 1920;
 const SLIDE_H = 1080;
-
 export interface SlideData {
   id: string;
   title: string;
@@ -21,13 +30,11 @@ export interface SlideData {
   // Generated raw HTML component if Vibe Agent bypassed schema and sent literal TSX/HTML
   rawHtml?: string;
 }
-
 interface SlideRendererProps {
   slide: SlideData;
   theme?: any;
   isActive?: boolean;
 }
-
 export const SlideRenderer: React.FC<SlideRendererProps> = ({ slide, theme, isActive = true }) => {
   // Inject dynamic theme styles using CSS variables onto a wrapping ref
   const styleObj = {
@@ -37,13 +44,11 @@ export const SlideRenderer: React.FC<SlideRendererProps> = ({ slide, theme, isAc
     "--vibe-text": theme?.colors?.text || "#1f2937",
     fontFamily: theme?.fontFamily || "sans-serif",
   } as React.CSSProperties;
-
   // Default container styling
   const containerClasses = cn(
     "w-full h-full flex items-center justify-center transition-all duration-500 overflow-hidden shrink-0 snap-center",
     isActive ? "opacity-100 scale-100" : "opacity-40 scale-95",
   );
-
   // If agent generated explicit RAW HTML, render it scaled to fill the container
   // maintaining a fixed 1920×1080 internal resolution.
   if (slide.rawHtml) {
@@ -55,7 +60,6 @@ export const SlideRenderer: React.FC<SlideRendererProps> = ({ slide, theme, isAc
       />
     );
   }
-
   // Fallback schema-driven layout renderer
   switch (slide.layoutType) {
     case "title":
@@ -104,7 +108,6 @@ export const SlideRenderer: React.FC<SlideRendererProps> = ({ slide, theme, isAc
       );
   }
 };
-
 // ─────────────────────────────────────────────────────
 // ScaledSlide: renders rawHtml in a sandboxed iframe at
 // 1920×1080, CSS-scaled to fill its container.
@@ -116,11 +119,9 @@ interface ScaledSlideProps {
   styleObj: React.CSSProperties;
   containerClasses: string;
 }
-
 const ScaledSlide: React.FC<ScaledSlideProps> = ({ html, containerClasses }) => {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(0); // 0 = hidden until first measurement
-
   useEffect(() => {
     const el = wrapperRef.current;
     if (!el) return;
@@ -132,13 +133,11 @@ const ScaledSlide: React.FC<ScaledSlideProps> = ({ html, containerClasses }) => 
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
-
   // CSS transform doesn't change layout — the element still occupies its
   // pre-scale dimensions. Negative margins compensate so the layout
   // footprint matches the visual (scaled) size, allowing flex centering to work.
   const mh = (SLIDE_W * (scale - 1)) / 2; // negative when scale < 1
   const mv = (SLIDE_H * (scale - 1)) / 2;
-
   return (
     <div ref={wrapperRef} className={containerClasses} style={{ borderRadius: 5 }}>
       <iframe

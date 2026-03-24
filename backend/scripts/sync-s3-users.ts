@@ -1,4 +1,16 @@
 /**
+ * ---------------------------------------------------------------------------
+ * (c) 2026 Freedom, LLC.
+ * This file is part of the SlideDeckVibeAgent System.
+ *
+ * All Rights Reserved. This code is the confidential and proprietary 
+ * information of Freedom, LLC ("Confidential Information"). You shall not 
+ * disclose such Confidential Information and shall use it only in accordance 
+ * with the terms of the license agreement you entered into with Freedom, LLC.
+ * ---------------------------------------------------------------------------
+ */
+
+/**
  * sync:db — Ensures every user in PostgreSQL has an S3 folder initialized.
  *
  * For each user, it tries to upload a 0-byte `.keep` file to:
@@ -10,11 +22,9 @@
  * Usage:
  *   bun run sync:db
  */
-
 import { Pool } from 'pg';
 import { config } from '../src/config';
 import { storageService } from '../src/core/container';
-
 const syncS3Users = async () => {
     const pool = new Pool({
         host: config.db.host,
@@ -23,9 +33,7 @@ const syncS3Users = async () => {
         password: config.db.password,
         database: config.db.database,
     });
-
     console.log('🔍 Fetching all users from PostgreSQL...');
-
     let users: { id: string; email: string }[];
     try {
         const result = await pool.query<{ id: string; email: string }>(
@@ -40,18 +48,14 @@ const syncS3Users = async () => {
     } finally {
         await pool.end();
     }
-
     if (users.length === 0) {
         console.log('✅ No users to sync. Exiting.');
         return;
     }
-
     let created = 0;
     let skipped = 0;
     let failed = 0;
-
     console.log('\n📦 Syncing S3 folders...\n');
-
     for (const user of users) {
         const key = `users/${user.id}/.keep`;
         try {
@@ -65,7 +69,6 @@ const syncS3Users = async () => {
             failed++;
         }
     }
-
     console.log(`
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
   Sync complete
@@ -74,10 +77,8 @@ const syncS3Users = async () => {
   ❌ Failed            : ${failed}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
 `);
-
     if (failed > 0) {
         process.exit(1);
     }
 };
-
 syncS3Users();

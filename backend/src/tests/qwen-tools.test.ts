@@ -1,14 +1,24 @@
 /**
+ * ---------------------------------------------------------------------------
+ * (c) 2026 Freedom, LLC.
+ * This file is part of the SlideDeckVibeAgent System.
+ *
+ * All Rights Reserved. This code is the confidential and proprietary 
+ * information of Freedom, LLC ("Confidential Information"). You shall not 
+ * disclose such Confidential Information and shall use it only in accordance 
+ * with the terms of the license agreement you entered into with Freedom, LLC.
+ * ---------------------------------------------------------------------------
+ */
+
+/**
  * Qwen Tool Calling Integration Test (Jest)
  *
  * Verifies that Qwen can trigger a locally-defined dummy tool call.
  * The tool is NOT a real production tool — it's a one-time echo function defined here only.
  * Requires QWEN_API_KEY in .env.test.
  */
-
 import '../config';
 import OpenAI from 'openai';
-
 // One-time dummy tool for testing purposes only
 const DUMMY_TOOL: OpenAI.Chat.ChatCompletionTool = {
     type: 'function',
@@ -27,10 +37,8 @@ const DUMMY_TOOL: OpenAI.Chat.ChatCompletionTool = {
         }
     }
 };
-
 describe('Qwen LLM - Tool Calling', () => {
     let openai: OpenAI;
-
     beforeAll(() => {
         const apiKey = process.env.QWEN_API_KEY;
         if (!apiKey) throw new Error('QWEN_API_KEY is not set in .env.test');
@@ -39,7 +47,6 @@ describe('Qwen LLM - Tool Calling', () => {
             baseURL: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1'
         });
     });
-
     it('should trigger the echo_test dummy tool call', async () => {
         const model = process.env.QWEN_MODEL_KEY || 'qwen-max';
         const response = await openai.chat.completions.create({
@@ -58,17 +65,13 @@ describe('Qwen LLM - Tool Calling', () => {
             tool_choice: 'auto',
             max_tokens: 512
         });
-
         const choice = response.choices[0];
         expect(choice).toBeDefined();
-
         const toolCalls = choice!.message.tool_calls;
         expect(toolCalls).toBeDefined();
         expect(toolCalls!.length).toBeGreaterThan(0);
-
         const tc = toolCalls![0] as any;
         expect(tc.function.name).toBe('echo_test');
-
         const args = JSON.parse(tc.function.arguments);
         expect(args).toHaveProperty('message');
     }, 30_000);
