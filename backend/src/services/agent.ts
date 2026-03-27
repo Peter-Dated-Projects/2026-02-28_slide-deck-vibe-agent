@@ -113,9 +113,8 @@ const persistConversationTaskList = async (conversationId: string, tasks: AgentT
     );
 };
 const createConversationVibeManager = async (conversationId: string) => {
-    const res = await db.query('SELECT c.project_id, p.custom_instructions FROM conversations c JOIN projects p ON c.project_id = p.id WHERE c.id = $1', [conversationId]);
+    const res = await db.query('SELECT project_id FROM conversations WHERE id = $1', [conversationId]);
     const projectId = res.rows[0]?.project_id;
-    const customInstructions = res.rows[0]?.custom_instructions;
     if (!projectId) throw new Error("Project ID not found for conversation");
     const { html } = await loadDeckHtmlForProject(projectId);
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'vibe-agent-'));
@@ -129,10 +128,10 @@ const createConversationVibeManager = async (conversationId: string) => {
     const cleanup = async () => {
         await fs.rm(tempDir, { recursive: true, force: true });
     };
-    return { vibeManager, persist, cleanup, customInstructions };
+    return { vibeManager, persist, cleanup };
 };
 export const chatWithAgent = async (conversationId: string, messages: any[]) => {
-    const { vibeManager, persist, cleanup, customInstructions } = await createConversationVibeManager(conversationId);
+    const { vibeManager, persist, cleanup } = await createConversationVibeManager(conversationId);
     const { tools, systemInstruction } = await getTools(vibeManager);
     const runtimeState: AgentRuntimeState = { tasks: await loadConversationTaskList(conversationId) };
     let currentMessages = [...messages];
@@ -141,10 +140,7 @@ export const chatWithAgent = async (conversationId: string, messages: any[]) => 
     try {
         while (turnCount < maxTurns) {
             turnCount++;
-            let dynamicSystemInstruction = buildSystemInstructionWithTaskList(systemInstruction, runtimeState);
-            if (customInstructions) {
-                dynamicSystemInstruction += `\n\nProject Custom Instructions (Guiding Prompts):\n${customInstructions}`;
-            }
+            const dynamicSystemInstruction = buildSystemInstructionWithTaskList(systemInstruction, runtimeState);
             const result = await llmService.chatWithAgent(
                 conversationId,
                 sanitizeMessagesForLlm(currentMessages),
@@ -201,7 +197,7 @@ export const chatWithAgentStream = async (
     messages: any[],
     onChunk: (token: string) => void
 ): Promise<string> => {
-    const { vibeManager, persist, cleanup, customInstructions } = await createConversationVibeManager(conversationId);
+    const { vibeManager, persist, cleanup } = await createConversationVibeManager(conversationId);
     const { tools, systemInstruction } = await getTools(vibeManager);
     const runtimeState: AgentRuntimeState = { tasks: await loadConversationTaskList(conversationId) };
     try {
@@ -220,10 +216,7 @@ export const chatWithAgentStream = async (
         const maxTurns = 100;
         while (turnCount < maxTurns) {
             turnCount++;
-        let dynamicSystemInstruction = buildSystemInstructionWithTaskList(systemInstruction, runtimeState);
-        if (customInstructions) {
-            dynamicSystemInstruction += `\n\nProject Custom Instructions (Guiding Prompts):\n${customInstructions}`;
-        }
+        const dynamicSystemInstruction = buildSystemInstructionWithTaskList(systemInstruction, runtimeState);
         let localToolCalls: any[] = [];
         let localText = '';
         // Wrap the callback to intercept the tool_calls event

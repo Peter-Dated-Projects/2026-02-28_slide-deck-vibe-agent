@@ -105,7 +105,6 @@ app.delete('/api/user/me', requireAuth, userController.deleteUser);
 app.get('/api/projects', requireAuth, projectController.getProjects);
 app.post('/api/projects', requireAuth, projectController.createProject);
 app.patch('/api/projects/:projectId/name', requireAuth, projectController.updateProjectName);
-app.patch('/api/projects/:projectId/instructions', requireAuth, projectController.updateProjectInstructions);
 app.post('/api/projects/:projectId/preview', requireAuth, projectController.generateProjectPreview);
 app.delete('/api/projects/:projectId', requireAuth, projectController.deleteProject);
 app.get('/api/conversations', requireAuth, async (req: AuthRequest, res: express.Response): Promise<void> => {

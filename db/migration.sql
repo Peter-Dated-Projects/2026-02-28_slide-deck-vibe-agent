@@ -102,16 +102,4 @@ BEGIN
 	END IF;
 END $$;
 
--- 6. Add guiding prompts / custom instructions
-DO $$
-BEGIN
-	IF EXISTS (
-		SELECT 1
-		FROM information_schema.tables
-		WHERE table_schema = 'public' AND table_name = 'projects'
-	) THEN
-		EXECUTE 'ALTER TABLE projects ADD COLUMN IF NOT EXISTS custom_instructions TEXT';
-	END IF;
-END $$;
-
 COMMIT;

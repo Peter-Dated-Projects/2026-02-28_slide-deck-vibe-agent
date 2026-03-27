@@ -43,7 +43,6 @@ CREATE TABLE projects (
     minio_object_key VARCHAR(255) NOT NULL,
     preview_url TEXT,
     theme_data JSONB,
-    custom_instructions TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
