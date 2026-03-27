@@ -55,7 +55,8 @@ export const getProjects = async (req: Request, res: Response): Promise<void> =>
                 p.updated_at as "updatedAt",
                 p.theme_data ->> 'preview_url' as preview_url,
                 p.theme_data,
-                p.conversation_ids
+                p.conversation_ids,
+                p.custom_instructions
             FROM projects p
             JOIN conversations c ON c.id = p.conversation_ids[1]
             WHERE c.user_id = $1
@@ -99,7 +100,8 @@ export const getProjects = async (req: Request, res: Response): Promise<void> =>
                 updatedAt: row.updatedAt,
                 theme,
                 thumbnailUrl,
-                latest_conversation_id: latestConversationId
+                latest_conversation_id: latestConversationId,
+                custom_instructions: row.custom_instructions || ''
             };
         }));
         try {
@@ -157,7 +159,8 @@ export const createProject = async (req: Request, res: Response): Promise<void> 
                 updatedAt: conversation.updated_at,
                 theme: 'Professional',
                 thumbnailUrl: undefined,
-                latest_conversation_id: conversation.id
+                latest_conversation_id: conversation.id,
+                custom_instructions: ''
             }
         });
     } catch (error) {
@@ -249,6 +252,49 @@ export const updateProjectName = async (req: Request, res: Response): Promise<vo
         res.json({ name: trimmedName });
     } catch (error) {
         console.error('Error updating project name:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+};
+export const updateProjectInstructions = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const userId = (req as any).user?.userId;
+        const rawProjectId = req.params.projectId;
+        const projectId = Array.isArray(rawProjectId) ? rawProjectId[0] : rawProjectId;
+        const { instructions } = req.body;
+        if (!userId) {
+            res.status(401).json({ error: 'Unauthorized' });
+            return;
+        }
+        if (!projectId) {
+            res.status(400).json({ error: 'Project ID is required' });
+            return;
+        }
+        if (typeof instructions !== 'string') {
+            res.status(400).json({ error: 'instructions is required' });
+            return;
+        }
+        const ownership = await db.query(
+            'SELECT 1 FROM conversations WHERE project_id = $1 AND user_id = $2 LIMIT 1',
+            [projectId, userId]
+        );
+        if (ownership.rows.length === 0) {
+            res.status(404).json({ error: 'Project not found' });
+            return;
+        }
+        await db.query(
+            `
+                UPDATE projects
+                SET
+                    custom_instructions = $2,
+                    updated_at = NOW()
+                WHERE id = $1
+            `,
+            [projectId, instructions]
+        );
+        await invalidateProjectsCache(userId);
+        res.json({ success: true, instructions });
+    } catch (error) {
+        console.error('Error updating project instructions:', error);
         res.status(500).json({ error: 'Internal server error' });
     }
 };

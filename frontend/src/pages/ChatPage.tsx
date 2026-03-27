@@ -31,6 +31,7 @@ import {
   Code2,
   Trash2,
   CreditCard,
+  Settings,
   X,
   Home,
   Pencil,
@@ -166,6 +167,7 @@ interface ConversationHistoryEntry {
   projectId: string | null;
   title: string;
   projectName?: string;
+  customInstructions?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -235,6 +237,9 @@ const ChatPage: React.FC = () => {
   const [slides, setSlides] = useState<SlideData[]>([]);
   const [currentSlideIndex] = useState(0);
   const [showSettings, setShowSettings] = useState(false);
+  const [showProjectSettings, setShowProjectSettings] = useState(false);
+  const [customInstructions, setCustomInstructions] = useState("");
+  const [isSavingInstructions, setIsSavingInstructions] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [sidebarWidth, setSidebarWidth] = usePersistentWidth({
     storageKey: "vibe-agent.chat-sidebar-width",
@@ -294,17 +299,21 @@ const ChatPage: React.FC = () => {
           projectId: entry.projectId ?? null,
           title: entry.title ?? "Untitled",
           projectName: entry.projectName,
+          customInstructions: entry.customInstructions,
           createdAt: entry.createdAt,
           updatedAt: entry.updatedAt,
         }),
       );
       setConversationHistory(sortConversationHistory(nextHistory));
       if (projectId) {
-        const currentProjectName = nextHistory.find(
+        const currentProject = nextHistory.find(
           (entry) => entry.projectId === projectId,
-        )?.projectName;
-        if (currentProjectName?.trim()) {
-          setDeckTitle(currentProjectName);
+        );
+        if (currentProject?.projectName?.trim()) {
+          setDeckTitle(currentProject.projectName);
+        }
+        if (currentProject?.customInstructions !== undefined) {
+          setCustomInstructions(currentProject.customInstructions || "");
         }
       }
       if (conversationId) {
@@ -997,6 +1006,17 @@ const ChatPage: React.FC = () => {
               <Pencil className="w-3 h-3 text-muted-foreground opacity-0 group-hover:opacity-60 transition-opacity absolute right-1.5 pointer-events-none" />
             )}
           </div>
+          {/* Project Settings button */}
+          <button
+            onClick={() => setShowProjectSettings(!showProjectSettings)}
+            className={cn(
+              "text-muted-foreground hover:text-foreground transition-colors p-2 rounded-lg hover:bg-muted cursor-pointer",
+              showProjectSettings && "bg-muted text-foreground"
+            )}
+            title="Project Settings (Guiding Prompts)"
+          >
+            <Settings className="w-4 h-4" />
+          </button>
           {/* New Chat button */}
           <button
             onClick={() => {
@@ -1031,6 +1051,7 @@ const ChatPage: React.FC = () => {
           </button>
           {isConversationHistoryOpen && (
             <div className="absolute left-0 right-0 top-full z-30 border-b border-border bg-white shadow-sm">
+              {showProjectSettings && renderProjectSettingsModal()}
               <div className="max-h-56 overflow-y-auto custom-scrollbar">
                 {isConversationHistoryLoading ? (
                   <div className="flex items-center gap-2 px-2 py-3 text-xs text-muted-foreground">
@@ -1310,6 +1331,54 @@ const ChatPage: React.FC = () => {
       </div>
     </div>
   );
+  
+  function renderProjectSettingsModal() {
+    const handleSave = async () => {
+      if (!projectId) return;
+      setIsSavingInstructions(true);
+      try {
+        await api.patch(`/projects/${projectId}/instructions`, { instructions: customInstructions });
+        // Assume success, could optionally show a toast
+      } catch (err) {
+        console.error("Failed to save instructions", err);
+      } finally {
+        setIsSavingInstructions(false);
+      }
+    };
+
+    return (
+      <div className="absolute top-12 left-4 w-80 bg-card border border-border rounded-xl shadow-card p-5 z-50 animate-in fade-in slide-in-from-top-2">
+        <div className="flex justify-between items-start mb-3">
+          <h3 className="text-[15px] font-semibold text-foreground">Guiding Prompts</h3>
+          <button
+            onClick={() => setShowProjectSettings(false)}
+            className="text-muted-foreground hover:text-foreground"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+        <p className="text-xs text-muted-foreground mb-4">
+          Provide custom instructions or rules for this project. The AI will strictly follow these guidelines in all chats for this deck.
+        </p>
+        <textarea
+          value={customInstructions}
+          onChange={(e) => setCustomInstructions(e.target.value)}
+          placeholder="e.g. Always respond in Spanish, focus on dark mode designs, use professional language..."
+          className="w-full h-32 text-sm bg-muted/50 border border-border rounded-lg p-3 text-foreground resize-none focus:outline-none focus:ring-1 focus:ring-primary/50"
+        />
+        <div className="mt-4 flex justify-end">
+          <button
+            onClick={handleSave}
+            disabled={isSavingInstructions || !projectId}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-primary text-primary-foreground rounded hover:bg-primary/90 transition-colors disabled:opacity-50"
+          >
+            {isSavingInstructions ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Save Settings"}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   function renderSettingsModal() {
     if (!user) return null;
     return (
