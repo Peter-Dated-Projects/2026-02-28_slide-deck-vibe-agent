@@ -12,6 +12,7 @@
 
 import OpenAI from 'openai';
 import { VibeManager } from './vibeManager';
+import { layoutRequestStore, type LayoutResponse } from './layoutRequestStore';
 import * as crypto from 'crypto';
 type ToolResult = {
     success?: boolean;
@@ -106,7 +107,7 @@ export const getTools = async (vibeManager: VibeManager): Promise<{ tools: OpenA
             type: 'function',
             function: {
                 name: 'list_slides',
-                description: 'Return the ordered slide list with stable slide IDs, positions, and per-slide hashes.',
+                description: 'Return the ordered list of project components (slides) with stable IDs, positions, and per-component hashes.',
                 parameters: {
                     type: 'object',
                     properties: {}
@@ -141,7 +142,7 @@ export const getTools = async (vibeManager: VibeManager): Promise<{ tools: OpenA
             type: 'function',
             function: {
                 name: 'write_slide',
-                description: 'Write one or many slides by slide_id only. Requires matching hash from read_slide.',
+                description: 'Write one or many components (slides) by slide_id only. Requires matching hash from read_slide. Ensure the root HTML element strictly follows the template.html format (e.g. <section class=\"slide\">).',
                 parameters: {
                     type: 'object',
                     properties: {
@@ -172,7 +173,7 @@ export const getTools = async (vibeManager: VibeManager): Promise<{ tools: OpenA
             type: 'function',
             function: {
                 name: 'add_slide',
-                description: 'Add a new slide block. Returns the created slide_id and updates manifest.active_slides.',
+                description: 'Add a new component/slide block. Returns the created slide_id and updates manifest.active_slides. Ensure proper semantic root tags based on template.html (e.g. <section class=\"slide\">).',
                 parameters: {
                     type: 'object',
                     properties: {
@@ -410,19 +411,82 @@ export const getTools = async (vibeManager: VibeManager): Promise<{ tools: OpenA
                     required: ['operations']
                 }
             }
+        },
+        {
+            type: 'function',
+            function: {
+                name: 'analyze_slide_layout',
+                description: 'Renders a slide in the user\'s browser and returns a JSON tree describing every visible element with its tag, classes, text content, and exact pixel position (x, y, width, height) relative to the 1920×1080 slide viewport. Use this to understand where elements are positioned and how large they are before making layout changes.',
+                parameters: {
+                    type: 'object',
+                    properties: {
+                        slide_id: { type: 'string', description: 'The slide_id to analyze. Must be a valid slide_id from list_slides.' }
+                    },
+                    required: ['slide_id']
+                }
+            }
+        },
+        {
+            type: 'function',
+            function: {
+                name: 'read_design',
+                description: 'Read the current contents of DESIGN.md. Call this at session start and whenever you need design context before making or evaluating an edit.',
+                parameters: {
+                    type: 'object',
+                    properties: {},
+                    required: []
+                }
+            }
+        },
+        {
+            type: 'function',
+            function: {
+                name: 'write_design',
+                description: 'Overwrite a named section of DESIGN.md. Only call this when a durable design decision has been confirmed by the user. Do not call this for conversational content, slide-level edits, or anything that belongs in the edit log.',
+                parameters: {
+                    type: 'object',
+                    properties: {
+                        section: {
+                            type: 'string',
+                            enum: ['intent', 'structure', 'visual_language', 'constraints'],
+                            description: 'The section of DESIGN.md to update.'
+                        },
+                        content: {
+                            type: 'string',
+                            description: 'The new content for the section. Use short declarative statements. Do not include the section header — just the content.'
+                        }
+                    },
+                    required: ['section', 'content']
+                }
+            }
         }
     ];
-    const systemInstruction = `You are editing a Vibe V3 slide deck with stable UUID slide IDs. Use slide_id for all write_slide operations (index writes are not allowed). Index may still be used for read_slide when needed. Always read before write and pass the returned hash (OCC). Use list_slides first when planning multi-slide updates. Use read_manifest/write_manifest or reorder_slides/move_slide to control active slide order. Use write_theme, write_transitions, write_animations, and write_global_ui for global style/UI updates. After structural edits, call validate_deck_state to confirm HTML and manifest alignment. Keep progress updates brief: when a tool finishes, briefly explain what you did and your current status.`;
+    const systemInstruction = `You are an advanced agent editing a modular web project.
+
+Note: The underlying tools use legacy terminology like "slide" and "deck", but these refer to any modular component or section of the project.
+
+**Core Guidelines:**
+1. **Component Management:** Use \`slide_id\` (component ID) for all write operations (index writes are not allowed). Always read before write and pass the returned hash (OCC).
+2. **Structure & Formatting:** Every component MUST strictly follow the templated format laid out in our \`template.html\` file. Specifically, each component MUST be wrapped in a \`<section class="slide">\` tag to maintain scroll-snap alignment, and its content must be placed inside a \`<div class="slide-aspect-ratio-box">\` to ensure correct rendering.
+3. **Global State:** Use read/write tools for themes, transitions, animations, and global UI. Use manifest tools or reorder_slides/move_slide to control active slide order.
+4. **Updates:** Keep progress updates brief. When a tool finishes, briefly explain what you did and your current status. After structural edits, call validate_deck_state.
+
+At the start of every new session, call \`read_design()\` before responding to the user. Use the contents to orient yourself — do not ask the user to re-explain decisions that are already documented. If DESIGN.md is empty, ask the user for the presentation's core intent and structure, then call \`write_design()\` to record it before proceeding.
+
+On every turn, check whether your response involves a design-level decision. If it does, call \`read_design()\` first to verify consistency, and call \`write_design()\` after if something durable was decided.`;
     return { tools, systemInstruction };
 };
 /**
  * Executes a tool call and returns the result string.
  */
+export type OnLayoutRequest = (requestId: string, slideId: string) => void;
+
 export const executeTool = async (
     vibeManager: VibeManager,
     name: string,
     args: any,
-    runtimeState?: AgentRuntimeState
+    runtimeState?: AgentRuntimeState,
+    onLayoutRequest?: OnLayoutRequest
 ): Promise<string> => {
     try {
         if (name === 'create_tasks') {
@@ -684,6 +748,49 @@ export const executeTool = async (
             await vibeManager.setGlobalUI(args.html);
             return formatResult({ success: true, mutated: true, entities_changed: ['global_ui'] });
         }
+        if (name === 'analyze_slide_layout') {
+            const slideId = String(args?.slide_id || '').trim();
+            if (!slideId) {
+                return formatResult({ error: 'Missing slide_id.', mutated: false });
+            }
+            const slide = resolveSlideByArgs(vibeManager, { slide_id: slideId });
+            if (!slide) {
+                return formatResult({ error: `Slide not found: ${slideId}`, mutated: false });
+            }
+            if (!onLayoutRequest) {
+                return formatResult({ error: 'Layout analysis is not available in this context (no active browser session).', mutated: false });
+            }
+            const { requestId, promise } = layoutRequestStore.createRequest();
+            onLayoutRequest(requestId, slideId);
+            try {
+                const layoutData: LayoutResponse = await promise;
+                return formatResult({
+                    success: true,
+                    slide_id: slideId,
+                    viewport: { width: layoutData.viewportWidth, height: layoutData.viewportHeight },
+                    layout_tree: layoutData.tree,
+                    mutated: false
+                });
+            } catch (err: any) {
+                return formatResult({ error: `Layout analysis failed: ${err.message}`, mutated: false });
+            }
+        }
+        if (name === 'read_design') {
+            const content = await vibeManager.readDesign();
+            return formatResult({ success: true, content, hash: hashOf(content), mutated: false });
+        }
+        if (name === 'write_design') {
+            const section = args?.section;
+            const content = args?.content;
+            if (!section || !['intent', 'structure', 'visual_language', 'constraints'].includes(section)) {
+                return formatResult({ error: 'Invalid or missing section. Must be one of: intent, structure, visual_language, constraints', mutated: false });
+            }
+            if (content === undefined) {
+                return formatResult({ error: 'Missing content.', mutated: false });
+            }
+            await vibeManager.writeDesign(section, content);
+            return formatResult({ success: true, mutated: true, entities_changed: ['design'] });
+        }
         if (name === 'validate_deck_state') {
             const validation = vibeManager.validateDeckState();
             return formatResult({ success: true, validation, mutated: false });
@@ -722,7 +829,7 @@ export const executeTool = async (
                         mutated: false
                     });
                 }
-                const raw = await executeTool(vibeManager, toolName, operation?.args || {}, runtimeState);
+                const raw = await executeTool(vibeManager, toolName, operation?.args || {}, runtimeState, onLayoutRequest);
                 let parsed: any;
                 try {
                     parsed = JSON.parse(raw);

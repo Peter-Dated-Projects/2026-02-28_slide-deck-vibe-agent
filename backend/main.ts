@@ -19,8 +19,9 @@ import * as projectController from './src/controllers/project';
 import { requireAuth, type AuthRequest } from './src/middleware/auth';
 import { dbService as db } from './src/core/container';
 import { chatWithAgent, chatWithAgentStream } from './src/services/agent';
-import { loadDeckHtmlForProject } from './src/services/projectDeck';
+import { loadDeckHtmlForProject, loadDesignForProject, saveDesignForProject } from './src/services/projectDeck';
 import { config } from './src/config';
+import { layoutRequestStore } from './src/core/layoutRequestStore';
 const app = express();
 const getTitleFromFirstRequest = (message: string) => message.trim().slice(0, 150);
 const updateTitleFromFirstRequestIfNeeded = async (
@@ -330,6 +331,10 @@ app.post('/api/chat/stream', requireAuth, async (req: AuthRequest, res: express.
         let accumulatedText = "";
         const thinkTimers: { startTime: number; endTime?: number }[] = [];
         // Stream tokens to client
+        const onLayoutRequest = (requestId: string, slideId: string) => {
+            send('layout_request', JSON.stringify({ requestId, slideId }));
+        };
+
         const fullText = await chatWithAgentStream(currentConvId, messagesContext, (token) => {
             if (token.startsWith('[TOOL_CALLS]') && token.endsWith('[/TOOL_CALLS]')) {
                 try {
@@ -431,7 +436,7 @@ app.post('/api/chat/stream', requireAuth, async (req: AuthRequest, res: express.
                     send('token_text', JSON.stringify({ token }));
                 }
             }
-        });
+        }, onLayoutRequest);
         // Persist full response and tool metadata
         if (fullText || streamedToolCalls.length > 0 || streamedToolResults.length > 0) {
             const normalizedContentBlocks = normalizeAssistantContentBlocks(contentBlocks);
@@ -563,6 +568,29 @@ app.patch('/api/conversations/:conversationId/title', requireAuth, async (req: A
         res.status(500).json({ error: 'Internal server error' });
     }
 });
+// Layout Analysis Response Route (Protected)
+app.post('/api/layout-response', requireAuth, async (req: AuthRequest, res: express.Response): Promise<void> => {
+    try {
+        const { requestId, layoutData } = req.body;
+        if (!requestId || typeof requestId !== 'string') {
+            res.status(400).json({ error: 'requestId is required' });
+            return;
+        }
+        if (!layoutData || typeof layoutData !== 'object') {
+            res.status(400).json({ error: 'layoutData is required' });
+            return;
+        }
+        const resolved = layoutRequestStore.resolveRequest(requestId, layoutData);
+        if (!resolved) {
+            res.status(404).json({ error: 'No pending layout request found for this requestId (may have timed out)' });
+            return;
+        }
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Error handling layout response:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
 // Presentation Data Route (Protected)
 app.get('/api/presentation/:projectId', requireAuth, async (req: AuthRequest, res: express.Response): Promise<void> => {
      try {
@@ -587,6 +615,55 @@ app.get('/api/presentation/:projectId', requireAuth, async (req: AuthRequest, re
          console.error('Error fetching presentation:', error);
          res.status(500).json({ error: 'Error fetching presentation' });
      }
+});
+
+// Design Document Route (Protected)
+app.get('/api/projects/:projectId/design', requireAuth, async (req: AuthRequest, res: express.Response): Promise<void> => {
+    try {
+        const { projectId } = req.params;
+        const userId = req.user!.userId;
+        const projResult = await db.query(
+            'SELECT p.id FROM projects p JOIN conversations c ON c.id = ANY(p.conversation_ids) WHERE p.id = $1 AND c.user_id = $2 LIMIT 1', 
+            [projectId, userId]
+        );
+        if (projResult.rows.length === 0) {
+            res.status(404).json({ error: 'Project not found' });
+            return;
+        }
+        const designContent = await loadDesignForProject(projectId);
+        res.json({ design: designContent });
+    } catch (error) {
+        console.error('Error fetching design:', error);
+        res.status(500).json({ error: 'Error fetching design document' });
+    }
+});
+
+app.put('/api/projects/:projectId/design', requireAuth, async (req: AuthRequest, res: express.Response): Promise<void> => {
+    try {
+        const { projectId } = req.params;
+        const { design } = req.body;
+        const userId = req.user!.userId;
+        
+        if (typeof design !== 'string') {
+            res.status(400).json({ error: 'design content is required' });
+            return;
+        }
+
+        const projResult = await db.query(
+            'SELECT p.id FROM projects p JOIN conversations c ON c.id = ANY(p.conversation_ids) WHERE p.id = $1 AND c.user_id = $2 LIMIT 1', 
+            [projectId, userId]
+        );
+        if (projResult.rows.length === 0) {
+            res.status(404).json({ error: 'Project not found' });
+            return;
+        }
+
+        await saveDesignForProject(projectId, design);
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Error saving design:', error);
+        res.status(500).json({ error: 'Error saving design document' });
+    }
 });
 if (require.main === module) {
     app.listen(config.port, () => {

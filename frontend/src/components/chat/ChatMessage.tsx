@@ -11,7 +11,7 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { ChevronDown, ChevronRight, Brain, Copy, Check } from "lucide-react";
+import { ChevronDown, ChevronRight, Brain, Copy, Check, Wrench } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
@@ -45,29 +45,99 @@ export interface ChatMessageData {
 function cn(...classes: (string | undefined | null | false)[]) {
   return classes.filter(Boolean).join(" ");
 }
-function parseContentBlocks(content: string) {
-  const blocks: { type: "text" | "think"; content: string }[] = [];
+interface ContentBlock {
+  type: "text" | "think" | "execute_tool";
+  content: string;
+  toolName?: string;
+  toolArgs?: Record<string, string>;
+}
+
+/**
+ * Parse a raw message string into an ordered list of blocks.
+ * Recognised block tags:
+ *  - <think>…</think>
+ *  - <execute_tool>…</execute_tool>  (Gemma 4 format)
+ */
+function parseContentBlocks(content: string): ContentBlock[] {
+  const blocks: ContentBlock[] = [];
   let remaining = content;
+
+  // Regex that matches the opening of either special tag
+  const tagOpen = /<(think|execute_tool)>/;
+
   while (remaining) {
-    const startIdx = remaining.indexOf("<think>");
-    if (startIdx === -1) {
+    const openMatch = tagOpen.exec(remaining);
+    if (!openMatch) {
+      // No more special tags — rest is plain text
       if (remaining.trim()) blocks.push({ type: "text", content: remaining });
       break;
     }
-    if (startIdx > 0) {
-      const textBefore = remaining.slice(0, startIdx);
-      if (textBefore.trim()) blocks.push({ type: "text", content: textBefore });
+
+    const tagName = openMatch[1] as "think" | "execute_tool";
+    const openIdx = openMatch.index;
+
+    // Push any text before the tag
+    if (openIdx > 0) {
+      const before = remaining.slice(0, openIdx);
+      if (before.trim()) blocks.push({ type: "text", content: before });
     }
-    const endIdx = remaining.indexOf("</think>", startIdx);
-    if (endIdx === -1) {
-      blocks.push({ type: "think", content: remaining.slice(startIdx + 7) });
+
+    const closeTag = `</${tagName}>`;
+    const afterOpen = remaining.slice(openIdx + openMatch[0].length);
+    const closeIdx = afterOpen.indexOf(closeTag);
+
+    if (closeIdx === -1) {
+      // Unclosed tag — treat rest as this block type
+      const inner = afterOpen;
+      if (tagName === "execute_tool") {
+        blocks.push(parseExecuteToolBlock(inner));
+      } else {
+        blocks.push({ type: "think", content: inner });
+      }
       break;
     } else {
-      blocks.push({ type: "think", content: remaining.slice(startIdx + 7, endIdx).trim() });
-      remaining = remaining.slice(endIdx + 8);
+      const inner = afterOpen.slice(0, closeIdx).trim();
+      if (tagName === "execute_tool") {
+        blocks.push(parseExecuteToolBlock(inner));
+      } else {
+        blocks.push({ type: "think", content: inner });
+      }
+      remaining = afterOpen.slice(closeIdx + closeTag.length);
     }
   }
+
   return blocks;
+}
+
+/**
+ * Parse the inner text of an `<execute_tool>` block into a structured block.
+ * Expected format (Gemma 4):
+ *   function_name{key:<|"|>value<|"|>, key2:<|"|>value2<|"|>}<tool_call|>
+ */
+function parseExecuteToolBlock(raw: string): ContentBlock {
+  // Strip trailing <tool_call|> if present
+  let cleaned = raw.replace(/<tool_call\|>\s*$/, "").trim();
+  // Match function_name { … }
+  const fnMatch = cleaned.match(/^([a-zA-Z_][a-zA-Z0-9_]*)\s*(\{[\s\S]*\})/);
+  if (!fnMatch) {
+    return { type: "execute_tool", content: raw, toolName: "unknown" };
+  }
+  const toolName = fnMatch[1];
+  let argsStr = fnMatch[2];
+  // Replace Gemma 4 quote markers with standard quotes
+  argsStr = argsStr.replace(/<\|">\|/g, '"').replace(/<\|"\|>/g, '"');
+  let toolArgs: Record<string, string> = {};
+  try {
+    toolArgs = JSON.parse(argsStr);
+  } catch {
+    try {
+      const fixed = argsStr.replace(/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g, '$1"$2":');
+      toolArgs = JSON.parse(fixed);
+    } catch {
+      toolArgs = { raw: argsStr };
+    }
+  }
+  return { type: "execute_tool", content: raw, toolName, toolArgs };
 }
 // ─────────────────────────────────────────────────────
 // ThinkingBlock sub-component
@@ -163,6 +233,65 @@ const ThinkingBlock: React.FC<ThinkingBlockProps> = ({
               {isThinking ? "Thinking…" : "No thinking content available."}
             </span>
           )}
+        </div>
+      )}
+    </div>
+  );
+};
+// ─────────────────────────────────────────────────────
+// ExecuteToolBlock sub-component (Gemma 4 Generative UI)
+// ─────────────────────────────────────────────────────
+interface ExecuteToolBlockProps {
+  toolName: string;
+  toolArgs?: Record<string, string>;
+}
+const ExecuteToolBlock: React.FC<ExecuteToolBlockProps> = ({ toolName, toolArgs }) => {
+  const [expanded, setExpanded] = useState(false);
+  // Human-friendly label
+  const labelMap: Record<string, string> = {
+    write_design: "Writing design spec",
+    read_design: "Reading design spec",
+    write_slide: "Updating slide",
+    read_slide: "Reading slide",
+    write_theme: "Updating theme",
+    read_theme: "Reading theme",
+    write_css: "Updating CSS",
+    read_css: "Reading CSS",
+  };
+  const friendlyLabel = labelMap[toolName] || `Running ${toolName}`;
+  return (
+    <div className="mb-1 w-full">
+      <button
+        onClick={() => setExpanded((v) => !v)}
+        className={cn(
+          "flex items-center gap-2 text-[10px] font-medium px-2.5 py-1 rounded-lg transition-all duration-200 group w-full",
+          "border border-emerald-400/30 bg-emerald-400/5 hover:bg-emerald-400/10 text-muted-foreground hover:text-foreground",
+        )}
+      >
+        <div className="w-3 h-3 flex-shrink-0 flex items-center justify-center rounded bg-emerald-400/20 text-emerald-400">
+          <Wrench className="w-2 h-2" />
+        </div>
+        <span className="flex-1 text-left break-words [overflow-wrap:anywhere]">
+          {friendlyLabel}
+        </span>
+        {expanded ? (
+          <ChevronDown className="w-2.5 h-2.5 flex-shrink-0 text-muted-foreground" />
+        ) : (
+          <ChevronRight className="w-2.5 h-2.5 flex-shrink-0 text-muted-foreground" />
+        )}
+      </button>
+      {expanded && toolArgs && (
+        <div className="mt-1.5 ml-2 pl-3 border-l-2 border-emerald-400/40 text-[10px] leading-relaxed text-muted-foreground space-y-1">
+          {Object.entries(toolArgs).map(([key, value]) => (
+            <div key={key} className="bg-background/50 rounded p-2 font-mono text-[9px] overflow-x-auto">
+              <span className="text-emerald-400 font-semibold">{key}:</span>{" "}
+              <span className="text-foreground break-words [overflow-wrap:anywhere]">
+                {typeof value === "string" && value.length > 200
+                  ? value.slice(0, 200) + "…"
+                  : String(value)}
+              </span>
+            </div>
+          ))}
         </div>
       )}
     </div>
@@ -559,6 +688,14 @@ export const ChatMessage: React.FC<ChatMessageProps> = React.memo(({ message }) 
                       }
                       // Skip the loop forward by the coalesced amount
                       i = j - 1;
+                    } else if (block.type === "execute_tool") {
+                      renderedElements.push(
+                        <ExecuteToolBlock
+                          key={`exec-${i}`}
+                          toolName={block.toolName || "unknown"}
+                          toolArgs={block.toolArgs}
+                        />,
+                      );
                     } else {
                       renderedElements.push(
                         <MarkdownContent

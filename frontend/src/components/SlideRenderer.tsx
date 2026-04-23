@@ -10,13 +10,14 @@
  * ---------------------------------------------------------------------------
  */
 
-import React, { useRef, useEffect, useState } from "react";
+import React, { useRef, useEffect, useState, forwardRef, useImperativeHandle } from "react";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 // Utility for Tailwind class merging
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
+import { injectLayoutExtractor } from "../lib/layoutExtractor";
 // Internal slide resolution (all content is authored at 1920×1080)
 const SLIDE_W = 1920;
 const SLIDE_H = 1080;
@@ -35,7 +36,12 @@ interface SlideRendererProps {
   theme?: any;
   isActive?: boolean;
 }
-export const SlideRenderer: React.FC<SlideRendererProps> = ({ slide, theme, isActive = true }) => {
+
+export interface SlideRendererHandle {
+  getIframe: () => HTMLIFrameElement | null;
+}
+
+export const SlideRenderer = forwardRef<SlideRendererHandle, SlideRendererProps>(({ slide, theme, isActive = true }, ref) => {
   // Inject dynamic theme styles using CSS variables onto a wrapping ref
   const styleObj = {
     "--vibe-primary": theme?.colors?.primary || "#3b82f6",
@@ -54,6 +60,7 @@ export const SlideRenderer: React.FC<SlideRendererProps> = ({ slide, theme, isAc
   if (slide.rawHtml) {
     return (
       <ScaledSlide
+        ref={ref}
         html={slide.rawHtml}
         styleObj={{ ...styleObj, backgroundColor: "var(--vibe-bg)", color: "var(--vibe-text)" }}
         containerClasses={containerClasses}
@@ -107,7 +114,7 @@ export const SlideRenderer: React.FC<SlideRendererProps> = ({ slide, theme, isAc
         </div>
       );
   }
-};
+});
 // ─────────────────────────────────────────────────────
 // ScaledSlide: renders rawHtml in a sandboxed iframe at
 // 1920×1080, CSS-scaled to fill its container.
@@ -119,9 +126,17 @@ interface ScaledSlideProps {
   styleObj: React.CSSProperties;
   containerClasses: string;
 }
-const ScaledSlide: React.FC<ScaledSlideProps> = ({ html, containerClasses }) => {
+const ScaledSlide = forwardRef<SlideRendererHandle, ScaledSlideProps>(({ html, containerClasses }, ref) => {
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
   const [scale, setScale] = useState(0); // 0 = hidden until first measurement
+
+  useImperativeHandle(ref, () => ({
+    getIframe: () => iframeRef.current,
+  }));
+
+  // Inject the layout extraction script into the HTML
+  const enhancedHtml = injectLayoutExtractor(html);
   useEffect(() => {
     const el = wrapperRef.current;
     if (!el) return;
@@ -141,7 +156,8 @@ const ScaledSlide: React.FC<ScaledSlideProps> = ({ html, containerClasses }) => 
   return (
     <div ref={wrapperRef} className={containerClasses} style={{ borderRadius: 5 }}>
       <iframe
-        srcDoc={html}
+        ref={iframeRef}
+        srcDoc={enhancedHtml}
         // allow-scripts lets the slide HTML run its own JS; no allow-same-origin
         // keeps it sandboxed from the parent page's cookies/localStorage.
         sandbox="allow-scripts"
@@ -163,4 +179,4 @@ const ScaledSlide: React.FC<ScaledSlideProps> = ({ html, containerClasses }) => 
       />
     </div>
   );
-};
+});

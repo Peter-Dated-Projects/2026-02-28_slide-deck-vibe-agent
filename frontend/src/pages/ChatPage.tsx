@@ -21,7 +21,8 @@ import React, {
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import api, { getAccessToken } from "../api";
-import { SlideRenderer, type SlideData } from "../components/SlideRenderer";
+import { SlideRenderer, type SlideData, type SlideRendererHandle } from "../components/SlideRenderer";
+import { extractLayoutFromIframe } from "../lib/layoutExtractor";
 import { ChatMessage, type ChatMessageData } from "../components/chat/ChatMessage";
 import { TaskListBar, type AgentTask } from "../components/chat/TaskListBar";
 import {
@@ -36,6 +37,8 @@ import {
   Pencil,
   Plus,
   ChevronLeft,
+  FileText,
+  Save,
 } from "lucide-react";
 import { usePersistentWidth } from "../hooks/usePersistentWidth";
 import {
@@ -249,7 +252,9 @@ const ChatPage: React.FC = () => {
   const [conversationHistory, setConversationHistory] = useState<ConversationHistoryEntry[]>([]);
   const [isConversationHistoryLoading, setIsConversationHistoryLoading] = useState(true);
   const [isConversationHistoryOpen, setIsConversationHistoryOpen] = useState(false);
-  const [rightPanelTab, setRightPanelTab] = useState<"preview" | "html">("preview");
+  const [rightPanelTab, setRightPanelTab] = useState<"preview" | "html" | "design">("preview");
+  const [designContent, setDesignContent] = useState<string>("");
+  const [isSavingDesign, setIsSavingDesign] = useState<boolean>(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -258,6 +263,7 @@ const ChatPage: React.FC = () => {
   const startWidth = useRef(0);
   const userScrolledUp = useRef(false);
   const liveConversationMessagesRef = useRef<Record<string, ChatMessageData[]>>({});
+  const slideRendererRef = useRef<SlideRendererHandle>(null);
   const conversationActivity = useSyncExternalStore(
     subscribeConversationActivity,
     getConversationActivitySnapshot,
@@ -517,8 +523,26 @@ const ChatPage: React.FC = () => {
         const presentationHtml = typeof res.data.html === "string" ? res.data.html : "";
         setSlides(formattedSlides.map((slide) => ({ ...slide, rawHtml: presentationHtml })));
       }
+      try {
+        const designRes = await api.get(`/projects/${id}/design`);
+        setDesignContent(designRes.data.design || "");
+      } catch (err) {
+        console.error("Failed to fetch design:", err);
+      }
     } catch (error) {
       console.error("Failed to fetch presentation:", error);
+    }
+  };
+
+  const handleSaveDesign = async () => {
+    if (!projectId) return;
+    setIsSavingDesign(true);
+    try {
+      await api.put(`/projects/${projectId}/design`, { design: designContent });
+    } catch (error) {
+      console.error("Failed to save design:", error);
+    } finally {
+      setIsSavingDesign(false);
     }
   };
   // ─────────────────────────────────────────────────────
@@ -881,6 +905,53 @@ const ChatPage: React.FC = () => {
                   setDeckTitle(data.projectName);
                 }
               }
+            } else if (eventName === "layout_request") {
+              // The backend is asking us to compute the layout of a slide
+              const { requestId: layoutRequestId, slideId: layoutSlideId } = data;
+              if (layoutRequestId && layoutSlideId) {
+                (async () => {
+                  try {
+                    const iframe = slideRendererRef.current?.getIframe?.();
+                    if (!iframe) {
+                      // No iframe available — send an error response
+                      await api.post("/layout-response", {
+                        requestId: layoutRequestId,
+                        layoutData: {
+                          slideId: layoutSlideId,
+                          viewportWidth: 1920,
+                          viewportHeight: 1080,
+                          tree: { tag: "body", x: 0, y: 0, width: 0, height: 0, children: [], text: "Slide iframe not available" },
+                        },
+                      });
+                      return;
+                    }
+                    const result = await extractLayoutFromIframe(iframe, layoutRequestId);
+                    await api.post("/layout-response", {
+                      requestId: layoutRequestId,
+                      layoutData: {
+                        slideId: layoutSlideId,
+                        viewportWidth: result.viewportWidth,
+                        viewportHeight: result.viewportHeight,
+                        tree: result.tree,
+                      },
+                    });
+                  } catch (layoutErr) {
+                    console.error("Layout extraction failed:", layoutErr);
+                    // Attempt to send a fallback so the backend doesn't hang
+                    try {
+                      await api.post("/layout-response", {
+                        requestId: layoutRequestId,
+                        layoutData: {
+                          slideId: layoutSlideId,
+                          viewportWidth: 1920,
+                          viewportHeight: 1080,
+                          tree: { tag: "body", x: 0, y: 0, width: 0, height: 0, children: [], text: "Extraction error" },
+                        },
+                      });
+                    } catch { /* best effort */ }
+                  }
+                })();
+              }
             } else if (eventName === "done") {
               doneConvId = data.conversationId;
               break outer;
@@ -1217,6 +1288,21 @@ const ChatPage: React.FC = () => {
               HTML
             </span>
           </button>
+          <button
+            type="button"
+            onClick={() => setRightPanelTab("design")}
+            className={cn(
+              "h-7 px-3 rounded-md text-xs font-medium transition-colors border",
+              rightPanelTab === "design"
+                ? "bg-primary text-primary-foreground border-primary"
+                : "bg-background/70 text-muted-foreground border-border hover:text-foreground hover:bg-muted/40",
+            )}
+          >
+            <span className="inline-flex items-center gap-1.5">
+              <FileText className="w-3.5 h-3.5" />
+              Design
+            </span>
+          </button>
         </div>
         <div
           className={cn(
@@ -1254,6 +1340,7 @@ const ChatPage: React.FC = () => {
                     )}
                   >
                     <SlideRenderer
+                      ref={idx === currentSlideIndex ? slideRendererRef : undefined}
                       slide={slide}
                       theme={slide.theme_data || slides[0]?.theme_data}
                       isActive={idx === currentSlideIndex}
@@ -1306,6 +1393,46 @@ const ChatPage: React.FC = () => {
               </p>
             </div>
           )}
+        </div>
+        <div
+          className={cn(
+            "absolute inset-x-2 bottom-2 top-24 rounded-lg border border-border bg-[#1e1e1e] text-zinc-100 overflow-hidden flex flex-col",
+            rightPanelTab === "design" ? "opacity-100 z-10" : "opacity-0 pointer-events-none z-0",
+          )}
+        >
+          <div className="h-9 shrink-0 border-b border-zinc-800/80 px-3 flex items-center justify-between bg-[#252526]">
+            <span className="text-[11px] uppercase tracking-[0.14em] text-zinc-400">
+              DESIGN.md
+            </span>
+            <button
+              onClick={handleSaveDesign}
+              disabled={isSavingDesign}
+              className="flex items-center gap-1.5 px-2.5 py-1 text-xs bg-primary text-primary-foreground rounded hover:bg-primary/90 transition-colors disabled:opacity-50"
+            >
+              {isSavingDesign ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
+              Save
+            </button>
+          </div>
+          <div className="flex-1 min-h-0 overflow-auto custom-scrollbar">
+            <Editor
+              height="100%"
+              defaultLanguage="markdown"
+              value={designContent}
+              onChange={(value) => setDesignContent(value || "")}
+              theme="vs-dark"
+              options={{
+                minimap: { enabled: false },
+                lineNumbers: "on",
+                fontSize: 13,
+                lineHeight: 22,
+                wordWrap: "on",
+                scrollBeyondLastLine: false,
+                renderLineHighlight: "line",
+                automaticLayout: true,
+                tabSize: 2,
+              }}
+            />
+          </div>
         </div>
       </div>
     </div>
