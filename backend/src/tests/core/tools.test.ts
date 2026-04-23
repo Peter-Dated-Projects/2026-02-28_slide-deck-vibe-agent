@@ -90,6 +90,14 @@ describe('Core Tools - V3 UUID and OCC behavior', () => {
             hash: hashOf(initialSlideInnerHtml)
         });
     });
+    it('read_html_document returns the full HTML document and hash', async () => {
+        const result = await executeTool(vibeManager, 'read_html_document', {});
+        const parsed = JSON.parse(result);
+        expect(parsed.success).toBe(true);
+        expect(parsed.mutated).toBe(false);
+        expect(parsed.html).toBe(fixtureHtml);
+        expect(parsed.hash).toBe(hashOf(fixtureHtml));
+    });
     it('write_slide succeeds with slide_id and matching hash', async () => {
         const readResult = await executeTool(vibeManager, 'read_slide', { slide_id: slide1Id });
         const readParsed = JSON.parse(readResult);
@@ -165,6 +173,13 @@ describe('Core Tools - V3 UUID and OCC behavior', () => {
         ]);
         expect(writeSlideTool.function.description).toContain('slide_id only');
         expect(systemInstruction).toContain('Use `slide_id` (component ID) for all write operations');
+    });
+    it('getTools includes read_html_document for full document access', async () => {
+        const { tools } = await getTools(vibeManager);
+        const readHtmlDocumentTool = tools.find((tool: any) => tool.type === 'function' && tool.function.name === 'read_html_document');
+        expect(readHtmlDocumentTool).toBeDefined();
+        if (!readHtmlDocumentTool) throw new Error('read_html_document tool is not registered');
+        expect(readHtmlDocumentTool.function.description).toContain('entire HTML document');
     });
     it('update_task_status updates an existing in-memory checklist task', async () => {
         const runtimeState = {

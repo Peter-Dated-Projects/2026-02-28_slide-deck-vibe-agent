@@ -59,6 +59,9 @@ export class VibeManager {
     getContentSnapshot(): string {
         return this.content;
     }
+    getDocumentHtml(): string {
+        return this.content;
+    }
     async restoreContentSnapshot(snapshot: string): Promise<void> {
         this.content = snapshot;
         await this.save();
