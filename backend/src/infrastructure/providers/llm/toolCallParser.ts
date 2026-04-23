@@ -22,6 +22,106 @@ export interface ParsedToolCall {
         arguments: string; // JSON string
     };
 }
+
+function extractBalancedObject(source: string, startIndex: number): string | null {
+    if (startIndex < 0 || startIndex >= source.length || source[startIndex] !== '{') {
+        return null;
+    }
+
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+
+    for (let i = startIndex; i < source.length; i++) {
+        const ch = source[i];
+
+        if (inString) {
+            if (escaped) {
+                escaped = false;
+                continue;
+            }
+            if (ch === '\\') {
+                escaped = true;
+                continue;
+            }
+            if (ch === '"') {
+                inString = false;
+            }
+            continue;
+        }
+
+        if (ch === '"') {
+            inString = true;
+            continue;
+        }
+
+        if (ch === '{') {
+            depth++;
+            continue;
+        }
+
+        if (ch === '}') {
+            depth--;
+            if (depth === 0) {
+                return source.slice(startIndex, i + 1);
+            }
+        }
+    }
+
+    return null;
+}
+
+function parseLooseArguments(rawArgs: string): Record<string, any> {
+    const normalizedToken = '<|Q|>';
+    const tokenNormalized = rawArgs
+        .replace(/<\|">\|/g, normalizedToken)
+        .replace(/<\|"\|>/g, normalizedToken);
+
+    // Gemma-style key/value payloads: key:<|"|>value<|"|>
+    const tokenValuePattern = /([A-Za-z_][A-Za-z0-9_]*)\s*:\s*<\|Q\|>([\s\S]*?)<\|Q\|>/g;
+    const tokenArgs: Record<string, any> = {};
+    for (const match of tokenNormalized.matchAll(tokenValuePattern)) {
+        const key = match[1];
+        const value = match[2];
+        if (!key || value === undefined) {
+            continue;
+        }
+        tokenArgs[key] = value;
+    }
+    if (Object.keys(tokenArgs).length > 0) {
+        return tokenArgs;
+    }
+
+    let normalizedJsonLike = tokenNormalized.replace(new RegExp(normalizedToken, 'g'), '"');
+
+    try {
+        return JSON.parse(normalizedJsonLike);
+    } catch {
+        // Try quoting unquoted keys
+        try {
+            const fixedArgsStr = normalizedJsonLike.replace(/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g, '$1"$2":');
+            return JSON.parse(fixedArgsStr);
+        } catch {
+            // Loose parser for key:"value" pairs (including multiline values)
+            const looseArgs: Record<string, any> = {};
+            const trimmed = normalizedJsonLike.trim().replace(/^\{/, '').replace(/\}$/, '');
+            const pairPattern = /([A-Za-z_][A-Za-z0-9_]*)\s*:\s*"([\s\S]*?)"(?=\s*,\s*[A-Za-z_][A-Za-z0-9_]*\s*:|\s*$)/g;
+            for (const match of trimmed.matchAll(pairPattern)) {
+                const key = match[1];
+                const value = match[2];
+                if (!key || value === undefined) {
+                    continue;
+                }
+                looseArgs[key] = value;
+            }
+            if (Object.keys(looseArgs).length > 0) {
+                return looseArgs;
+            }
+        }
+    }
+
+    return { raw: rawArgs };
+}
 /**
  * Attempts to extract tool calls from arbitrary text.
  * Supports multiple patterns:
@@ -31,7 +131,7 @@ export interface ParsedToolCall {
  */
 export function extractToolCallsFromText(text: string): ParsedToolCall[] {
     const toolCalls: ParsedToolCall[] = [];
-    // Pattern 1: Look for JSON structures that contain tool_calls
+    // Pattern 1: Look for JSON structures that contain tool_calls (array)
     const jsonPattern = /"\$?tool_calls"\s*:\s*\[([\s\S]*?)\]/g;
     const jsonMatches = text.matchAll(jsonPattern);
     for (const match of jsonMatches) {
@@ -54,6 +154,26 @@ export function extractToolCallsFromText(text: string): ParsedToolCall[] {
             // Continue if parsing fails
         }
     }
+
+    // Pattern 1b: Look for JSON structures that contain a singular tool_call object
+    const singleJsonPattern = /"\$?tool_call"\s*:\s*(\{[\s\S]*?\})(?=\s*(?:,\s*"|\}\s*$))/g;
+    const singleJsonMatches = text.matchAll(singleJsonPattern);
+    for (const match of singleJsonMatches) {
+        try {
+            const objectStr = match[1];
+            if (!objectStr) {
+                continue;
+            }
+            const parsed = JSON.parse(objectStr);
+            const toolCall = normalizeToolCall(parsed, toolCalls.length);
+            if (toolCall) {
+                toolCalls.push(toolCall);
+            }
+        } catch {
+            // Continue if parsing fails
+        }
+    }
+
     // Pattern 2: Look for function_calls XML-style tags
     const xmlPattern = /<function_calls>([\s\S]*?)<\/function_calls>/g;
     const xmlMatches = text.matchAll(xmlPattern);
@@ -155,19 +275,7 @@ export function extractToolCallsFromText(text: string): ParsedToolCall[] {
         const functionName = match[1];
         let argsStr = match[2];
         if (functionName && argsStr) {
-            argsStr = argsStr.replace(/<\|">\|/g, '"').replace(/<\|"\|>/g, '"');
-            let parsedArgs = {};
-            try {
-                parsedArgs = JSON.parse(argsStr);
-            } catch (e) {
-                // Attempt a loose parse by quoting unquoted keys
-                try {
-                    const fixedArgsStr = argsStr.replace(/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g, '$1"$2":');
-                    parsedArgs = JSON.parse(fixedArgsStr);
-                } catch (e2) {
-                    parsedArgs = { raw: argsStr }; // fallback
-                }
-            }
+            const parsedArgs = parseLooseArguments(argsStr);
             toolCalls.push({
                 id: `tool_call_gemma_${gemmaIndex}`,
                 type: 'function',
@@ -180,28 +288,35 @@ export function extractToolCallsFromText(text: string): ParsedToolCall[] {
         }
     }
 
-    // Pattern 5: `<execute_tool> function_name{args}</execute_tool>` (Some local models, potentially with `<|"|>` as quotes)
-    const executeToolPattern = /<execute_tool>\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*(\{[\s\S]*?\})(?:<tool_call\|>)?\s*<\/execute_tool>/g;
+    // Pattern 5: `<execute_tool> function_name{args}</execute_tool>`
+    // Use balanced-brace extraction so CSS/HTML with inner braces doesn't truncate arguments.
+    const executeToolPattern = /<execute_tool>([\s\S]*?)<\/execute_tool>/g;
     const executeMatches = text.matchAll(executeToolPattern);
     let executeIndex = 0;
     for (const match of executeMatches) {
-        const functionName = match[1];
-        let argsStr = match[2];
+        const rawInner = match[1];
+        if (!rawInner) {
+            executeIndex++;
+            continue;
+        }
+
+        const normalizedInner = rawInner
+            .replace(/<\|tool_call\|>/g, '')
+            .replace(/<tool_call\|>/g, '')
+            .trim();
+
+        const functionMatch = normalizedInner.match(/^([a-zA-Z_][a-zA-Z0-9_]*)/);
+        if (!functionMatch || !functionMatch[1]) {
+            executeIndex++;
+            continue;
+        }
+
+        const functionName = functionMatch[1];
+        const openBraceIndex = normalizedInner.indexOf('{', functionMatch[0].length);
+        let argsStr = openBraceIndex >= 0 ? extractBalancedObject(normalizedInner, openBraceIndex) : null;
+
         if (functionName && argsStr) {
-            // Replace special quote delimiters if present
-            argsStr = argsStr.replace(/<\|">\|/g, '"').replace(/<\|"\|>/g, '"');
-            let parsedArgs = {};
-            try {
-                parsedArgs = JSON.parse(argsStr);
-            } catch (e) {
-                // Attempt a loose parse by quoting unquoted keys
-                try {
-                    const fixedArgsStr = argsStr.replace(/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g, '$1"$2":');
-                    parsedArgs = JSON.parse(fixedArgsStr);
-                } catch (e2) {
-                    parsedArgs = { raw: argsStr }; // fallback
-                }
-            }
+            const parsedArgs = parseLooseArguments(argsStr);
             toolCalls.push({
                 id: `tool_call_exec_${executeIndex}`,
                 type: 'function',
