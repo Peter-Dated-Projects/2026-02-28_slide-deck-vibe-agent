@@ -14,6 +14,7 @@ import OpenAI from 'openai';
 import { VibeManager } from './vibeManager';
 import { layoutRequestStore, type LayoutResponse } from './layoutRequestStore';
 import * as crypto from 'crypto';
+const HTML_DOCUMENT_LINES_PER_SECTION = 50;
 type ToolResult = {
     success?: boolean;
     error?: string;
@@ -276,8 +277,14 @@ export const getTools = async (vibeManager: VibeManager): Promise<{ tools: OpenA
             type: 'function',
             function: {
                 name: 'read_html_document',
-                description: 'Read the entire HTML document, including head, body, slides, manifest, and engine scripts, and return its hash.',
-                parameters: { type: 'object', properties: {} }
+                description: 'Read the HTML document in 50-line sections. Provide page and sections on every call; returns the requested chunk plus the document line count.',
+                parameters: {
+                    type: 'object',
+                    properties: {
+                        page: { type: 'number', description: '1-based section page to start reading from.' },
+                        sections: { type: 'number', description: 'Number of 50-line sections to read.' }
+                    }
+                }
             }
         },
         {
@@ -704,8 +711,24 @@ export const executeTool = async (
             return formatResult({ success: true, mutated: true, entities_changed: ['manifest'] });
         }
         if (name === 'read_html_document') {
-            const html = vibeManager.getDocumentHtml();
-            return formatResult({ success: true, html, hash: hashOf(html), mutated: false });
+            const page = Number(args?.page || 1);
+            const sections = Number(args?.sections || 1);
+            if (isNaN(page) || isNaN(sections) || page < 1 || sections < 1) {
+                return formatResult({ error: 'Missing or invalid page/sections. Both must be positive numbers.', mutated: false });
+            }
+            const documentSection = vibeManager.getDocumentSection(page, sections, HTML_DOCUMENT_LINES_PER_SECTION);
+            return formatResult({
+                success: true,
+                html: documentSection.html,
+                hash: hashOf(documentSection.html),
+                page,
+                sections,
+                lines_per_section: HTML_DOCUMENT_LINES_PER_SECTION,
+                start_line: documentSection.startLine + 1,
+                end_line: documentSection.endLine,
+                max_length: documentSection.maxLength,
+                mutated: false
+            });
         }
         if (name === 'reorder_slides') {
             if (!Array.isArray(args?.active_slides)) {

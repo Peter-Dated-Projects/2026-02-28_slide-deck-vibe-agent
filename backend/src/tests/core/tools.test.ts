@@ -68,6 +68,15 @@ describe('Core Tools - V3 UUID and OCC behavior', () => {
     <!-- <!-- VIBE_MANIFEST_END --> -->
 </body>
 </html>`;
+    const longFixtureHtml = `<!doctype html>
+<html>
+<head>
+    <title>Long Doc</title>
+</head>
+<body>
+${Array.from({ length: 120 }, (_value, index) => `LINE ${index + 1}`).join('\n')}
+</body>
+</html>`;
     beforeEach(async () => {
         tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'vibe-tools-'));
         tempFilePath = path.join(tempDir, 'deck.html');
@@ -97,6 +106,32 @@ describe('Core Tools - V3 UUID and OCC behavior', () => {
         expect(parsed.mutated).toBe(false);
         expect(parsed.html).toBe(fixtureHtml);
         expect(parsed.hash).toBe(hashOf(fixtureHtml));
+        expect(parsed.max_length).toBe(fixtureHtml.split(/\r?\n/).length);
+    });
+    it('read_html_document paginates 50-line sections with max_length metadata', async () => {
+        await fs.writeFile(tempFilePath, longFixtureHtml, { encoding: 'utf-8' });
+        vibeManager = await VibeManager.create(tempFilePath);
+
+        const firstPageResult = await executeTool(vibeManager, 'read_html_document', { page: 1, sections: 1 });
+        const firstPageParsed = JSON.parse(firstPageResult);
+        const longLines = longFixtureHtml.split(/\r?\n/);
+        expect(firstPageParsed.success).toBe(true);
+        expect(firstPageParsed.page).toBe(1);
+        expect(firstPageParsed.sections).toBe(1);
+        expect(firstPageParsed.lines_per_section).toBe(50);
+        expect(firstPageParsed.start_line).toBe(1);
+        expect(firstPageParsed.end_line).toBe(50);
+        expect(firstPageParsed.max_length).toBe(longLines.length);
+        expect(firstPageParsed.html).toBe(longLines.slice(0, 50).join('\n'));
+
+        const secondPageResult = await executeTool(vibeManager, 'read_html_document', { page: 2, sections: 2 });
+        const secondPageParsed = JSON.parse(secondPageResult);
+        expect(secondPageParsed.success).toBe(true);
+        expect(secondPageParsed.page).toBe(2);
+        expect(secondPageParsed.sections).toBe(2);
+        expect(secondPageParsed.start_line).toBe(51);
+        expect(secondPageParsed.end_line).toBe(longLines.length);
+        expect(secondPageParsed.html).toBe(longLines.slice(50).join('\n'));
     });
     it('write_slide succeeds with slide_id and matching hash', async () => {
         const readResult = await executeTool(vibeManager, 'read_slide', { slide_id: slide1Id });
@@ -180,6 +215,8 @@ describe('Core Tools - V3 UUID and OCC behavior', () => {
         expect(readHtmlDocumentTool).toBeDefined();
         if (!readHtmlDocumentTool) throw new Error('read_html_document tool is not registered');
         expect(readHtmlDocumentTool.function.description).toContain('entire HTML document');
+        expect((readHtmlDocumentTool.function.parameters as any)?.properties?.page?.type).toBe('number');
+        expect((readHtmlDocumentTool.function.parameters as any)?.properties?.sections?.type).toBe('number');
     });
     it('update_task_status updates an existing in-memory checklist task', async () => {
         const runtimeState = {
