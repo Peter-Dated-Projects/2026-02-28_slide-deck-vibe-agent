@@ -632,7 +632,17 @@ export const executeTool = async (
                 writes.push({ slide_id: slide.id, index: slide.index, success: true, message: `Updated slide ${slide.id}` });
             }
             const anySuccess = writes.some((w) => w.success);
-            return formatResult({ success: true, writes, mutated: anySuccess, entities_changed: anySuccess ? ['slides'] : [] });
+            const failedWrites = writes.filter((w) => !w.success);
+            const hasFailures = failedWrites.length > 0;
+            return formatResult({
+                success: !hasFailures,
+                error: hasFailures
+                    ? `write_slide failed for ${failedWrites.length} of ${writes.length} write(s).`
+                    : undefined,
+                writes,
+                mutated: anySuccess,
+                entities_changed: anySuccess ? ['slides'] : []
+            });
         }
         if (name === 'add_slide') {
             if (!args?.newHtml) {

@@ -120,6 +120,8 @@ describe('Core Tools - V3 UUID and OCC behavior', () => {
             hash: 'unused'
         });
         const parsed = JSON.parse(writeResult);
+        expect(parsed.success).toBe(false);
+        expect(parsed.error).toContain('write_slide failed');
         expect(parsed.mutated).toBe(false);
         expect(parsed.writes[0].error).toContain('slide_id is required');
     });
@@ -142,6 +144,8 @@ describe('Core Tools - V3 UUID and OCC behavior', () => {
             ]
         });
         const parsed = JSON.parse(writeResult);
+        expect(parsed.success).toBe(false);
+        expect(parsed.error).toContain('write_slide failed');
         expect(parsed.mutated).toBe(true);
         expect(parsed.writes[0].success).toBe(true);
         expect(parsed.writes[1].success).toBe(false);
@@ -160,7 +164,7 @@ describe('Core Tools - V3 UUID and OCC behavior', () => {
             { required: ['writes'] }
         ]);
         expect(writeSlideTool.function.description).toContain('slide_id only');
-        expect(systemInstruction).toContain('slide_id for all write_slide operations');
+        expect(systemInstruction).toContain('Use `slide_id` (component ID) for all write operations');
     });
     it('update_task_status updates an existing in-memory checklist task', async () => {
         const runtimeState = {

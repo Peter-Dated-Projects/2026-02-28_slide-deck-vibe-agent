@@ -3,9 +3,9 @@
  * (c) 2026 Freedom, LLC.
  * This file is part of the SlideDeckVibeAgent System.
  *
- * All Rights Reserved. This code is the confidential and proprietary 
- * information of Freedom, LLC ("Confidential Information"). You shall not 
- * disclose such Confidential Information and shall use it only in accordance 
+ * All Rights Reserved. This code is the confidential and proprietary
+ * information of Freedom, LLC ("Confidential Information"). You shall not
+ * disclose such Confidential Information and shall use it only in accordance
  * with the terms of the license agreement you entered into with Freedom, LLC.
  * ---------------------------------------------------------------------------
  */
@@ -15,7 +15,7 @@ import { ChevronDown, ChevronRight, Brain, Copy, Check, Wrench } from "lucide-re
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
-import { parseGemmaContentBlocks, type GemmaContentBlock } from "../../lib/gemmaOutputParser";
+import { parseGemmaContentBlocks } from "../../lib/gemmaOutputParser";
 // Import a highlight.js theme (GitHub Dark — works well on both light and dark UI)
 import "highlight.js/styles/github-dark-dimmed.css";
 // ─────────────────────────────────────────────────────
@@ -45,14 +45,6 @@ export interface ChatMessageData {
 // ─────────────────────────────────────────────────────
 function cn(...classes: (string | undefined | null | false)[]) {
   return classes.filter(Boolean).join(" ");
-}
-interface ContentBlock {
-  type: "text" | "think" | "execute_tool";
-  content: string;
-  toolName?: string;
-  toolArgs?: Record<string, string>;
-  parsed?: boolean;
-  isOpen?: boolean;
 }
 // ─────────────────────────────────────────────────────
 // ThinkingBlock sub-component
@@ -133,23 +125,30 @@ const ThinkingBlock: React.FC<ThinkingBlockProps> = ({
         )}
       </button>
       {/* Expanded thinking content */}
-      {expanded && (
-        <div
-          className={cn(
-            "mt-1.5 ml-2 pl-3 border-l-2 text-[10px] leading-relaxed whitespace-pre-wrap text-muted-foreground",
-            "transition-all duration-200 overflow-y-auto custom-scrollbar max-h-[160px]", // ~10 lines of text
-            isThinking ? "border-primary/40" : "border-border",
-          )}
-        >
-          {thinkingContent ? (
-            <span>{thinkingContent}</span>
-          ) : (
-            <span className="italic opacity-60">
-              {isThinking ? "Thinking…" : "No thinking content available."}
-            </span>
-          )}
+      <div
+        className={cn(
+          "grid transition-[grid-template-rows] duration-200 ease-out",
+          expanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]",
+        )}
+      >
+        <div className={cn("min-h-0 overflow-hidden")}>
+          <div
+            className={cn(
+              "mt-1.5 ml-2 pl-3 border-l-2 text-[10px] leading-relaxed whitespace-pre-wrap text-muted-foreground",
+              "transition-all duration-200 overflow-y-auto custom-scrollbar max-h-[160px]", // ~10 lines of text
+              isThinking ? "border-primary/40" : "border-border",
+            )}
+          >
+            {thinkingContent ? (
+              <span>{thinkingContent}</span>
+            ) : (
+              <span className="italic opacity-60">
+                {isThinking ? "Thinking…" : "No thinking content available."}
+              </span>
+            )}
+          </div>
         </div>
-      )}
+      </div>
     </div>
   );
 };
@@ -157,13 +156,19 @@ const ThinkingBlock: React.FC<ThinkingBlockProps> = ({
 // ExecuteToolBlock sub-component (Gemma 4 Generative UI)
 // ─────────────────────────────────────────────────────
 interface ExecuteToolBlockProps {
-  toolName: string;
+  toolName?: string;
   toolArgs?: Record<string, string>;
   content: string;
   parsed?: boolean;
   isOpen?: boolean;
 }
-const ExecuteToolBlock: React.FC<ExecuteToolBlockProps> = ({ toolName, toolArgs, content, parsed, isOpen }) => {
+const ExecuteToolBlock: React.FC<ExecuteToolBlockProps> = ({
+  toolName,
+  toolArgs,
+  content,
+  parsed,
+  isOpen,
+}) => {
   const [expanded, setExpanded] = useState(false);
   // Human-friendly label
   const labelMap: Record<string, string> = {
@@ -176,22 +181,28 @@ const ExecuteToolBlock: React.FC<ExecuteToolBlockProps> = ({ toolName, toolArgs,
     write_css: "Updating CSS",
     read_css: "Reading CSS",
   };
-  const friendlyLabel = labelMap[toolName] || `Running ${toolName}`;
-  const shouldShowFallback = !parsed || !toolName || toolName === "unknown" || !toolArgs || Object.keys(toolArgs).length === 0;
+  const resolvedToolName = toolName || "unknown";
+  const friendlyLabel = labelMap[resolvedToolName] || `Running ${resolvedToolName}`;
+  const showExecuting = Boolean(isOpen);
   return (
     <div className="mb-1 w-full">
       <button
         onClick={() => setExpanded((v) => !v)}
         className={cn(
           "flex items-center gap-2 text-[10px] font-medium px-2.5 py-1 rounded-lg transition-all duration-200 group w-full",
-          "border border-indigo-400/30 bg-indigo-400/5 hover:bg-indigo-400/10 text-muted-foreground hover:text-foreground",
+          "border border-indigo-500/40 bg-violet-500/10 hover:bg-violet-500/15 text-muted-foreground hover:text-foreground",
         )}
       >
-        <div className={cn("w-3 h-3 flex-shrink-0 flex items-center justify-center rounded text-indigo-400", isOpen ? "bg-indigo-400/20 animate-pulse" : "bg-indigo-400/15")}>
+        <div
+          className={cn(
+            "w-3 h-3 flex-shrink-0 flex items-center justify-center rounded bg-indigo-500/20 text-indigo-400",
+            showExecuting && "animate-pulse",
+          )}
+        >
           <Wrench className="w-2 h-2" />
         </div>
         <span className="flex-1 text-left break-words [overflow-wrap:anywhere]">
-          {friendlyLabel}
+          {showExecuting ? `${friendlyLabel} (executing)` : friendlyLabel}
         </span>
         {expanded ? (
           <ChevronDown className="w-2.5 h-2.5 flex-shrink-0 text-muted-foreground" />
@@ -199,25 +210,27 @@ const ExecuteToolBlock: React.FC<ExecuteToolBlockProps> = ({ toolName, toolArgs,
           <ChevronRight className="w-2.5 h-2.5 flex-shrink-0 text-muted-foreground" />
         )}
       </button>
-      {expanded && shouldShowFallback && (
-        <div className="mt-1.5 ml-2 pl-3 border-l-2 border-indigo-400/40 text-[10px] leading-relaxed text-muted-foreground">
-          <pre className="bg-background/50 rounded p-2 font-mono text-[9px] overflow-x-auto whitespace-pre-wrap break-words text-foreground">
-            {content}
-          </pre>
-        </div>
-      )}
-      {expanded && !shouldShowFallback && toolArgs && (
-        <div className="mt-1.5 ml-2 pl-3 border-l-2 border-emerald-400/40 text-[10px] leading-relaxed text-muted-foreground space-y-1">
-          {Object.entries(toolArgs).map(([key, value]) => (
-            <div key={key} className="bg-background/50 rounded p-2 font-mono text-[9px] overflow-x-auto">
-              <span className="text-emerald-400 font-semibold">{key}:</span>{" "}
-              <span className="text-foreground break-words [overflow-wrap:anywhere]">
-                {typeof value === "string" && value.length > 200
-                  ? value.slice(0, 200) + "…"
-                  : String(value)}
-              </span>
-            </div>
-          ))}
+      {expanded && (
+        <div className="mt-1.5 ml-2 pl-3 border-l-2 border-indigo-500/40 text-[10px] leading-relaxed text-muted-foreground space-y-1">
+          {parsed !== false && toolArgs && Object.keys(toolArgs).length > 0 ? (
+            Object.entries(toolArgs).map(([key, value]) => (
+              <div
+                key={key}
+                className="bg-background/50 rounded p-2 font-mono text-[9px] overflow-x-auto"
+              >
+                <span className="text-indigo-400 font-semibold">{key}:</span>{" "}
+                <span className="text-foreground break-words [overflow-wrap:anywhere]">
+                  {typeof value === "string" && value.length > 200
+                    ? value.slice(0, 200) + "…"
+                    : String(value)}
+                </span>
+              </div>
+            ))
+          ) : (
+            <pre className="bg-background/50 rounded p-2 font-mono text-[10px] text-foreground overflow-x-auto whitespace-pre-wrap">
+              {content}
+            </pre>
+          )}
         </div>
       )}
     </div>
@@ -250,7 +263,9 @@ const ToolBlock: React.FC<ToolBlockProps> = ({ toolCalls, toolResults }) => {
   };
   if (!toolCalls || toolCalls.length === 0) return null;
   const firstToolName = toolCalls[0]?.function?.name || "tool";
-  const allSameTool = toolCalls.every((toolCall) => (toolCall?.function?.name || "tool") === firstToolName);
+  const allSameTool = toolCalls.every(
+    (toolCall) => (toolCall?.function?.name || "tool") === firstToolName,
+  );
   const title =
     toolCalls.length === 1
       ? `Agent ran: ${firstToolName}`
@@ -280,9 +295,7 @@ const ToolBlock: React.FC<ToolBlockProps> = ({ toolCalls, toolResults }) => {
             <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path>
           </svg>
         </div>
-        <span className="flex-1 text-left break-words [overflow-wrap:anywhere]">
-          {title}
-        </span>
+        <span className="flex-1 text-left break-words [overflow-wrap:anywhere]">{title}</span>
         {expanded ? (
           <ChevronDown className="w-2.5 h-2.5 flex-shrink-0 text-muted-foreground" />
         ) : (
@@ -514,7 +527,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = React.memo(({ message }) 
               // Assistant messages: parse and handle think blocks + markdown
               <div className="space-y-3 w-full">
                 {(() => {
-                  let blocks: GemmaContentBlock[] = [];
+                  let blocks: any[] = [];
                   if (typeof message.content === "string") {
                     blocks = parseGemmaContentBlocks(message.content);
                   } else if (Array.isArray(message.content)) {
@@ -581,21 +594,26 @@ export const ChatMessage: React.FC<ChatMessageProps> = React.memo(({ message }) 
                         }
                         j++;
                       }
-                      const groupedBySequentialTool: { toolCalls: any[]; toolResults: any[] }[] = [];
+                      const groupedBySequentialTool: { toolCalls: any[]; toolResults: any[] }[] =
+                        [];
                       let currentGroupName: string | null = null;
                       for (const toolCall of segmentToolCalls) {
                         const toolName = toolCall?.function?.name ?? "tool";
                         if (currentGroupName === toolName && groupedBySequentialTool.length > 0) {
-                          groupedBySequentialTool[groupedBySequentialTool.length - 1].toolCalls.push(
-                            toolCall,
-                          );
+                          groupedBySequentialTool[
+                            groupedBySequentialTool.length - 1
+                          ].toolCalls.push(toolCall);
                         } else {
                           groupedBySequentialTool.push({ toolCalls: [toolCall], toolResults: [] });
                           currentGroupName = toolName;
                         }
                       }
                       if (groupedBySequentialTool.length > 0) {
-                        for (let groupIdx = 0; groupIdx < groupedBySequentialTool.length; groupIdx++) {
+                        for (
+                          let groupIdx = 0;
+                          groupIdx < groupedBySequentialTool.length;
+                          groupIdx++
+                        ) {
                           const group = groupedBySequentialTool[groupIdx];
                           const groupCallIds = new Set(
                             group.toolCalls.map((toolCall) => toolCall?.id).filter(Boolean),
@@ -607,7 +625,9 @@ export const ChatMessage: React.FC<ChatMessageProps> = React.memo(({ message }) 
                             <ToolBlock
                               key={`toolgroup-${i}-${groupIdx}`}
                               toolCalls={group.toolCalls}
-                              toolResults={group.toolResults.length > 0 ? group.toolResults : undefined}
+                              toolResults={
+                                group.toolResults.length > 0 ? group.toolResults : undefined
+                              }
                             />,
                           );
                         }
@@ -618,7 +638,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = React.memo(({ message }) 
                       renderedElements.push(
                         <ExecuteToolBlock
                           key={`exec-${i}`}
-                          toolName={block.toolName || "unknown"}
+                          toolName={block.toolName}
                           toolArgs={block.toolArgs}
                           content={block.content || ""}
                           parsed={block.parsed}

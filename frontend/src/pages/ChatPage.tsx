@@ -3,9 +3,9 @@
  * (c) 2026 Freedom, LLC.
  * This file is part of the SlideDeckVibeAgent System.
  *
- * All Rights Reserved. This code is the confidential and proprietary 
- * information of Freedom, LLC ("Confidential Information"). You shall not 
- * disclose such Confidential Information and shall use it only in accordance 
+ * All Rights Reserved. This code is the confidential and proprietary
+ * information of Freedom, LLC ("Confidential Information"). You shall not
+ * disclose such Confidential Information and shall use it only in accordance
  * with the terms of the license agreement you entered into with Freedom, LLC.
  * ---------------------------------------------------------------------------
  */
@@ -21,10 +21,13 @@ import React, {
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import api, { getAccessToken } from "../api";
-import { SlideRenderer, type SlideData, type SlideRendererHandle } from "../components/SlideRenderer";
+import {
+  SlideRenderer,
+  type SlideData,
+  type SlideRendererHandle,
+} from "../components/SlideRenderer";
 import { extractLayoutFromIframe } from "../lib/layoutExtractor";
 import { ChatMessage, type ChatMessageData } from "../components/chat/ChatMessage";
-import { parseGemmaContentBlocks, type GemmaContentBlock } from "../lib/gemmaOutputParser";
 import { TaskListBar, type AgentTask } from "../components/chat/TaskListBar";
 import {
   Send,
@@ -78,6 +81,21 @@ function generateId() {
 }
 function getConversationRequestKey(conversationId?: string, projectId?: string | null) {
   return conversationId ?? `draft:${projectId ?? "global"}`;
+}
+function parseStreamSnapshot(snapshot: string) {
+  const thinkStarts = snapshot.split("<think>").length - 1;
+  const thinkEnds = snapshot.split("</think>").length - 1;
+  let isThinking = thinkStarts > thinkEnds;
+  if (!isThinking && thinkStarts === thinkEnds) {
+    const stripped = snapshot.trim();
+    const prefixes = ["<think", "<thin", "<thi", "<th", "<t", "<"];
+    if (prefixes.includes(stripped) || !stripped) {
+      if (snapshot.length < 8) {
+        isThinking = true;
+      }
+    }
+  }
+  return { isThinking, thinkingContent: "", content: snapshot };
 }
 function parseJsonSafely(value: unknown) {
   if (typeof value !== "string") {
@@ -205,45 +223,86 @@ function formatLastEdited(dateString: string) {
       return relativeTimeFormatter
         .format(Math.round(diffSeconds / secondsPerUnit), unit)
         .toLowerCase();
-                const parsedBlocks = parseGemmaContentBlocks(accumulatedText);
-                const visibleBlocks: GemmaContentBlock[] = parsedBlocks.map((block, index) => {
-                  if (block.type === "think") {
-                    const timer = thinkTimers[index] ?? { startTime: Date.now() };
-                    if (!thinkTimers[index]) {
-                      thinkTimers[index] = timer;
-                    }
-                    if (!block.isOpen && !timer.endTime) {
-                      timer.endTime = Date.now();
-                    }
-                    return {
-                      ...block,
-                      content: block.content,
-                      isOpen: block.isOpen,
-                      startTime: timer.startTime,
-                      endTime: timer.endTime,
-                      text: block.content,
-                    } as GemmaContentBlock & { text?: string; startTime?: number; endTime?: number };
-                  }
-                  if (block.type === "text") {
-                    return { ...block, text: block.content } as GemmaContentBlock & { text?: string };
-                  }
-                  return block;
-                });
-                const reconstructedBlocks: any[] = [];
-                let visibleCursor = 0;
-                for (const block of contentBlocks) {
-                  if (block.type === "tool_call" || block.type === "tool_result") {
-                    reconstructedBlocks.push(block);
-                  } else if (visibleCursor < visibleBlocks.length) {
-                    reconstructedBlocks.push(visibleBlocks[visibleCursor]);
-                    visibleCursor++;
-                  }
-                }
-                while (visibleCursor < visibleBlocks.length) {
-                  reconstructedBlocks.push(visibleBlocks[visibleCursor]);
-                  visibleCursor++;
-                }
-                contentBlocks = reconstructedBlocks;
+    }
+  }
+  return relativeTimeFormatter.format(diffSeconds, "second").toLowerCase();
+}
+// ─────────────────────────────────────────────────────
+// ChatPage
+// ─────────────────────────────────────────────────────
+const ChatPage: React.FC = () => {
+  const { conversationId } = useParams<{ conversationId?: string }>();
+  const [searchParams] = useSearchParams();
+  const projectId = searchParams.get("projectId");
+  const navigate = useNavigate();
+  const { user, logout } = useAuth();
+  const [messages, setMessages] = useState<ChatMessageData[]>([]);
+  const [input, setInput] = useState("");
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [slides, setSlides] = useState<SlideData[]>([]);
+  const [currentSlideIndex] = useState(0);
+  const [showSettings, setShowSettings] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = usePersistentWidth({
+    storageKey: "vibe-agent.chat-sidebar-width",
+    defaultWidth: 380,
+    minWidth: 350,
+    maxWidth: 550,
+  });
+  const [isResizingState, setIsResizingState] = useState(false);
+  const [deckTitle, setDeckTitle] = useState("New Chat");
+  const [conversationTitle, setConversationTitle] = useState("New Chat");
+  const [isTitleFocused, setIsTitleFocused] = useState(false);
+  const [conversationHistory, setConversationHistory] = useState<ConversationHistoryEntry[]>([]);
+  const [isConversationHistoryLoading, setIsConversationHistoryLoading] = useState(true);
+  const [isConversationHistoryOpen, setIsConversationHistoryOpen] = useState(false);
+  const [rightPanelTab, setRightPanelTab] = useState<"preview" | "html" | "design">("preview");
+  const [designContent, setDesignContent] = useState<string>("");
+  const [isSavingDesign, setIsSavingDesign] = useState<boolean>(false);
+  const [isCompressingMemory, setIsCompressingMemory] = useState<boolean>(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const isResizing = useRef(false);
+  const startX = useRef(0);
+  const startWidth = useRef(0);
+  const userScrolledUp = useRef(false);
+  const liveConversationMessagesRef = useRef<Record<string, ChatMessageData[]>>({});
+  const slideRendererRef = useRef<SlideRendererHandle>(null);
+  const conversationActivity = useSyncExternalStore(
+    subscribeConversationActivity,
+    getConversationActivitySnapshot,
+    getConversationActivitySnapshot,
+  );
+  const currentConversationKey = getConversationRequestKey(conversationId, projectId);
+  const currentConversationKeyRef = useRef(currentConversationKey);
+  const hasTriggeredExitPreviewRef = useRef(false);
+  useEffect(() => {
+    currentConversationKeyRef.current = currentConversationKey;
+  }, [currentConversationKey]);
+  const isCurrentConversationBusy = Boolean(conversationActivity[currentConversationKey]);
+  const agentTasks = useMemo(() => extractAgentTasks(messages), [messages]);
+  const adjustTextareaHeight = useCallback((element: HTMLTextAreaElement) => {
+    element.style.height = "auto";
+    const styles = window.getComputedStyle(element);
+    const lineHeight = Number.parseFloat(styles.lineHeight) || 20;
+    const paddingTop = Number.parseFloat(styles.paddingTop) || 0;
+    const paddingBottom = Number.parseFloat(styles.paddingBottom) || 0;
+    const maxHeight = lineHeight * 3 + paddingTop + paddingBottom;
+    const nextHeight = Math.min(element.scrollHeight, maxHeight);
+    element.style.height = `${nextHeight}px`;
+    element.style.overflowY = element.scrollHeight > maxHeight ? "auto" : "hidden";
+  }, []);
+  const loadConversationHistory = useCallback(async () => {
+    setIsConversationHistoryLoading(true);
+    try {
+      const response = await api.get("/conversations", {
+        params: projectId ? { projectId } : undefined,
+      });
+      const nextHistory: ConversationHistoryEntry[] = (response.data.conversations ?? []).map(
+        (entry: any) => ({
+          id: entry.id,
+          projectId: entry.projectId ?? null,
           title: entry.title ?? "Untitled",
           projectName: entry.projectName,
           createdAt: entry.createdAt,
@@ -647,6 +706,98 @@ function formatLastEdited(dateString: string) {
       let contentBlocks: any[] = [];
       let accumulatedText = "";
       let pendingTokens = false;
+      const gemmaControlTokens = ["<channel|>", "<|channel|>", "<tool_call|>", "<|tool_call|>"];
+      const fifoSegments: string[] = [];
+      const fifoWordChunkSize = 20;
+      let fifoCarry = "";
+      let fifoPauseUntilRefill = false;
+
+      const trailingControlPrefixLength = (value: string) => {
+        let maxPrefixLength = 0;
+        for (const token of gemmaControlTokens) {
+          for (let length = 1; length < token.length; length++) {
+            if (value.endsWith(token.slice(0, length)) && length > maxPrefixLength) {
+              maxPrefixLength = length;
+            }
+          }
+        }
+        return maxPrefixLength;
+      };
+
+      const countWordsInSegments = (segments: string[]) =>
+        segments.reduce((count, segment) => count + (segment.trim() ? 1 : 0), 0);
+
+      const flushWordChunk = () => {
+        const output: string[] = [];
+        let words = 0;
+        while (fifoSegments.length > 0) {
+          const segment = fifoSegments.shift()!;
+          output.push(segment);
+          if (segment.trim()) {
+            words += 1;
+            if (words >= fifoWordChunkSize) {
+              break;
+            }
+          }
+        }
+        return output.join("");
+      };
+
+      const flushAllSegments = () => {
+        const output = fifoSegments.join("");
+        fifoSegments.length = 0;
+        return output;
+      };
+
+      const enqueueGemmaTokenText = (rawToken: string, flushAll = false) => {
+        const beforeSanitize = fifoCarry + rawToken;
+        const hadControlToken = gemmaControlTokens.some((token) => beforeSanitize.includes(token));
+        let sanitized = beforeSanitize;
+        for (const token of gemmaControlTokens) {
+          sanitized = sanitized.split(token).join("");
+        }
+
+        const trailingPrefixLen = flushAll ? 0 : trailingControlPrefixLength(sanitized);
+        const pushable =
+          trailingPrefixLen > 0
+            ? sanitized.slice(0, sanitized.length - trailingPrefixLen)
+            : sanitized;
+        fifoCarry =
+          trailingPrefixLen > 0 ? sanitized.slice(sanitized.length - trailingPrefixLen) : "";
+
+        if (pushable) {
+          const parts = pushable.split(/(\s+)/);
+          for (const part of parts) {
+            if (part.length > 0) {
+              fifoSegments.push(part);
+            }
+          }
+        }
+
+        if (hadControlToken) {
+          fifoPauseUntilRefill = true;
+        }
+
+        const wordCount = countWordsInSegments(fifoSegments);
+        if (fifoPauseUntilRefill && wordCount < fifoWordChunkSize && !flushAll) {
+          return "";
+        }
+        if (fifoPauseUntilRefill && wordCount >= fifoWordChunkSize) {
+          fifoPauseUntilRefill = false;
+        }
+
+        if (flushAll) {
+          const tail = fifoCarry;
+          fifoCarry = "";
+          return flushAllSegments() + tail;
+        }
+
+        if (wordCount >= fifoWordChunkSize) {
+          return flushWordChunk();
+        }
+
+        return "";
+      };
       let thinkTimers: { startTime: number; endTime?: number }[] = [
         { startTime: thinkingStartedAt },
       ];
@@ -760,11 +911,18 @@ function formatLastEdited(dateString: string) {
                 setIsCompressingMemory(false);
                 pendingTokens = true;
               } else {
-                accumulatedText += tokenStr;
+                const nextChunk = enqueueGemmaTokenText(tokenStr);
+                if (!nextChunk) {
+                  continue;
+                }
+
+                accumulatedText += nextChunk;
                 if (thinkMode === "undecided") {
-                  const trimmed = tokenStr.trim();
+                  const trimmed = nextChunk.trim();
                   if (trimmed.length > 0) {
-                    thinkMode = tokenStr.trimStart().startsWith("<think>") ? "enabled" : "disabled";
+                    thinkMode = nextChunk.trimStart().startsWith("<think>")
+                      ? "enabled"
+                      : "disabled";
                   }
                 }
                 if (thinkMode === "disabled") {
@@ -872,7 +1030,15 @@ function formatLastEdited(dateString: string) {
                           slideId: layoutSlideId,
                           viewportWidth: 1920,
                           viewportHeight: 1080,
-                          tree: { tag: "body", x: 0, y: 0, width: 0, height: 0, children: [], text: "Slide iframe not available" },
+                          tree: {
+                            tag: "body",
+                            x: 0,
+                            y: 0,
+                            width: 0,
+                            height: 0,
+                            children: [],
+                            text: "Slide iframe not available",
+                          },
                         },
                       });
                       return;
@@ -897,14 +1063,113 @@ function formatLastEdited(dateString: string) {
                           slideId: layoutSlideId,
                           viewportWidth: 1920,
                           viewportHeight: 1080,
-                          tree: { tag: "body", x: 0, y: 0, width: 0, height: 0, children: [], text: "Extraction error" },
+                          tree: {
+                            tag: "body",
+                            x: 0,
+                            y: 0,
+                            width: 0,
+                            height: 0,
+                            children: [],
+                            text: "Extraction error",
+                          },
                         },
                       });
-                    } catch { /* best effort */ }
+                    } catch {
+                      /* best effort */
+                    }
                   }
                 })();
               }
             } else if (eventName === "done") {
+              const bufferedChunk = enqueueGemmaTokenText("", true);
+              if (bufferedChunk) {
+                accumulatedText += bufferedChunk;
+                pendingTokens = true;
+                if (thinkMode === "undecided") {
+                  const trimmed = bufferedChunk.trim();
+                  if (trimmed.length > 0) {
+                    thinkMode = bufferedChunk.trimStart().startsWith("<think>")
+                      ? "enabled"
+                      : "disabled";
+                  }
+                }
+
+                if (thinkMode === "disabled") {
+                  const reconstructedBlocks: any[] = [];
+                  for (const block of contentBlocks) {
+                    if (block.type === "tool_call" || block.type === "tool_result") {
+                      reconstructedBlocks.push(block);
+                    }
+                  }
+                  if (accumulatedText.trim()) {
+                    reconstructedBlocks.push({ type: "text", text: accumulatedText });
+                  }
+                  contentBlocks = reconstructedBlocks;
+                } else {
+                  const numThinkTags = accumulatedText.split("<think>").length - 1;
+                  while (thinkTimers.length < Math.max(1, numThinkTags)) {
+                    thinkTimers.push({ startTime: Date.now() });
+                  }
+                  const newTextThinkBlocks: any[] = [];
+                  let remaining = accumulatedText;
+                  let thinkIdx = 0;
+                  while (remaining) {
+                    const startIdx = remaining.indexOf("<think>");
+                    if (startIdx === -1) {
+                      if (remaining.trim()) {
+                        newTextThinkBlocks.push({ type: "text", text: remaining });
+                      }
+                      break;
+                    }
+                    if (startIdx > 0) {
+                      const textBefore = remaining.slice(0, startIdx);
+                      if (textBefore.trim()) {
+                        newTextThinkBlocks.push({ type: "text", text: textBefore });
+                      }
+                    }
+                    const endIdx = remaining.indexOf("</think>", startIdx);
+                    if (endIdx === -1) {
+                      const timer = thinkTimers[thinkIdx];
+                      newTextThinkBlocks.push({
+                        type: "think",
+                        text: remaining.slice(startIdx + 7).trim(),
+                        startTime: timer?.startTime,
+                        endTime: timer?.endTime,
+                      });
+                      break;
+                    }
+
+                    const timer = thinkTimers[thinkIdx];
+                    if (timer && !timer.endTime) {
+                      timer.endTime = Date.now();
+                    }
+                    newTextThinkBlocks.push({
+                      type: "think",
+                      text: remaining.slice(startIdx + 7, endIdx).trim(),
+                      startTime: timer?.startTime,
+                      endTime: timer?.endTime,
+                    });
+                    remaining = remaining.slice(endIdx + 8);
+                    thinkIdx++;
+                  }
+
+                  let textThinkCursor = 0;
+                  const reconstructedBlocks: any[] = [];
+                  for (const block of contentBlocks) {
+                    if (block.type === "tool_call" || block.type === "tool_result") {
+                      reconstructedBlocks.push(block);
+                    } else if (textThinkCursor < newTextThinkBlocks.length) {
+                      reconstructedBlocks.push(newTextThinkBlocks[textThinkCursor]);
+                      textThinkCursor++;
+                    }
+                  }
+                  while (textThinkCursor < newTextThinkBlocks.length) {
+                    reconstructedBlocks.push(newTextThinkBlocks[textThinkCursor]);
+                    textThinkCursor++;
+                  }
+                  contentBlocks = reconstructedBlocks;
+                }
+              }
               doneConvId = data.conversationId;
               break outer;
             } else if (eventName === "error") {
@@ -1360,15 +1625,17 @@ function formatLastEdited(dateString: string) {
           )}
         >
           <div className="h-9 shrink-0 border-b border-zinc-800/80 px-3 flex items-center justify-between bg-[#252526]">
-            <span className="text-[11px] uppercase tracking-[0.14em] text-zinc-400">
-              DESIGN.md
-            </span>
+            <span className="text-[11px] uppercase tracking-[0.14em] text-zinc-400">DESIGN.md</span>
             <button
               onClick={handleSaveDesign}
               disabled={isSavingDesign}
               className="flex items-center gap-1.5 px-2.5 py-1 text-xs bg-primary text-primary-foreground rounded hover:bg-primary/90 transition-colors disabled:opacity-50"
             >
-              {isSavingDesign ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
+              {isSavingDesign ? (
+                <Loader2 className="w-3 h-3 animate-spin" />
+              ) : (
+                <Save className="w-3 h-3" />
+              )}
               Save
             </button>
           </div>

@@ -32,7 +32,13 @@ export class QwenProvider implements ILLMService {
     private buildMessages(messages: any[], systemInstruction?: string) {
         const instruction = systemInstruction || "You are Vibe Agent, an expert frontend engineer creating beautiful web-native presentations. You communicate directly with the user to understand their slide deck needs. Keep slides modern, interactive, and visually stunning.";
         const formatted = messages.map(m => {
-            if (m.role === 'tool' || (m.role === 'user' && m.content && Array.isArray(m.content))) {
+            if (m.role === 'tool') {
+                return {
+                    role: 'user',
+                    content: `[Tool Result for ${m.tool_call_id || 'unknown'}]\n${typeof m.content === 'string' ? m.content : JSON.stringify(m.content)}`
+                };
+            }
+            if (m.role === 'user' && m.content && Array.isArray(m.content)) {
                 return {
                     role: 'user',
                     content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content)
