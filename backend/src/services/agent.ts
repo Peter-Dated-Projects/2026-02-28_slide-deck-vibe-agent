@@ -16,7 +16,7 @@ import * as fs from 'fs/promises';
 import * as os from 'os';
 import { VibeManager } from '../core/vibeManager';
 import { getTools, executeTool, type AgentRuntimeState, type AgentTaskItem, type OnLayoutRequest } from '../core/tools';
-import { loadDeckHtmlForProject, saveDeckHtmlForProject } from './projectDeck';
+import { loadDeckHtmlForProject, saveDeckHtmlForProject, loadDesignForProject, saveDesignForProject } from './projectDeck';
 const buildSystemInstructionWithTaskList = (baseInstruction: string, runtimeState: AgentRuntimeState) => {
     if (!runtimeState.tasks.length) {
         return `${baseInstruction}\n\nCurrent task checklist: (none yet)`;
@@ -117,13 +117,22 @@ const createConversationVibeManager = async (conversationId: string) => {
     const projectId = res.rows[0]?.project_id;
     if (!projectId) throw new Error("Project ID not found for conversation");
     const { html } = await loadDeckHtmlForProject(projectId);
+    const designMd = await loadDesignForProject(projectId);
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'vibe-agent-'));
     const tempFilePath = path.join(tempDir, `${projectId}.html`);
+    const designFilePath = path.join(tempDir, 'DESIGN.md');
     await fs.writeFile(tempFilePath, html, { encoding: 'utf-8' });
+    await fs.writeFile(designFilePath, designMd, { encoding: 'utf-8' });
     const vibeManager = await VibeManager.create(tempFilePath);
     const persist = async () => {
         const updatedHtml = await fs.readFile(tempFilePath, { encoding: 'utf-8' });
         await saveDeckHtmlForProject(projectId, updatedHtml);
+        try {
+            const updatedDesign = await fs.readFile(designFilePath, { encoding: 'utf-8' });
+            await saveDesignForProject(projectId, updatedDesign);
+        } catch (e) {
+            // design file might not exist or be accessible, ignore
+        }
     };
     const cleanup = async () => {
         await fs.rm(tempDir, { recursive: true, force: true });

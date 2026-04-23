@@ -274,3 +274,23 @@ export const saveDeckHtmlForProject = async (projectId: string, html: string): P
     });
     return s3Key;
 };
+
+export const getDesignKey = async (projectId: string, existingUserId?: string): Promise<string> => {
+    const userId = existingUserId || await getProjectOwner(projectId);
+    return `users/${userId}/${projectId}-design.md`;
+};
+
+export const loadDesignForProject = async (projectId: string): Promise<string> => {
+    try {
+        const key = await getDesignKey(projectId);
+        return await storageService.getFileContent(key);
+    } catch (e: any) {
+        // Return default template if not exists
+        return `# Presentation design spec\n\n## Intent\n\n## Structure\n\n## Visual language\n\n## Constraints\n`;
+    }
+};
+
+export const saveDesignForProject = async (projectId: string, md: string): Promise<void> => {
+    const key = await getDesignKey(projectId);
+    await storageService.uploadFile(key, md, 'text/markdown');
+};

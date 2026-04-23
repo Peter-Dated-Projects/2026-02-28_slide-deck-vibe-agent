@@ -37,6 +37,8 @@ import {
   Pencil,
   Plus,
   ChevronLeft,
+  FileText,
+  Save,
 } from "lucide-react";
 import { usePersistentWidth } from "../hooks/usePersistentWidth";
 import {
@@ -250,7 +252,9 @@ const ChatPage: React.FC = () => {
   const [conversationHistory, setConversationHistory] = useState<ConversationHistoryEntry[]>([]);
   const [isConversationHistoryLoading, setIsConversationHistoryLoading] = useState(true);
   const [isConversationHistoryOpen, setIsConversationHistoryOpen] = useState(false);
-  const [rightPanelTab, setRightPanelTab] = useState<"preview" | "html">("preview");
+  const [rightPanelTab, setRightPanelTab] = useState<"preview" | "html" | "design">("preview");
+  const [designContent, setDesignContent] = useState<string>("");
+  const [isSavingDesign, setIsSavingDesign] = useState<boolean>(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -519,8 +523,26 @@ const ChatPage: React.FC = () => {
         const presentationHtml = typeof res.data.html === "string" ? res.data.html : "";
         setSlides(formattedSlides.map((slide) => ({ ...slide, rawHtml: presentationHtml })));
       }
+      try {
+        const designRes = await api.get(`/projects/${id}/design`);
+        setDesignContent(designRes.data.design || "");
+      } catch (err) {
+        console.error("Failed to fetch design:", err);
+      }
     } catch (error) {
       console.error("Failed to fetch presentation:", error);
+    }
+  };
+
+  const handleSaveDesign = async () => {
+    if (!projectId) return;
+    setIsSavingDesign(true);
+    try {
+      await api.put(`/projects/${projectId}/design`, { design: designContent });
+    } catch (error) {
+      console.error("Failed to save design:", error);
+    } finally {
+      setIsSavingDesign(false);
     }
   };
   // ─────────────────────────────────────────────────────
@@ -1266,6 +1288,21 @@ const ChatPage: React.FC = () => {
               HTML
             </span>
           </button>
+          <button
+            type="button"
+            onClick={() => setRightPanelTab("design")}
+            className={cn(
+              "h-7 px-3 rounded-md text-xs font-medium transition-colors border",
+              rightPanelTab === "design"
+                ? "bg-primary text-primary-foreground border-primary"
+                : "bg-background/70 text-muted-foreground border-border hover:text-foreground hover:bg-muted/40",
+            )}
+          >
+            <span className="inline-flex items-center gap-1.5">
+              <FileText className="w-3.5 h-3.5" />
+              Design
+            </span>
+          </button>
         </div>
         <div
           className={cn(
@@ -1356,6 +1393,46 @@ const ChatPage: React.FC = () => {
               </p>
             </div>
           )}
+        </div>
+        <div
+          className={cn(
+            "absolute inset-x-2 bottom-2 top-24 rounded-lg border border-border bg-[#1e1e1e] text-zinc-100 overflow-hidden flex flex-col",
+            rightPanelTab === "design" ? "opacity-100 z-10" : "opacity-0 pointer-events-none z-0",
+          )}
+        >
+          <div className="h-9 shrink-0 border-b border-zinc-800/80 px-3 flex items-center justify-between bg-[#252526]">
+            <span className="text-[11px] uppercase tracking-[0.14em] text-zinc-400">
+              DESIGN.md
+            </span>
+            <button
+              onClick={handleSaveDesign}
+              disabled={isSavingDesign}
+              className="flex items-center gap-1.5 px-2.5 py-1 text-xs bg-primary text-primary-foreground rounded hover:bg-primary/90 transition-colors disabled:opacity-50"
+            >
+              {isSavingDesign ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
+              Save
+            </button>
+          </div>
+          <div className="flex-1 min-h-0 overflow-auto custom-scrollbar">
+            <Editor
+              height="100%"
+              defaultLanguage="markdown"
+              value={designContent}
+              onChange={(value) => setDesignContent(value || "")}
+              theme="vs-dark"
+              options={{
+                minimap: { enabled: false },
+                lineNumbers: "on",
+                fontSize: 13,
+                lineHeight: 22,
+                wordWrap: "on",
+                scrollBeyondLastLine: false,
+                renderLineHighlight: "line",
+                automaticLayout: true,
+                tabSize: 2,
+              }}
+            />
+          </div>
         </div>
       </div>
     </div>
