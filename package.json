@@ -21,6 +21,7 @@
   },
   "dependencies": {
     "playwright-core": "^1.58.2",
-    "sharp": "^0.34.5"
+    "sharp": "^0.34.5",
+    "vibe-slide-root": "."
   }
 }
