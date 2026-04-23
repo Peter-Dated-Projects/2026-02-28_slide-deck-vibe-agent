@@ -283,6 +283,14 @@ export class OllamaProvider implements ILLMService {
                             onChunk('</think>');
                             fullText += '</think>';
                         }
+                        // Some models emit tool calls inline in regular text content
+                        // (e.g., <execute_tool>...</execute_tool>) instead of native tool fields.
+                        if (toolCallsCollected.length === 0 && fullText.trim()) {
+                            const textToolCalls = extractToolCallsFromText(fullText);
+                            if (textToolCalls.length > 0) {
+                                toolCallsCollected.push(...textToolCalls);
+                            }
+                        }
                         // Emit all collected tool calls at the end
                         if (toolCallsCollected.length > 0) {
                             const tcStr = JSON.stringify({ type: 'tool_calls', tool_calls: toolCallsCollected });
@@ -296,6 +304,12 @@ export class OllamaProvider implements ILLMService {
             }
         }
         // Final check: emit any collected tool calls
+        if (toolCallsCollected.length === 0 && fullText.trim()) {
+            const textToolCalls = extractToolCallsFromText(fullText);
+            if (textToolCalls.length > 0) {
+                toolCallsCollected.push(...textToolCalls);
+            }
+        }
         if (toolCallsCollected.length > 0) {
             const tcStr = JSON.stringify({ type: 'tool_calls', tool_calls: toolCallsCollected });
             onChunk(`[TOOL_CALLS]${tcStr}[/TOOL_CALLS]`);

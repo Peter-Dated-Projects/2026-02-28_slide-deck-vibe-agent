@@ -213,11 +213,9 @@
         }
         function settleSlideFromScroll() {
             if (!container) return;
-            const observedIndex = Math.round(container.scrollTop / window.innerHeight);
-            const maxStepDown = activeSlideIndex + 1;
-            const maxStepUp = activeSlideIndex - 1;
-            const oneStepIndex = Math.max(maxStepUp, Math.min(maxStepDown, observedIndex));
-            goToSlide(oneStepIndex);
+            // Sync active index with user scroll position without forcing an auto-transition.
+            const observedIndex = clampSlideIndex(Math.round(container.scrollTop / window.innerHeight));
+            activeSlideIndex = observedIndex;
         }
         if (container) {
             container.addEventListener('scroll', () => {
