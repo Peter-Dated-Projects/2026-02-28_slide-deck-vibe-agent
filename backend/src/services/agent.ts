@@ -17,6 +17,7 @@ import * as os from 'os';
 import { VibeManager } from '../core/vibeManager';
 import { getTools, executeTool, type AgentRuntimeState, type AgentTaskItem, type OnLayoutRequest } from '../core/tools';
 import { loadDeckHtmlForProject, saveDeckHtmlForProject, loadDesignForProject, saveDesignForProject } from './projectDeck';
+import { ContextManager } from './contextManager';
 const buildSystemInstructionWithTaskList = (baseInstruction: string, runtimeState: AgentRuntimeState) => {
     if (!runtimeState.tasks.length) {
         return `${baseInstruction}\n\nCurrent task checklist: (none yet)`;
@@ -146,15 +147,21 @@ export const chatWithAgent = async (conversationId: string, messages: any[]) => 
     let currentMessages = [...messages];
     let turnCount = 0;
     const maxTurns = 100;
+
+    // Fetch context memory for assembleContext
+    const memRes = await db.query('SELECT edit_log, summary FROM conversations WHERE id = $1', [conversationId]);
+    const { edit_log: editLog = '', summary: convSummary = '' } = memRes.rows[0] || {};
+
     try {
         while (turnCount < maxTurns) {
             turnCount++;
             const dynamicSystemInstruction = buildSystemInstructionWithTaskList(systemInstruction, runtimeState);
+            const assembledContext = ContextManager.assembleContext(dynamicSystemInstruction, editLog, convSummary, currentMessages);
             const result = await llmService.chatWithAgent(
                 conversationId,
-                sanitizeMessagesForLlm(currentMessages),
+                sanitizeMessagesForLlm(assembledContext.messages),
                 tools,
-                dynamicSystemInstruction
+                assembledContext.systemInstruction
             );
             if (result.stop_reason === 'tool_calls' && result.tool_calls) {
                 const safeToolCalls = sanitizeToolCalls(result.tool_calls);
@@ -224,9 +231,16 @@ export const chatWithAgentStream = async (
         let currentMessages = [...messages];
         let turnCount = 0;
         const maxTurns = 100;
+        
+        // Fetch context memory
+        const memRes = await db.query('SELECT edit_log, summary FROM conversations WHERE id = $1', [conversationId]);
+        const { edit_log: editLog = '', summary: convSummary = '' } = memRes.rows[0] || {};
+        
         while (turnCount < maxTurns) {
             turnCount++;
         const dynamicSystemInstruction = buildSystemInstructionWithTaskList(systemInstruction, runtimeState);
+        const assembledContext = ContextManager.assembleContext(dynamicSystemInstruction, editLog, convSummary, currentMessages);
+        
         let localToolCalls: any[] = [];
         let localText = '';
         // Wrap the callback to intercept the tool_calls event
@@ -251,10 +265,10 @@ export const chatWithAgentStream = async (
         };
            await llmService.chatWithAgentStream(
                conversationId,
-               sanitizeMessagesForLlm(currentMessages),
+               sanitizeMessagesForLlm(assembledContext.messages),
                wrappedCallback,
                tools,
-               dynamicSystemInstruction
+               assembledContext.systemInstruction
            );
         if (localToolCalls.length > 0) {
              const safeToolCalls = sanitizeToolCalls(localToolCalls);

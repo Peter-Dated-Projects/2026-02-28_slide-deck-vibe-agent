@@ -102,4 +102,25 @@ BEGIN
 	END IF;
 END $$;
 
+-- 6. Context compression: add edit_log and summary to conversations, is_compressed to messages.
+DO $$
+BEGIN
+	IF EXISTS (
+		SELECT 1
+		FROM information_schema.tables
+		WHERE table_schema = 'public' AND table_name = 'conversations'
+	) THEN
+		EXECUTE 'ALTER TABLE conversations ADD COLUMN IF NOT EXISTS edit_log TEXT';
+		EXECUTE 'ALTER TABLE conversations ADD COLUMN IF NOT EXISTS summary TEXT';
+	END IF;
+
+	IF EXISTS (
+		SELECT 1
+		FROM information_schema.tables
+		WHERE table_schema = 'public' AND table_name = 'messages'
+	) THEN
+		EXECUTE 'ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_compressed BOOLEAN DEFAULT FALSE';
+	END IF;
+END $$;
+
 COMMIT;

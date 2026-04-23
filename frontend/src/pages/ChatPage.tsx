@@ -24,6 +24,7 @@ import api, { getAccessToken } from "../api";
 import { SlideRenderer, type SlideData, type SlideRendererHandle } from "../components/SlideRenderer";
 import { extractLayoutFromIframe } from "../lib/layoutExtractor";
 import { ChatMessage, type ChatMessageData } from "../components/chat/ChatMessage";
+import { parseGemmaContentBlocks, type GemmaContentBlock } from "../lib/gemmaOutputParser";
 import { TaskListBar, type AgentTask } from "../components/chat/TaskListBar";
 import {
   Send,
@@ -77,21 +78,6 @@ function generateId() {
 }
 function getConversationRequestKey(conversationId?: string, projectId?: string | null) {
   return conversationId ?? `draft:${projectId ?? "global"}`;
-}
-function parseStreamSnapshot(snapshot: string) {
-  const thinkStarts = snapshot.split("<think>").length - 1;
-  const thinkEnds = snapshot.split("</think>").length - 1;
-  let isThinking = thinkStarts > thinkEnds;
-  if (!isThinking && thinkStarts === thinkEnds) {
-    const stripped = snapshot.trim();
-    const prefixes = ["<think", "<thin", "<thi", "<th", "<t", "<"];
-    if (prefixes.includes(stripped) || !stripped) {
-      if (snapshot.length < 8) {
-        isThinking = true;
-      }
-    }
-  }
-  return { isThinking, thinkingContent: "", content: snapshot };
 }
 function parseJsonSafely(value: unknown) {
   if (typeof value !== "string") {
@@ -219,85 +205,45 @@ function formatLastEdited(dateString: string) {
       return relativeTimeFormatter
         .format(Math.round(diffSeconds / secondsPerUnit), unit)
         .toLowerCase();
-    }
-  }
-  return relativeTimeFormatter.format(diffSeconds, "second").toLowerCase();
-}
-// ─────────────────────────────────────────────────────
-// ChatPage
-// ─────────────────────────────────────────────────────
-const ChatPage: React.FC = () => {
-  const { conversationId } = useParams<{ conversationId?: string }>();
-  const [searchParams] = useSearchParams();
-  const projectId = searchParams.get("projectId");
-  const navigate = useNavigate();
-  const { user, logout } = useAuth();
-  const [messages, setMessages] = useState<ChatMessageData[]>([]);
-  const [input, setInput] = useState("");
-  const [historyLoading, setHistoryLoading] = useState(false);
-  const [slides, setSlides] = useState<SlideData[]>([]);
-  const [currentSlideIndex] = useState(0);
-  const [showSettings, setShowSettings] = useState(false);
-  const [isDeleting, setIsDeleting] = useState(false);
-  const [sidebarWidth, setSidebarWidth] = usePersistentWidth({
-    storageKey: "vibe-agent.chat-sidebar-width",
-    defaultWidth: 380,
-    minWidth: 350,
-    maxWidth: 550,
-  });
-  const [isResizingState, setIsResizingState] = useState(false);
-  const [deckTitle, setDeckTitle] = useState("New Chat");
-  const [conversationTitle, setConversationTitle] = useState("New Chat");
-  const [isTitleFocused, setIsTitleFocused] = useState(false);
-  const [conversationHistory, setConversationHistory] = useState<ConversationHistoryEntry[]>([]);
-  const [isConversationHistoryLoading, setIsConversationHistoryLoading] = useState(true);
-  const [isConversationHistoryOpen, setIsConversationHistoryOpen] = useState(false);
-  const [rightPanelTab, setRightPanelTab] = useState<"preview" | "html" | "design">("preview");
-  const [designContent, setDesignContent] = useState<string>("");
-  const [isSavingDesign, setIsSavingDesign] = useState<boolean>(false);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const messagesContainerRef = useRef<HTMLDivElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const isResizing = useRef(false);
-  const startX = useRef(0);
-  const startWidth = useRef(0);
-  const userScrolledUp = useRef(false);
-  const liveConversationMessagesRef = useRef<Record<string, ChatMessageData[]>>({});
-  const slideRendererRef = useRef<SlideRendererHandle>(null);
-  const conversationActivity = useSyncExternalStore(
-    subscribeConversationActivity,
-    getConversationActivitySnapshot,
-    getConversationActivitySnapshot,
-  );
-  const currentConversationKey = getConversationRequestKey(conversationId, projectId);
-  const currentConversationKeyRef = useRef(currentConversationKey);
-  const hasTriggeredExitPreviewRef = useRef(false);
-  useEffect(() => {
-    currentConversationKeyRef.current = currentConversationKey;
-  }, [currentConversationKey]);
-  const isCurrentConversationBusy = Boolean(conversationActivity[currentConversationKey]);
-  const agentTasks = useMemo(() => extractAgentTasks(messages), [messages]);
-  const adjustTextareaHeight = useCallback((element: HTMLTextAreaElement) => {
-    element.style.height = "auto";
-    const styles = window.getComputedStyle(element);
-    const lineHeight = Number.parseFloat(styles.lineHeight) || 20;
-    const paddingTop = Number.parseFloat(styles.paddingTop) || 0;
-    const paddingBottom = Number.parseFloat(styles.paddingBottom) || 0;
-    const maxHeight = lineHeight * 3 + paddingTop + paddingBottom;
-    const nextHeight = Math.min(element.scrollHeight, maxHeight);
-    element.style.height = `${nextHeight}px`;
-    element.style.overflowY = element.scrollHeight > maxHeight ? "auto" : "hidden";
-  }, []);
-  const loadConversationHistory = useCallback(async () => {
-    setIsConversationHistoryLoading(true);
-    try {
-      const response = await api.get("/conversations", {
-        params: projectId ? { projectId } : undefined,
-      });
-      const nextHistory: ConversationHistoryEntry[] = (response.data.conversations ?? []).map(
-        (entry: any) => ({
-          id: entry.id,
-          projectId: entry.projectId ?? null,
+                const parsedBlocks = parseGemmaContentBlocks(accumulatedText);
+                const visibleBlocks: GemmaContentBlock[] = parsedBlocks.map((block, index) => {
+                  if (block.type === "think") {
+                    const timer = thinkTimers[index] ?? { startTime: Date.now() };
+                    if (!thinkTimers[index]) {
+                      thinkTimers[index] = timer;
+                    }
+                    if (!block.isOpen && !timer.endTime) {
+                      timer.endTime = Date.now();
+                    }
+                    return {
+                      ...block,
+                      content: block.content,
+                      isOpen: block.isOpen,
+                      startTime: timer.startTime,
+                      endTime: timer.endTime,
+                      text: block.content,
+                    } as GemmaContentBlock & { text?: string; startTime?: number; endTime?: number };
+                  }
+                  if (block.type === "text") {
+                    return { ...block, text: block.content } as GemmaContentBlock & { text?: string };
+                  }
+                  return block;
+                });
+                const reconstructedBlocks: any[] = [];
+                let visibleCursor = 0;
+                for (const block of contentBlocks) {
+                  if (block.type === "tool_call" || block.type === "tool_result") {
+                    reconstructedBlocks.push(block);
+                  } else if (visibleCursor < visibleBlocks.length) {
+                    reconstructedBlocks.push(visibleBlocks[visibleCursor]);
+                    visibleCursor++;
+                  }
+                }
+                while (visibleCursor < visibleBlocks.length) {
+                  reconstructedBlocks.push(visibleBlocks[visibleCursor]);
+                  visibleCursor++;
+                }
+                contentBlocks = reconstructedBlocks;
           title: entry.title ?? "Untitled",
           projectName: entry.projectName,
           createdAt: entry.createdAt,
@@ -807,6 +753,12 @@ const ChatPage: React.FC = () => {
                 } catch (e) {}
               } else if (tokenStr === "[PRESENTATION_UPDATED]") {
                 requestPresentationRefresh();
+              } else if (tokenStr === "[COMPRESSING_MEMORY]") {
+                setIsCompressingMemory(true);
+                pendingTokens = true;
+              } else if (tokenStr === "[COMPRESSION_DONE]") {
+                setIsCompressingMemory(false);
+                pendingTokens = true;
               } else {
                 accumulatedText += tokenStr;
                 if (thinkMode === "undecided") {
@@ -988,6 +940,7 @@ const ChatPage: React.FC = () => {
         ),
       );
     } finally {
+      setIsCompressingMemory(false);
       if (stopTrackingConversation) {
         stopTrackingConversation();
       }
@@ -1180,6 +1133,12 @@ const ChatPage: React.FC = () => {
             </div>
           )}
           {!historyLoading && messages.map((m) => <ChatMessage key={m.id} message={m} />)}
+          {isCompressingMemory && (
+            <div className="flex items-center gap-2 px-4 py-3 text-xs text-muted-foreground bg-muted/30 rounded-lg animate-pulse">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              <span>Compressing memory...</span>
+            </div>
+          )}
           <div ref={messagesEndRef} />
           <div aria-hidden="true" className="h-[30%] min-h-20" />
         </div>
