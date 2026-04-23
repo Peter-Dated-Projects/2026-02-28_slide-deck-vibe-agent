@@ -21,13 +21,15 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css" rel="stylesheet">
     <style>
-        /* --- CORE ENGINE (READ ONLY) --- */
+        /* --- CORE ENGINE (READ ONLY) ---
+           Do not edit the structural rules in this block. Only change values inside the marked theme, transition, and animation sections below. */
         :root {
             --base-width: 1920px;
             --base-height: 1080px;
             --vibe-scale: 1;
         }
-        /* <!-- VIBE_THEME_START --> */
+        /* <!-- VIBE_THEME_START -->
+           Editable: update colors, font, and other theme tokens only. Avoid layout or behavior changes here. */
         :root {
             --vibe-primary: #6366f1;
             --vibe-secondary: #ec4899;
@@ -37,7 +39,8 @@
             --vibe-font: 'Inter', system-ui, sans-serif;
         }
         /* <!-- VIBE_THEME_END --> */
-        /* <!-- VIBE_TRANSITIONS_START --> */
+        /* <!-- VIBE_TRANSITIONS_START -->
+           Editable: tune slide transition behavior here only. Keep selectors scoped to the transition block. */
         .slide-container {
             scroll-behavior: smooth;
             perspective: 2000px;
@@ -47,7 +50,8 @@
             transition: opacity 0.8s ease-in-out;
         }
         /* <!-- VIBE_TRANSITIONS_END --> */
-        /* <!-- VIBE_ANIMATIONS_START --> */
+        /* <!-- VIBE_ANIMATIONS_START -->
+           Editable: add or adjust animation keyframes and utility classes here only. */
         @keyframes vibe-float {
             0% { transform: translateY(0px); }
             50% { transform: translateY(-20px); }
@@ -97,6 +101,7 @@
 </head>
 <body class="vibe-transition-fade">
     <!-- VIBE_GLOBAL_UI_START -->
+    <!-- Editable: global chrome lives here. You may change branding text, coordinate labels, and button styling, but keep the slide navigation handlers intact. -->
     <div class="fixed inset-0 pointer-events-none z-50 flex flex-col justify-between p-10">
         <!-- HEADER: Global Brand Layer. Edit the brand text, build label, or styling here without touching slide content. -->
         <header class="flex justify-between items-center opacity-40">
@@ -119,7 +124,7 @@
     </div>
     <!-- VIBE_GLOBAL_UI_END -->
     <div class="slide-container" id="vibe-deck">
-        <!-- VIBE_SLIDES_CONTAINER_START: Add, remove, or reorder slides here. Keep each slide wrapped in matching VIBE_SLIDE_ID markers. -->
+        <!-- VIBE_SLIDES_CONTAINER_START: Editable region. Add, remove, reorder, or rewrite slides here. Do not edit the engine script below from inside slide markup. -->
         <!-- VIBE_SLIDE_ID:550e8400-e29b-41d4-a716-446655440000_START -->
         <section class="slide" id="slide-550e8400">
             <div class="slide-aspect-ratio-box justify-center items-center">
@@ -159,9 +164,9 @@
             </div>
         </section>
         <!-- VIBE_SLIDE_ID:a1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d_END -->
-        <!-- VIBE_SLIDES_CONTAINER_END: Keep slide content inside this container so navigation and scaling continue to work. -->
+        <!-- VIBE_SLIDES_CONTAINER_END: Stop editing slide content above this line. Keep all slides inside the container so navigation and scaling continue to work. -->
     </div>
-    <!-- VIBE_MANIFEST_START: Update engine metadata here and keep active_slides in sync with the slide IDs above. -->
+    <!-- VIBE_MANIFEST_START: Editable metadata block. Update engine_version, project_id, theme_id, transition_style, and active_slides only. -->
     <script id="vibe-manifest" type="application/json">
     {
         "engine_version": "3.0.0",
@@ -174,8 +179,9 @@
         ]
     }
     </script>
-    <!-- VIBE_MANIFEST_END: Only change values that the runtime reads from this manifest block. -->
+    <!-- VIBE_MANIFEST_END: Do not add app logic here. This block is for manifest data only. -->
     <script>
+        // Read-only engine runtime below. Edit only if you are intentionally changing navigation behavior.
         const container = document.getElementById('vibe-deck');
         let activeSlideIndex = 0;
         let settleTimer = null;
