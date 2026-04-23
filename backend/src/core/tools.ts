@@ -14,6 +14,7 @@ import OpenAI from 'openai';
 import { VibeManager } from './vibeManager';
 import { layoutRequestStore, type LayoutResponse } from './layoutRequestStore';
 import * as crypto from 'crypto';
+const HTML_DOCUMENT_LINES_PER_SECTION = 50;
 type ToolResult = {
     success?: boolean;
     error?: string;
@@ -275,6 +276,20 @@ export const getTools = async (vibeManager: VibeManager): Promise<{ tools: OpenA
         {
             type: 'function',
             function: {
+                name: 'read_html_document',
+                description: 'Read the HTML document in 50-line sections. Provide page and sections on every call; returns the requested chunk plus the document line count.',
+                parameters: {
+                    type: 'object',
+                    properties: {
+                        page: { type: 'number', description: '1-based section page to start reading from.' },
+                        sections: { type: 'number', description: 'Number of 50-line sections to read.' }
+                    }
+                }
+            }
+        },
+        {
+            type: 'function',
+            function: {
                 name: 'read_theme',
                 description: 'Read deck-wide theme CSS and return hash.',
                 parameters: { type: 'object', properties: {} }
@@ -468,7 +483,7 @@ Note: The underlying tools use legacy terminology like "slide" and "deck", but t
 **Core Guidelines:**
 1. **Component Management:** Use \`slide_id\` (component ID) for all write operations (index writes are not allowed). Always read before write and pass the returned hash (OCC).
 2. **Structure & Formatting:** Every component MUST strictly follow the templated format laid out in our \`template.html\` file. Specifically, each component MUST be wrapped in a \`<section class="slide">\` tag to maintain scroll-snap alignment, and its content must be placed inside a \`<div class="slide-aspect-ratio-box">\` to ensure correct rendering.
-3. **Global State:** Use read/write tools for themes, transitions, animations, and global UI. Use manifest tools or reorder_slides/move_slide to control active slide order.
+3. **Global State:** Use read/write tools for the full HTML document, themes, transitions, animations, and global UI. Use manifest tools or reorder_slides/move_slide to control active slide order.
 4. **Updates:** Keep progress updates brief. When a tool finishes, briefly explain what you did and your current status. After structural edits, call validate_deck_state.
 
 At the start of every new session, call \`read_design()\` before responding to the user. Use the contents to orient yourself — do not ask the user to re-explain decisions that are already documented. If DESIGN.md is empty, ask the user for the presentation's core intent and structure, then call \`write_design()\` to record it before proceeding.
@@ -632,7 +647,17 @@ export const executeTool = async (
                 writes.push({ slide_id: slide.id, index: slide.index, success: true, message: `Updated slide ${slide.id}` });
             }
             const anySuccess = writes.some((w) => w.success);
-            return formatResult({ success: true, writes, mutated: anySuccess, entities_changed: anySuccess ? ['slides'] : [] });
+            const failedWrites = writes.filter((w) => !w.success);
+            const hasFailures = failedWrites.length > 0;
+            return formatResult({
+                success: !hasFailures,
+                error: hasFailures
+                    ? `write_slide failed for ${failedWrites.length} of ${writes.length} write(s).`
+                    : undefined,
+                writes,
+                mutated: anySuccess,
+                entities_changed: anySuccess ? ['slides'] : []
+            });
         }
         if (name === 'add_slide') {
             if (!args?.newHtml) {
@@ -684,6 +709,26 @@ export const executeTool = async (
             }
             await vibeManager.setManifest(args.manifest);
             return formatResult({ success: true, mutated: true, entities_changed: ['manifest'] });
+        }
+        if (name === 'read_html_document') {
+            const page = Number(args?.page || 1);
+            const sections = Number(args?.sections || 1);
+            if (isNaN(page) || isNaN(sections) || page < 1 || sections < 1) {
+                return formatResult({ error: 'Missing or invalid page/sections. Both must be positive numbers.', mutated: false });
+            }
+            const documentSection = vibeManager.getDocumentSection(page, sections, HTML_DOCUMENT_LINES_PER_SECTION);
+            return formatResult({
+                success: true,
+                html: documentSection.html,
+                hash: hashOf(documentSection.html),
+                page,
+                sections,
+                lines_per_section: HTML_DOCUMENT_LINES_PER_SECTION,
+                start_line: documentSection.startLine + 1,
+                end_line: documentSection.endLine,
+                max_length: documentSection.maxLength,
+                mutated: false
+            });
         }
         if (name === 'reorder_slides') {
             if (!Array.isArray(args?.active_slides)) {

@@ -59,6 +59,27 @@ export class VibeManager {
     getContentSnapshot(): string {
         return this.content;
     }
+    getDocumentHtml(): string {
+        return this.content;
+    }
+    getDocumentLineCount(): number {
+        return this.content.split(/\r?\n/).length;
+    }
+    getDocumentSection(page: number, sections: number, linesPerSection = 50): { html: string; maxLength: number; startLine: number; endLine: number } {
+        const safePage = Math.max(1, Math.floor(page || 1));
+        const safeSections = Math.max(1, Math.floor(sections || 1));
+        const safeLinesPerSection = Math.max(1, Math.floor(linesPerSection || 50));
+        const lines = this.content.split(/\r?\n/);
+        const maxLength = lines.length;
+        const startLine = (safePage - 1) * safeLinesPerSection;
+        const endLine = Math.min(startLine + safeSections * safeLinesPerSection, maxLength);
+        return {
+            html: lines.slice(startLine, endLine).join('\n'),
+            maxLength,
+            startLine,
+            endLine
+        };
+    }
     async restoreContentSnapshot(snapshot: string): Promise<void> {
         this.content = snapshot;
         await this.save();

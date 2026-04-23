@@ -22,6 +22,8 @@ import { chatWithAgent, chatWithAgentStream } from './src/services/agent';
 import { loadDeckHtmlForProject, loadDesignForProject, saveDesignForProject } from './src/services/projectDeck';
 import { config } from './src/config';
 import { layoutRequestStore } from './src/core/layoutRequestStore';
+import { ContextManager } from './src/services/contextManager';
+
 const app = express();
 const getTitleFromFirstRequest = (message: string) => message.trim().slice(0, 150);
 const updateTitleFromFirstRequestIfNeeded = async (
@@ -194,21 +196,23 @@ app.post('/api/chat', requireAuth, async (req: AuthRequest, res: express.Respons
             [currentConvId, 'user', JSON.stringify({ text: message })]
         );
         await touchConversationActivity(currentConvId);
-        // Fetch conversation history
-        const historyResult = await db.query(
-            'SELECT role, content, tool_calls, tool_call_id, tool_results FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC',
+        // Fetch conversation metadata for compression
+        const convMetaResult = await db.query('SELECT edit_log, summary FROM conversations WHERE id = $1', [currentConvId]);
+        const { edit_log: editLog = '', summary: convSummary = '' } = convMetaResult.rows[0] || {};
+
+        // Fetch only uncompressed messages
+        let historyResult = await db.query(
+            'SELECT role, content, tool_calls, tool_call_id, tool_results FROM messages WHERE conversation_id = $1 AND is_compressed = FALSE ORDER BY created_at ASC',
             [currentConvId]
         );
-        let messagesContext: any[] = historyResult.rows.map((row: any) => {
+        const mapMessagesNonStream = (rows: any[]) => rows.map((row: any) => {
             const raw = row.content;
             let text: string;
             if (typeof raw === 'string') {
                 text = raw;
             } else if (raw?.text) {
-                // user messages: { text: "..." }
                 text = raw.text;
             } else if (Array.isArray(raw)) {
-                // assistant messages blocks
                 text = raw.map((b: any) => {
                     if (b.type === 'text') return b.text || b.content || "";
                     if (b.type === 'think') return `<think>\n${b.text || b.content || ""}\n</think>`;
@@ -219,6 +223,19 @@ app.post('/api/chat', requireAuth, async (req: AuthRequest, res: express.Respons
             }
             return { role: row.role as string, content: text };
         });
+        let messagesContext: any[] = mapMessagesNonStream(historyResult.rows);
+
+        // Budget check — run compression silently (no SSE in non-streaming path)
+        const noopEvent = (_event: string, _data: string) => {};
+        if (ContextManager.checkBudget('', editLog, convSummary, messagesContext)) {
+            await ContextManager.runCompressionPass(currentConvId, noopEvent);
+            historyResult = await db.query(
+                'SELECT role, content, tool_calls, tool_call_id, tool_results FROM messages WHERE conversation_id = $1 AND is_compressed = FALSE ORDER BY created_at ASC',
+                [currentConvId]
+            );
+            messagesContext = mapMessagesNonStream(historyResult.rows);
+        }
+
         // Call Agent
         let agentResponse = await chatWithAgent(currentConvId, messagesContext);
         // Save Final Assistant Response
@@ -302,12 +319,16 @@ app.post('/api/chat/stream', requireAuth, async (req: AuthRequest, res: express.
             [currentConvId, 'user', JSON.stringify({ text: message })]
         );
         await touchConversationActivity(currentConvId);
-        // Fetch conversation history
-        const historyResult = await db.query(
-            'SELECT role, content, tool_calls, tool_call_id, tool_results FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC',
+        // Context Compression Pass
+        const convMetadataResult = await db.query('SELECT edit_log, summary FROM conversations WHERE id = $1', [currentConvId]);
+        const { edit_log: editLog = '', summary: convSummary = '' } = convMetadataResult.rows[0] || {};
+        
+        let uncompressedMessagesResult = await db.query(
+            'SELECT role, content, tool_calls, tool_call_id, tool_results FROM messages WHERE conversation_id = $1 AND is_compressed = FALSE ORDER BY created_at ASC',
             [currentConvId]
         );
-        const messagesContext: any[] = historyResult.rows.map((row: any) => {
+        
+        const mapMessages = (rows: any[]) => rows.map((row: any) => {
             const raw = row.content;
             let text: string;
             if (typeof raw === 'string') {
@@ -323,8 +344,27 @@ app.post('/api/chat/stream', requireAuth, async (req: AuthRequest, res: express.
             } else {
                 text = JSON.stringify(raw);
             }
-            return { role: row.role as string, content: text };
+            return { 
+                role: row.role as string, 
+                content: text,
+                tool_calls: row.tool_calls,
+                tool_results: row.tool_results,
+                tool_call_id: row.tool_call_id
+            };
         });
+
+        let messagesContext = mapMessages(uncompressedMessagesResult.rows);
+
+        // Pre-generation budget check
+        if (ContextManager.checkBudget('', editLog, convSummary, messagesContext)) {
+            await ContextManager.runCompressionPass(currentConvId, send);
+            // Re-fetch after compression
+            uncompressedMessagesResult = await db.query(
+                'SELECT role, content, tool_calls, tool_call_id, tool_results FROM messages WHERE conversation_id = $1 AND is_compressed = FALSE ORDER BY created_at ASC',
+                [currentConvId]
+            );
+            messagesContext = mapMessages(uncompressedMessagesResult.rows);
+        }
         const streamedToolCalls: any[] = [];
         const streamedToolResults: any[] = [];
         let contentBlocks: any[] = [];

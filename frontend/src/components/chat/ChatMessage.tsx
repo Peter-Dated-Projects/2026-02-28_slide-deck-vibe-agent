@@ -3,9 +3,9 @@
  * (c) 2026 Freedom, LLC.
  * This file is part of the SlideDeckVibeAgent System.
  *
- * All Rights Reserved. This code is the confidential and proprietary 
- * information of Freedom, LLC ("Confidential Information"). You shall not 
- * disclose such Confidential Information and shall use it only in accordance 
+ * All Rights Reserved. This code is the confidential and proprietary
+ * information of Freedom, LLC ("Confidential Information"). You shall not
+ * disclose such Confidential Information and shall use it only in accordance
  * with the terms of the license agreement you entered into with Freedom, LLC.
  * ---------------------------------------------------------------------------
  */
@@ -15,6 +15,7 @@ import { ChevronDown, ChevronRight, Brain, Copy, Check, Wrench } from "lucide-re
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
+import { parseGemmaContentBlocks } from "../../lib/gemmaOutputParser";
 // Import a highlight.js theme (GitHub Dark — works well on both light and dark UI)
 import "highlight.js/styles/github-dark-dimmed.css";
 // ─────────────────────────────────────────────────────
@@ -44,100 +45,6 @@ export interface ChatMessageData {
 // ─────────────────────────────────────────────────────
 function cn(...classes: (string | undefined | null | false)[]) {
   return classes.filter(Boolean).join(" ");
-}
-interface ContentBlock {
-  type: "text" | "think" | "execute_tool";
-  content: string;
-  toolName?: string;
-  toolArgs?: Record<string, string>;
-}
-
-/**
- * Parse a raw message string into an ordered list of blocks.
- * Recognised block tags:
- *  - <think>…</think>
- *  - <execute_tool>…</execute_tool>  (Gemma 4 format)
- */
-function parseContentBlocks(content: string): ContentBlock[] {
-  const blocks: ContentBlock[] = [];
-  let remaining = content;
-
-  // Regex that matches the opening of either special tag
-  const tagOpen = /<(think|execute_tool)>/;
-
-  while (remaining) {
-    const openMatch = tagOpen.exec(remaining);
-    if (!openMatch) {
-      // No more special tags — rest is plain text
-      if (remaining.trim()) blocks.push({ type: "text", content: remaining });
-      break;
-    }
-
-    const tagName = openMatch[1] as "think" | "execute_tool";
-    const openIdx = openMatch.index;
-
-    // Push any text before the tag
-    if (openIdx > 0) {
-      const before = remaining.slice(0, openIdx);
-      if (before.trim()) blocks.push({ type: "text", content: before });
-    }
-
-    const closeTag = `</${tagName}>`;
-    const afterOpen = remaining.slice(openIdx + openMatch[0].length);
-    const closeIdx = afterOpen.indexOf(closeTag);
-
-    if (closeIdx === -1) {
-      // Unclosed tag — treat rest as this block type
-      const inner = afterOpen;
-      if (tagName === "execute_tool") {
-        blocks.push(parseExecuteToolBlock(inner));
-      } else {
-        blocks.push({ type: "think", content: inner });
-      }
-      break;
-    } else {
-      const inner = afterOpen.slice(0, closeIdx).trim();
-      if (tagName === "execute_tool") {
-        blocks.push(parseExecuteToolBlock(inner));
-      } else {
-        blocks.push({ type: "think", content: inner });
-      }
-      remaining = afterOpen.slice(closeIdx + closeTag.length);
-    }
-  }
-
-  return blocks;
-}
-
-/**
- * Parse the inner text of an `<execute_tool>` block into a structured block.
- * Expected format (Gemma 4):
- *   function_name{key:<|"|>value<|"|>, key2:<|"|>value2<|"|>}<tool_call|>
- */
-function parseExecuteToolBlock(raw: string): ContentBlock {
-  // Strip trailing <tool_call|> if present
-  let cleaned = raw.replace(/<tool_call\|>\s*$/, "").trim();
-  // Match function_name { … }
-  const fnMatch = cleaned.match(/^([a-zA-Z_][a-zA-Z0-9_]*)\s*(\{[\s\S]*\})/);
-  if (!fnMatch) {
-    return { type: "execute_tool", content: raw, toolName: "unknown" };
-  }
-  const toolName = fnMatch[1];
-  let argsStr = fnMatch[2];
-  // Replace Gemma 4 quote markers with standard quotes
-  argsStr = argsStr.replace(/<\|">\|/g, '"').replace(/<\|"\|>/g, '"');
-  let toolArgs: Record<string, string> = {};
-  try {
-    toolArgs = JSON.parse(argsStr);
-  } catch {
-    try {
-      const fixed = argsStr.replace(/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g, '$1"$2":');
-      toolArgs = JSON.parse(fixed);
-    } catch {
-      toolArgs = { raw: argsStr };
-    }
-  }
-  return { type: "execute_tool", content: raw, toolName, toolArgs };
 }
 // ─────────────────────────────────────────────────────
 // ThinkingBlock sub-component
@@ -218,23 +125,30 @@ const ThinkingBlock: React.FC<ThinkingBlockProps> = ({
         )}
       </button>
       {/* Expanded thinking content */}
-      {expanded && (
-        <div
-          className={cn(
-            "mt-1.5 ml-2 pl-3 border-l-2 text-[10px] leading-relaxed whitespace-pre-wrap text-muted-foreground",
-            "transition-all duration-200 overflow-y-auto custom-scrollbar max-h-[160px]", // ~10 lines of text
-            isThinking ? "border-primary/40" : "border-border",
-          )}
-        >
-          {thinkingContent ? (
-            <span>{thinkingContent}</span>
-          ) : (
-            <span className="italic opacity-60">
-              {isThinking ? "Thinking…" : "No thinking content available."}
-            </span>
-          )}
+      <div
+        className={cn(
+          "grid transition-[grid-template-rows] duration-200 ease-out",
+          expanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]",
+        )}
+      >
+        <div className={cn("min-h-0 overflow-hidden")}>
+          <div
+            className={cn(
+              "mt-1.5 ml-2 pl-3 border-l-2 text-[10px] leading-relaxed whitespace-pre-wrap text-muted-foreground",
+              "transition-all duration-200 overflow-y-auto custom-scrollbar max-h-[160px]", // ~10 lines of text
+              isThinking ? "border-primary/40" : "border-border",
+            )}
+          >
+            {thinkingContent ? (
+              <span>{thinkingContent}</span>
+            ) : (
+              <span className="italic opacity-60">
+                {isThinking ? "Thinking…" : "No thinking content available."}
+              </span>
+            )}
+          </div>
         </div>
-      )}
+      </div>
     </div>
   );
 };
@@ -242,10 +156,19 @@ const ThinkingBlock: React.FC<ThinkingBlockProps> = ({
 // ExecuteToolBlock sub-component (Gemma 4 Generative UI)
 // ─────────────────────────────────────────────────────
 interface ExecuteToolBlockProps {
-  toolName: string;
+  toolName?: string;
   toolArgs?: Record<string, string>;
+  content: string;
+  parsed?: boolean;
+  isOpen?: boolean;
 }
-const ExecuteToolBlock: React.FC<ExecuteToolBlockProps> = ({ toolName, toolArgs }) => {
+const ExecuteToolBlock: React.FC<ExecuteToolBlockProps> = ({
+  toolName,
+  toolArgs,
+  content,
+  parsed,
+  isOpen,
+}) => {
   const [expanded, setExpanded] = useState(false);
   // Human-friendly label
   const labelMap: Record<string, string> = {
@@ -258,21 +181,28 @@ const ExecuteToolBlock: React.FC<ExecuteToolBlockProps> = ({ toolName, toolArgs 
     write_css: "Updating CSS",
     read_css: "Reading CSS",
   };
-  const friendlyLabel = labelMap[toolName] || `Running ${toolName}`;
+  const resolvedToolName = toolName || "unknown";
+  const friendlyLabel = labelMap[resolvedToolName] || `Running ${resolvedToolName}`;
+  const showExecuting = Boolean(isOpen);
   return (
     <div className="mb-1 w-full">
       <button
         onClick={() => setExpanded((v) => !v)}
         className={cn(
           "flex items-center gap-2 text-[10px] font-medium px-2.5 py-1 rounded-lg transition-all duration-200 group w-full",
-          "border border-emerald-400/30 bg-emerald-400/5 hover:bg-emerald-400/10 text-muted-foreground hover:text-foreground",
+          "border border-indigo-500/40 bg-violet-500/10 hover:bg-violet-500/15 text-muted-foreground hover:text-foreground",
         )}
       >
-        <div className="w-3 h-3 flex-shrink-0 flex items-center justify-center rounded bg-emerald-400/20 text-emerald-400">
+        <div
+          className={cn(
+            "w-3 h-3 flex-shrink-0 flex items-center justify-center rounded bg-indigo-500/20 text-indigo-400",
+            showExecuting && "animate-pulse",
+          )}
+        >
           <Wrench className="w-2 h-2" />
         </div>
         <span className="flex-1 text-left break-words [overflow-wrap:anywhere]">
-          {friendlyLabel}
+          {showExecuting ? `${friendlyLabel} (executing)` : friendlyLabel}
         </span>
         {expanded ? (
           <ChevronDown className="w-2.5 h-2.5 flex-shrink-0 text-muted-foreground" />
@@ -280,18 +210,27 @@ const ExecuteToolBlock: React.FC<ExecuteToolBlockProps> = ({ toolName, toolArgs 
           <ChevronRight className="w-2.5 h-2.5 flex-shrink-0 text-muted-foreground" />
         )}
       </button>
-      {expanded && toolArgs && (
-        <div className="mt-1.5 ml-2 pl-3 border-l-2 border-emerald-400/40 text-[10px] leading-relaxed text-muted-foreground space-y-1">
-          {Object.entries(toolArgs).map(([key, value]) => (
-            <div key={key} className="bg-background/50 rounded p-2 font-mono text-[9px] overflow-x-auto">
-              <span className="text-emerald-400 font-semibold">{key}:</span>{" "}
-              <span className="text-foreground break-words [overflow-wrap:anywhere]">
-                {typeof value === "string" && value.length > 200
-                  ? value.slice(0, 200) + "…"
-                  : String(value)}
-              </span>
-            </div>
-          ))}
+      {expanded && (
+        <div className="mt-1.5 ml-2 pl-3 border-l-2 border-indigo-500/40 text-[10px] leading-relaxed text-muted-foreground space-y-1">
+          {parsed !== false && toolArgs && Object.keys(toolArgs).length > 0 ? (
+            Object.entries(toolArgs).map(([key, value]) => (
+              <div
+                key={key}
+                className="bg-background/50 rounded p-2 font-mono text-[9px] overflow-x-auto"
+              >
+                <span className="text-indigo-400 font-semibold">{key}:</span>{" "}
+                <span className="text-foreground break-words [overflow-wrap:anywhere]">
+                  {typeof value === "string" && value.length > 200
+                    ? value.slice(0, 200) + "…"
+                    : String(value)}
+                </span>
+              </div>
+            ))
+          ) : (
+            <pre className="bg-background/50 rounded p-2 font-mono text-[10px] text-foreground overflow-x-auto whitespace-pre-wrap">
+              {content}
+            </pre>
+          )}
         </div>
       )}
     </div>
@@ -324,7 +263,9 @@ const ToolBlock: React.FC<ToolBlockProps> = ({ toolCalls, toolResults }) => {
   };
   if (!toolCalls || toolCalls.length === 0) return null;
   const firstToolName = toolCalls[0]?.function?.name || "tool";
-  const allSameTool = toolCalls.every((toolCall) => (toolCall?.function?.name || "tool") === firstToolName);
+  const allSameTool = toolCalls.every(
+    (toolCall) => (toolCall?.function?.name || "tool") === firstToolName,
+  );
   const title =
     toolCalls.length === 1
       ? `Agent ran: ${firstToolName}`
@@ -354,9 +295,7 @@ const ToolBlock: React.FC<ToolBlockProps> = ({ toolCalls, toolResults }) => {
             <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path>
           </svg>
         </div>
-        <span className="flex-1 text-left break-words [overflow-wrap:anywhere]">
-          {title}
-        </span>
+        <span className="flex-1 text-left break-words [overflow-wrap:anywhere]">{title}</span>
         {expanded ? (
           <ChevronDown className="w-2.5 h-2.5 flex-shrink-0 text-muted-foreground" />
         ) : (
@@ -590,7 +529,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = React.memo(({ message }) 
                 {(() => {
                   let blocks: any[] = [];
                   if (typeof message.content === "string") {
-                    blocks = parseContentBlocks(message.content);
+                    blocks = parseGemmaContentBlocks(message.content);
                   } else if (Array.isArray(message.content)) {
                     blocks = message.content;
                   }
@@ -655,21 +594,26 @@ export const ChatMessage: React.FC<ChatMessageProps> = React.memo(({ message }) 
                         }
                         j++;
                       }
-                      const groupedBySequentialTool: { toolCalls: any[]; toolResults: any[] }[] = [];
+                      const groupedBySequentialTool: { toolCalls: any[]; toolResults: any[] }[] =
+                        [];
                       let currentGroupName: string | null = null;
                       for (const toolCall of segmentToolCalls) {
                         const toolName = toolCall?.function?.name ?? "tool";
                         if (currentGroupName === toolName && groupedBySequentialTool.length > 0) {
-                          groupedBySequentialTool[groupedBySequentialTool.length - 1].toolCalls.push(
-                            toolCall,
-                          );
+                          groupedBySequentialTool[
+                            groupedBySequentialTool.length - 1
+                          ].toolCalls.push(toolCall);
                         } else {
                           groupedBySequentialTool.push({ toolCalls: [toolCall], toolResults: [] });
                           currentGroupName = toolName;
                         }
                       }
                       if (groupedBySequentialTool.length > 0) {
-                        for (let groupIdx = 0; groupIdx < groupedBySequentialTool.length; groupIdx++) {
+                        for (
+                          let groupIdx = 0;
+                          groupIdx < groupedBySequentialTool.length;
+                          groupIdx++
+                        ) {
                           const group = groupedBySequentialTool[groupIdx];
                           const groupCallIds = new Set(
                             group.toolCalls.map((toolCall) => toolCall?.id).filter(Boolean),
@@ -681,7 +625,9 @@ export const ChatMessage: React.FC<ChatMessageProps> = React.memo(({ message }) 
                             <ToolBlock
                               key={`toolgroup-${i}-${groupIdx}`}
                               toolCalls={group.toolCalls}
-                              toolResults={group.toolResults.length > 0 ? group.toolResults : undefined}
+                              toolResults={
+                                group.toolResults.length > 0 ? group.toolResults : undefined
+                              }
                             />,
                           );
                         }
@@ -692,8 +638,11 @@ export const ChatMessage: React.FC<ChatMessageProps> = React.memo(({ message }) 
                       renderedElements.push(
                         <ExecuteToolBlock
                           key={`exec-${i}`}
-                          toolName={block.toolName || "unknown"}
+                          toolName={block.toolName}
                           toolArgs={block.toolArgs}
+                          content={block.content || ""}
+                          parsed={block.parsed}
+                          isOpen={block.isOpen}
                         />,
                       );
                     } else {

@@ -27,12 +27,38 @@ export class OllamaProvider implements ILLMService {
     }
     private buildMessages(messages: any[], systemInstruction?: string) {
         const instruction = systemInstruction || "You are Vibe Agent, an expert frontend engineer creating beautiful web-native presentations. You communicate directly with the user to understand their slide deck needs. Keep slides modern, interactive, and visually stunning.";
+        const normalizedMessages = messages.map((m: any) => {
+            if (m?.role === 'assistant' && Array.isArray(m?.tool_calls) && m.tool_calls.length > 0) {
+                const toolCallText = m.tool_calls.map((tc: any) => {
+                    const name = tc?.function?.name || 'unknown';
+                    const args = typeof tc?.function?.arguments === 'string'
+                        ? tc.function.arguments
+                        : JSON.stringify(tc?.function?.arguments || {});
+                    return `[Tool Call: ${name}]\n${args}`;
+                }).join('\n\n');
+                const prefix = typeof m?.content === 'string' && m.content.trim() ? `${m.content}\n\n` : '';
+                return {
+                    role: 'assistant',
+                    content: `${prefix}${toolCallText}`
+                };
+            }
+
+            if (m?.role === 'tool') {
+                const content = typeof m?.content === 'string' ? m.content : JSON.stringify(m?.content ?? '');
+                return {
+                    role: 'user',
+                    content: `[Tool Result for ${m?.tool_call_id || 'unknown'}]\n${content}`
+                };
+            }
+
+            return m;
+        });
         return [
             {
                 role: 'system',
                 content: instruction 
             },
-            ...messages
+            ...normalizedMessages
         ];
     }
     private truncate(value: string, max = 240): string {

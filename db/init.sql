@@ -53,6 +53,8 @@ CREATE TABLE conversations (
     project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
     title VARCHAR(255) NOT NULL,
     task_list JSONB NOT NULL DEFAULT '[]'::jsonb,
+    edit_log TEXT,
+    summary TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
@@ -65,5 +67,6 @@ CREATE TABLE messages (
     tool_calls JSONB,
     tool_call_id TEXT,
     tool_results JSONB,
+    is_compressed BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
