@@ -21,7 +21,8 @@ import React, {
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import api, { getAccessToken } from "../api";
-import { SlideRenderer, type SlideData } from "../components/SlideRenderer";
+import { SlideRenderer, type SlideData, type SlideRendererHandle } from "../components/SlideRenderer";
+import { extractLayoutFromIframe } from "../lib/layoutExtractor";
 import { ChatMessage, type ChatMessageData } from "../components/chat/ChatMessage";
 import { TaskListBar, type AgentTask } from "../components/chat/TaskListBar";
 import {
@@ -258,6 +259,7 @@ const ChatPage: React.FC = () => {
   const startWidth = useRef(0);
   const userScrolledUp = useRef(false);
   const liveConversationMessagesRef = useRef<Record<string, ChatMessageData[]>>({});
+  const slideRendererRef = useRef<SlideRendererHandle>(null);
   const conversationActivity = useSyncExternalStore(
     subscribeConversationActivity,
     getConversationActivitySnapshot,
@@ -881,6 +883,53 @@ const ChatPage: React.FC = () => {
                   setDeckTitle(data.projectName);
                 }
               }
+            } else if (eventName === "layout_request") {
+              // The backend is asking us to compute the layout of a slide
+              const { requestId: layoutRequestId, slideId: layoutSlideId } = data;
+              if (layoutRequestId && layoutSlideId) {
+                (async () => {
+                  try {
+                    const iframe = slideRendererRef.current?.getIframe?.();
+                    if (!iframe) {
+                      // No iframe available — send an error response
+                      await api.post("/layout-response", {
+                        requestId: layoutRequestId,
+                        layoutData: {
+                          slideId: layoutSlideId,
+                          viewportWidth: 1920,
+                          viewportHeight: 1080,
+                          tree: { tag: "body", x: 0, y: 0, width: 0, height: 0, children: [], text: "Slide iframe not available" },
+                        },
+                      });
+                      return;
+                    }
+                    const result = await extractLayoutFromIframe(iframe, layoutRequestId);
+                    await api.post("/layout-response", {
+                      requestId: layoutRequestId,
+                      layoutData: {
+                        slideId: layoutSlideId,
+                        viewportWidth: result.viewportWidth,
+                        viewportHeight: result.viewportHeight,
+                        tree: result.tree,
+                      },
+                    });
+                  } catch (layoutErr) {
+                    console.error("Layout extraction failed:", layoutErr);
+                    // Attempt to send a fallback so the backend doesn't hang
+                    try {
+                      await api.post("/layout-response", {
+                        requestId: layoutRequestId,
+                        layoutData: {
+                          slideId: layoutSlideId,
+                          viewportWidth: 1920,
+                          viewportHeight: 1080,
+                          tree: { tag: "body", x: 0, y: 0, width: 0, height: 0, children: [], text: "Extraction error" },
+                        },
+                      });
+                    } catch { /* best effort */ }
+                  }
+                })();
+              }
             } else if (eventName === "done") {
               doneConvId = data.conversationId;
               break outer;
@@ -1254,6 +1303,7 @@ const ChatPage: React.FC = () => {
                     )}
                   >
                     <SlideRenderer
+                      ref={idx === currentSlideIndex ? slideRendererRef : undefined}
                       slide={slide}
                       theme={slide.theme_data || slides[0]?.theme_data}
                       isActive={idx === currentSlideIndex}

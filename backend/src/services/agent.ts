@@ -15,7 +15,7 @@ import * as path from 'path';
 import * as fs from 'fs/promises';
 import * as os from 'os';
 import { VibeManager } from '../core/vibeManager';
-import { getTools, executeTool, type AgentRuntimeState, type AgentTaskItem } from '../core/tools';
+import { getTools, executeTool, type AgentRuntimeState, type AgentTaskItem, type OnLayoutRequest } from '../core/tools';
 import { loadDeckHtmlForProject, saveDeckHtmlForProject } from './projectDeck';
 const buildSystemInstructionWithTaskList = (baseInstruction: string, runtimeState: AgentRuntimeState) => {
     if (!runtimeState.tasks.length) {
@@ -195,7 +195,8 @@ export const chatWithAgent = async (conversationId: string, messages: any[]) => 
 export const chatWithAgentStream = async (
     conversationId: string,
     messages: any[],
-    onChunk: (token: string) => void
+    onChunk: (token: string) => void,
+    onLayoutRequest?: OnLayoutRequest
 ): Promise<string> => {
     const { vibeManager, persist, cleanup } = await createConversationVibeManager(conversationId);
     const { tools, systemInstruction } = await getTools(vibeManager);
@@ -259,7 +260,7 @@ export const chatWithAgentStream = async (
              for (const tc of safeToolCalls) {
                  const name = tc.function.name;
                  const args = parseToolArguments(tc.function.arguments);
-                 const output = await executeTool(vibeManager, name, args, runtimeState);
+                 const output = await executeTool(vibeManager, name, args, runtimeState, onLayoutRequest);
                  let shouldRefreshPresentation = false;
                  try {
                      const parsed = JSON.parse(output);

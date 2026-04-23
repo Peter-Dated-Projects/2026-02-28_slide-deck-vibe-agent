@@ -147,6 +147,38 @@ export function extractToolCallsFromText(text: string): ParsedToolCall[] {
         }
         toolCallIndex++;
     }
+    // Pattern 4: Gemma-3 style tool calls `<|tool_call>call:function_name{args}<tool_call|>`
+    const gemmaPattern = /<\|tool_call>call:([a-zA-Z_][a-zA-Z0-9_]*)\s*(\{[\s\S]*?\})<tool_call\|>/g;
+    const gemmaMatches = text.matchAll(gemmaPattern);
+    let gemmaIndex = 0;
+    for (const match of gemmaMatches) {
+        const functionName = match[1];
+        let argsStr = match[2];
+        if (functionName && argsStr) {
+            let parsedArgs = {};
+            try {
+                parsedArgs = JSON.parse(argsStr);
+            } catch (e) {
+                // Attempt a loose parse by quoting unquoted keys (e.g. {indices:[1]} -> {"indices":[1]})
+                try {
+                    const fixedArgsStr = argsStr.replace(/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g, '$1"$2":');
+                    parsedArgs = JSON.parse(fixedArgsStr);
+                } catch (e2) {
+                    parsedArgs = { raw: argsStr }; // fallback
+                }
+            }
+            toolCalls.push({
+                id: `tool_call_gemma_${gemmaIndex}`,
+                type: 'function',
+                function: {
+                    name: functionName,
+                    arguments: JSON.stringify(parsedArgs)
+                }
+            });
+            gemmaIndex++;
+        }
+    }
+
     return toolCalls;
 }
 /**

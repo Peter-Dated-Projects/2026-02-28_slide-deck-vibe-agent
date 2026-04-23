@@ -21,6 +21,7 @@ import { dbService as db } from './src/core/container';
 import { chatWithAgent, chatWithAgentStream } from './src/services/agent';
 import { loadDeckHtmlForProject } from './src/services/projectDeck';
 import { config } from './src/config';
+import { layoutRequestStore } from './src/core/layoutRequestStore';
 const app = express();
 const getTitleFromFirstRequest = (message: string) => message.trim().slice(0, 150);
 const updateTitleFromFirstRequestIfNeeded = async (
@@ -330,6 +331,10 @@ app.post('/api/chat/stream', requireAuth, async (req: AuthRequest, res: express.
         let accumulatedText = "";
         const thinkTimers: { startTime: number; endTime?: number }[] = [];
         // Stream tokens to client
+        const onLayoutRequest = (requestId: string, slideId: string) => {
+            send('layout_request', JSON.stringify({ requestId, slideId }));
+        };
+
         const fullText = await chatWithAgentStream(currentConvId, messagesContext, (token) => {
             if (token.startsWith('[TOOL_CALLS]') && token.endsWith('[/TOOL_CALLS]')) {
                 try {
@@ -431,7 +436,7 @@ app.post('/api/chat/stream', requireAuth, async (req: AuthRequest, res: express.
                     send('token_text', JSON.stringify({ token }));
                 }
             }
-        });
+        }, onLayoutRequest);
         // Persist full response and tool metadata
         if (fullText || streamedToolCalls.length > 0 || streamedToolResults.length > 0) {
             const normalizedContentBlocks = normalizeAssistantContentBlocks(contentBlocks);
@@ -560,6 +565,29 @@ app.patch('/api/conversations/:conversationId/title', requireAuth, async (req: A
         res.json({ title: title.trim() });
     } catch (error) {
         console.error('Error updating conversation title:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+// Layout Analysis Response Route (Protected)
+app.post('/api/layout-response', requireAuth, async (req: AuthRequest, res: express.Response): Promise<void> => {
+    try {
+        const { requestId, layoutData } = req.body;
+        if (!requestId || typeof requestId !== 'string') {
+            res.status(400).json({ error: 'requestId is required' });
+            return;
+        }
+        if (!layoutData || typeof layoutData !== 'object') {
+            res.status(400).json({ error: 'layoutData is required' });
+            return;
+        }
+        const resolved = layoutRequestStore.resolveRequest(requestId, layoutData);
+        if (!resolved) {
+            res.status(404).json({ error: 'No pending layout request found for this requestId (may have timed out)' });
+            return;
+        }
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Error handling layout response:', error);
         res.status(500).json({ error: 'Internal server error' });
     }
 });

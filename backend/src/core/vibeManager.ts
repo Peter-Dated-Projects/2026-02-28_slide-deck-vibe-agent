@@ -459,4 +459,43 @@ export class VibeManager {
         await this.save();
         return { migrated: true, slideIdMap };
     }
+
+    async readDesign(): Promise<string> {
+        const designPath = path.join(path.dirname(this.filePath), 'DESIGN.md');
+        try {
+            const content = await fs.readFile(designPath, { encoding: 'utf-8' });
+            return content;
+        } catch (error: any) {
+            if (error.code === 'ENOENT') {
+                const TEMPLATE = `# Presentation design spec\n\n## Intent\n\n## Structure\n\n## Visual language\n\n## Constraints\n`;
+                await fs.writeFile(designPath, TEMPLATE, { encoding: 'utf-8' });
+                return TEMPLATE;
+            }
+            throw error;
+        }
+    }
+
+    async writeDesign(section: 'intent' | 'structure' | 'visual_language' | 'constraints', content: string): Promise<string> {
+        const designPath = path.join(path.dirname(this.filePath), 'DESIGN.md');
+        let doc = await this.readDesign();
+        
+        const headers: Record<string, string> = {
+            "intent": "## Intent",
+            "structure": "## Structure",
+            "visual_language": "## Visual language",
+            "constraints": "## Constraints"
+        };
+        const header = headers[section];
+        if (!header) {
+            throw new Error(`Invalid section: ${section}`);
+        }
+        
+        const escapedHeader = VibeManager.escapeRegex(header);
+        const pattern = new RegExp(`(${escapedHeader}\\n)([\\s\\S]*?)(?=\\n## |$)`, 'i');
+        const updated = doc.replace(pattern, (match, p1) => {
+            return `${p1}${content.trim()}\n`;
+        });
+        await fs.writeFile(designPath, updated, { encoding: 'utf-8' });
+        return updated;
+    }
 }
