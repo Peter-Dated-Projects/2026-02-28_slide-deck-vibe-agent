@@ -398,14 +398,6 @@ export const getTools = async (vibeManager: VibeManager): Promise<{ tools: OpenA
         {
             type: 'function',
             function: {
-                name: 'migrate_template_to_v3',
-                description: 'Migrate a legacy V2 template to V3 UUID markers and initialize manifest/global UI markers.',
-                parameters: { type: 'object', properties: {} }
-            }
-        },
-        {
-            type: 'function',
-            function: {
                 name: 'apply_changes',
                 description: 'Apply multiple tool operations transactionally. On any error, restore the pre-change snapshot.',
                 parameters: {
@@ -444,34 +436,27 @@ export const getTools = async (vibeManager: VibeManager): Promise<{ tools: OpenA
         {
             type: 'function',
             function: {
-                name: 'read_design',
-                description: 'Read the current contents of DESIGN.md. Call this at session start and whenever you need design context before making or evaluating an edit.',
-                parameters: {
-                    type: 'object',
-                    properties: {},
-                    required: []
-                }
-            }
-        },
-        {
-            type: 'function',
-            function: {
-                name: 'write_design',
-                description: 'Overwrite a named section of DESIGN.md. Only call this when a durable design decision has been confirmed by the user. Do not call this for conversational content, slide-level edits, or anything that belongs in the edit log.',
+                name: 'design',
+                description: 'Read or write DESIGN.md. Set action to read or write. For write, provide section and content.',
                 parameters: {
                     type: 'object',
                     properties: {
+                        action: {
+                            type: 'string',
+                            enum: ['read', 'write'],
+                            description: 'Whether to read DESIGN.md or write a section.'
+                        },
                         section: {
                             type: 'string',
                             enum: ['intent', 'structure', 'visual_language', 'constraints'],
-                            description: 'The section of DESIGN.md to update.'
+                            description: 'Required when action is write. The section of DESIGN.md to update.'
                         },
                         content: {
                             type: 'string',
-                            description: 'The new content for the section. Use short declarative statements. Do not include the section header — just the content.'
+                            description: 'Required when action is write. The new content for the section. Use short declarative statements. Do not include the section header - just the content.'
                         }
                     },
-                    required: ['section', 'content']
+                    required: ['action']
                 }
             }
         }
@@ -488,9 +473,9 @@ Note: The underlying tools use legacy terminology like "slide" and "deck", but t
 
 When you need to call a tool, you must ONLY use the native tool call format: <execute_tool>function_name{json_arguments}</execute_tool>. Do not use other XML tags, bracketed text like [Tool Call], or any other tool-call syntax.
 
-At the start of every new session, call \`read_design()\` before responding to the user. Use the contents to orient yourself — do not ask the user to re-explain decisions that are already documented. If DESIGN.md is empty, ask the user for the presentation's core intent and structure, then call \`write_design()\` to record it before proceeding.
+At the start of every new session, call \`design({\"action\":\"read\"})\` before responding to the user. Use the contents to orient yourself - do not ask the user to re-explain decisions that are already documented. If DESIGN.md is empty, ask the user for the presentation's core intent and structure, then call \`design({\"action\":\"write\",\"section\":...,\"content\":...})\` to record it before proceeding.
 
-On every turn, check whether your response involves a design-level decision. If it does, call \`read_design()\` first to verify consistency, and call \`write_design()\` after if something durable was decided.`;
+On every turn, check whether your response involves a design-level decision. If it does, call \`design({\"action\":\"read\"})\` first to verify consistency, and call \`design({\"action\":\"write\",\"section\":...,\"content\":...})\` after if something durable was decided.`;
     return { tools, systemInstruction };
 };
 /**
@@ -822,11 +807,15 @@ export const executeTool = async (
                 return formatResult({ error: `Layout analysis failed: ${err.message}`, mutated: false });
             }
         }
-        if (name === 'read_design') {
-            const content = await vibeManager.readDesign();
-            return formatResult({ success: true, content, hash: hashOf(content), mutated: false });
-        }
-        if (name === 'write_design') {
+        if (name === 'design') {
+            const action = String(args?.action || '').trim().toLowerCase();
+            if (!action || !['read', 'write'].includes(action)) {
+                return formatResult({ error: 'Invalid or missing action. Must be one of: read, write', mutated: false });
+            }
+            if (action === 'read') {
+                const content = await vibeManager.readDesign();
+                return formatResult({ success: true, content, hash: hashOf(content), mutated: false });
+            }
             const section = args?.section;
             const content = args?.content;
             if (!section || !['intent', 'structure', 'visual_language', 'constraints'].includes(section)) {
@@ -845,15 +834,6 @@ export const executeTool = async (
         if (name === 'detect_template_version') {
             const version = vibeManager.detectTemplateVersion();
             return formatResult({ success: true, version, mutated: false });
-        }
-        if (name === 'migrate_template_to_v3') {
-            const migration = await vibeManager.migrateToV3();
-            return formatResult({
-                success: true,
-                migration,
-                mutated: migration.migrated,
-                entities_changed: migration.migrated ? ['slides', 'manifest', 'global_ui'] : []
-            });
         }
         if (name === 'apply_changes') {
             const operations = Array.isArray(args?.operations) ? args.operations : [];
