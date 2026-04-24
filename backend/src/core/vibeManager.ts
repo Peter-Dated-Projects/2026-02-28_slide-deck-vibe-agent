@@ -163,6 +163,20 @@ export class VibeManager {
         }
         return content.trim();
     }
+    private static renderSlideTemplate(slideId: string, innerHtml: string, sectionOpenTag?: string): string {
+        const normalizedId = String(slideId || '').replace(/^legacy-/, '');
+        const openTag =
+            sectionOpenTag?.trim() ||
+            `<section class="slide" id="slide-${normalizedId.slice(0, 8)}">`;
+        const indentedInner = innerHtml.trim()
+            ? innerHtml
+                .trim()
+                .split(/\r?\n/)
+                .map((line) => `                ${line}`)
+                .join('\n')
+            : '';
+        return `${openTag}\n            <div class="slide-aspect-ratio-box">\n${indentedInner ? `${indentedInner}\n` : ''}            </div>\n        </section>`;
+    }
     private static markerBoundaryPattern(marker: string): string {
         if (!marker.trimStart().startsWith('<!--')) {
             return VibeManager.escapeRegex(marker);
@@ -485,20 +499,19 @@ export class VibeManager {
         const target = this.resolveSlide(this.listSlides(), identifier);
         if (!target) throw new Error(`Slide ${identifier} not found`);
         const normalizedInner = VibeManager.normalizeSlideToolContent(newHtml);
-        const updatedSlide = VibeManager.replaceInnerContent(target.content, 'div', 'slide-aspect-ratio-box', normalizedInner);
+        const existingSectionOpenTag = target.content.match(/<section\b[^>]*>/i)?.[0];
+        const updatedSlide = VibeManager.renderSlideTemplate(target.id, normalizedInner, existingSectionOpenTag);
         const escapedStart = VibeManager.escapeRegex(target.startMarker);
         const escapedEnd = VibeManager.escapeRegex(target.endMarker);
-        const pattern = new RegExp(`(${escapedStart})[\s\S]*?(${escapedEnd})`, 'i');
+        const pattern = new RegExp(`(${escapedStart})[\\s\\S]*?(${escapedEnd})`, 'i');
         this.content = this.content.replace(pattern, `$1\n        ${updatedSlide.trim()}\n        $2`);
         await this.save();
     }
     async addSlide(newHtml: string, customId?: string): Promise<string> {
         const id = customId || randomUUID();
         const normalizedInner = VibeManager.normalizeSlideToolContent(newHtml);
-        const indentedInner = normalizedInner
-            ? normalizedInner.split(/\r?\n/).map((line) => `                ${line}`).join('\n')
-            : '';
-        const newBlock = `\n        <!-- VIBE_SLIDE_ID:${id}_START -->\n        <section class="slide" id="slide-${id.slice(0, 8)}">\n            <div class="slide-aspect-ratio-box">\n${indentedInner ? `${indentedInner}\n` : ''}            </div>\n        </section>\n        <!-- VIBE_SLIDE_ID:${id}_END -->\n`;
+        const renderedSlide = VibeManager.renderSlideTemplate(id, normalizedInner);
+        const newBlock = `\n        <!-- VIBE_SLIDE_ID:${id}_START -->\n        ${renderedSlide}\n        <!-- VIBE_SLIDE_ID:${id}_END -->\n`;
         const container = this.getSlideContainerBlock();
         this.content = this.content.replace(container.end, `${newBlock}        ${container.end}`);
         const manifest = this.getManifest();
