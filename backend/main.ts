@@ -24,6 +24,9 @@ import { loadDeckHtmlForProject, loadDesignForProject, saveDesignForProject } fr
 import { config } from './src/config';
 import { layoutRequestStore } from './src/core/layoutRequestStore';
 import { ContextManager } from './src/services/contextManager';
+import { mountCrdtWebsocket } from './src/routes/crdtWebsocket';
+import { uploadsRouter } from './src/routes/uploads';
+import http from 'http';
 
 const app = express();
 const getTitleFromFirstRequest = (message: string) => message.trim().slice(0, 150);
@@ -90,6 +93,7 @@ app.use(cors({
 }));
 app.use(express.json());
 app.use(cookieParser());
+app.use('/api', uploadsRouter);
 // Auth Routes
 app.post('/api/auth/google', authController.googleAuth);
 app.post('/api/auth/refresh', authController.refreshToken);
@@ -661,8 +665,11 @@ app.put('/api/projects/:projectId/design', requireAuth, async (req: AuthRequest,
     }
 });
 if (require.main === module) {
-    app.listen(config.port, () => {
+    const server = http.createServer(app);
+    mountCrdtWebsocket(server);
+    server.listen(config.port, () => {
       console.log(`Backend server running on port ${config.port}`);
+      console.log(`CRDT WebSocket mounted at /ws/presentation/:projectId`);
     });
 }
 export default app;

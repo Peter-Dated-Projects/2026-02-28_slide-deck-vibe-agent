@@ -70,3 +70,27 @@ CREATE TABLE messages (
     is_compressed BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+
+-- ─── CRDT engine (Phase 1) ────────────────────────────────────────────────────
+-- Full snapshots of the Yjs document, one row per project.
+-- doc_state is the binary output of Y.encodeStateAsUpdate(ydoc).
+CREATE TABLE crdt_documents (
+    project_id UUID PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+    doc_state BYTEA NOT NULL,
+    snapshot_version INT NOT NULL DEFAULT 0,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Append-only log of individual Y.Doc updates between snapshots.
+-- agent_id tags the origin of each update (human userId or 'ai:<session>'),
+-- enabling targeted "Undo AI" rollback and attribution.
+CREATE TABLE crdt_updates (
+    id BIGSERIAL PRIMARY KEY,
+    project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    update BYTEA NOT NULL,
+    agent_id TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_crdt_updates_project_created
+    ON crdt_updates (project_id, id);
