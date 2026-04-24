@@ -144,15 +144,16 @@ describe('extractToolCallsFromText', () => {
     });
     it('should extract execute_tool calls when arguments include CSS braces', () => {
         const text = `
-        <execute_tool> write_theme{css:<|"|>body { color: red; } .slide { padding: 4rem; }<|"|>,hash:<|"|>abc123<|"|>} </execute_tool>
+        <execute_tool> theme{action:<|"|>write<|"|>,css:<|"|>body { color: red; } .slide { padding: 4rem; }<|"|>,hash:<|"|>abc123<|"|>} </execute_tool>
         `;
         const toolCalls = extractToolCallsFromText(text);
         expect(toolCalls).toHaveLength(1);
         const firstToolCall = toolCalls[0];
         expect(firstToolCall).toBeDefined();
         if (!firstToolCall) throw new Error('Expected first tool call');
-        expect(firstToolCall.function.name).toBe('write_theme');
+        expect(firstToolCall.function.name).toBe('theme');
         const args = JSON.parse(firstToolCall.function.arguments);
+        expect(args.action).toBe('write');
         expect(args.css).toContain('body { color: red; }');
         expect(args.css).toContain('.slide { padding: 4rem; }');
         expect(args.hash).toBe('abc123');

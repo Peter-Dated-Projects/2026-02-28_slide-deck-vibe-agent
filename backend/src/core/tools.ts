@@ -233,26 +233,19 @@ export const getTools = async (vibeManager: VibeManager): Promise<{ tools: OpenA
         {
             type: 'function',
             function: {
-                name: 'read_manifest',
-                description: 'Read the current vibe manifest JSON and return its content hash.',
-                parameters: {
-                    type: 'object',
-                    properties: {}
-                }
-            }
-        },
-        {
-            type: 'function',
-            function: {
-                name: 'write_manifest',
-                description: 'Write manifest JSON with OCC hash validation from read_manifest.',
+                name: 'manifest',
+                description: 'Read or write manifest JSON. Set action to read or write. For write, provide manifest and hash from a prior read.',
                 parameters: {
                     type: 'object',
                     properties: {
+                        action: {
+                            type: 'string',
+                            enum: ['read', 'write']
+                        },
                         manifest: { type: 'object' },
                         hash: { type: 'string' }
                     },
-                    required: ['manifest', 'hash']
+                    required: ['action']
                 }
             }
         },
@@ -290,92 +283,76 @@ export const getTools = async (vibeManager: VibeManager): Promise<{ tools: OpenA
         {
             type: 'function',
             function: {
-                name: 'read_theme',
-                description: 'Read deck-wide theme CSS and return hash.',
-                parameters: { type: 'object', properties: {} }
-            }
-        },
-        {
-            type: 'function',
-            function: {
-                name: 'write_theme',
-                description: 'Write deck-wide theme CSS with OCC hash validation.',
+                name: 'theme',
+                description: 'Read or write deck-wide theme CSS. Set action to read or write. For write, provide css and hash from a prior read.',
                 parameters: {
                     type: 'object',
                     properties: {
-                        newCss: { type: 'string' },
-                        hash: { type: 'string' }
-                    },
-                    required: ['newCss', 'hash']
-                }
-            }
-        },
-        {
-            type: 'function',
-            function: {
-                name: 'read_transitions',
-                description: 'Read transitions CSS and return hash.',
-                parameters: { type: 'object', properties: {} }
-            }
-        },
-        {
-            type: 'function',
-            function: {
-                name: 'write_transitions',
-                description: 'Write transitions CSS with OCC hash validation.',
-                parameters: {
-                    type: 'object',
-                    properties: {
+                        action: {
+                            type: 'string',
+                            enum: ['read', 'write']
+                        },
                         css: { type: 'string' },
                         hash: { type: 'string' }
                     },
-                    required: ['css', 'hash']
+                    required: ['action']
                 }
             }
         },
         {
             type: 'function',
             function: {
-                name: 'read_animations',
-                description: 'Read animations CSS and return hash.',
-                parameters: { type: 'object', properties: {} }
-            }
-        },
-        {
-            type: 'function',
-            function: {
-                name: 'write_animations',
-                description: 'Write animations CSS with OCC hash validation.',
+                name: 'transitions',
+                description: 'Read or write transitions CSS. Set action to read or write. For write, provide css and hash from a prior read.',
                 parameters: {
                     type: 'object',
                     properties: {
+                        action: {
+                            type: 'string',
+                            enum: ['read', 'write']
+                        },
                         css: { type: 'string' },
                         hash: { type: 'string' }
                     },
-                    required: ['css', 'hash']
+                    required: ['action']
                 }
             }
         },
         {
             type: 'function',
             function: {
-                name: 'read_global_ui',
-                description: 'Read global UI HTML and return hash.',
-                parameters: { type: 'object', properties: {} }
+                name: 'animations',
+                description: 'Read or write animations CSS. Set action to read or write. For write, provide css and hash from a prior read.',
+                parameters: {
+                    type: 'object',
+                    properties: {
+                        action: {
+                            type: 'string',
+                            enum: ['read', 'write']
+                        },
+                        css: { type: 'string' },
+                        hash: { type: 'string' }
+                    },
+                    required: ['action']
+                }
             }
         },
         {
             type: 'function',
             function: {
-                name: 'write_global_ui',
-                description: 'Write global UI HTML with OCC hash validation.',
+                name: 'global_ui',
+                description: 'Read or write global UI HTML. Set action to read or write. For write, provide html and hash from a prior read.',
                 parameters: {
                     type: 'object',
                     properties: {
+                        action: {
+                            type: 'string',
+                            enum: ['read', 'write']
+                        },
                         html: { type: 'string' },
                         hash: { type: 'string' }
                     },
-                    required: ['html', 'hash']
+                    required: ['action']
                 }
             }
         },
@@ -682,11 +659,15 @@ export const executeTool = async (
             await vibeManager.reorderManifestSlides(reordered);
             return formatResult({ success: true, active_slides: reordered, mutated: true, entities_changed: ['manifest'] });
         }
-        if (name === 'read_manifest') {
-            const manifest = vibeManager.getManifest();
-            return formatResult({ success: true, manifest, hash: hashOf(manifest), mutated: false });
-        }
-        if (name === 'write_manifest') {
+        if (name === 'manifest') {
+            const action = String(args?.action || '').trim().toLowerCase();
+            if (!action || !['read', 'write'].includes(action)) {
+                return formatResult({ error: 'Invalid or missing action. Must be one of: read, write', mutated: false });
+            }
+            if (action === 'read') {
+                const manifest = vibeManager.getManifest();
+                return formatResult({ success: true, manifest, hash: hashOf(manifest), mutated: false });
+            }
             if (!args?.manifest) return formatResult({ error: 'Missing manifest payload.', mutated: false });
             if (!args?.hash) return formatResult({ error: 'Missing hash. Read manifest first.', mutated: false });
             const current = vibeManager.getManifest();
@@ -729,26 +710,34 @@ export const executeTool = async (
             await vibeManager.reorderManifestSlides(args.active_slides);
             return formatResult({ success: true, mutated: true, entities_changed: ['manifest'] });
         }
-        if (name === 'read_theme') {
-            const css = vibeManager.getTheme();
-            if (!css) return formatResult({ error: 'No theme block found.', mutated: false });
-            return formatResult({ success: true, css, hash: hashOf(css), mutated: false });
-        }
-        if (name === 'write_theme') {
-            if (!args?.newCss) return formatResult({ error: 'Missing newCss.', mutated: false });
+        if (name === 'theme') {
+            const action = String(args?.action || '').trim().toLowerCase();
+            if (!action || !['read', 'write'].includes(action)) {
+                return formatResult({ error: 'Invalid or missing action. Must be one of: read, write', mutated: false });
+            }
+            if (action === 'read') {
+                const css = vibeManager.getTheme();
+                if (!css) return formatResult({ error: 'No theme block found.', mutated: false });
+                return formatResult({ success: true, css, hash: hashOf(css), mutated: false });
+            }
+            if (!args?.css) return formatResult({ error: 'Missing css.', mutated: false });
             if (!args?.hash) return formatResult({ error: 'Missing hash. Read theme first.', mutated: false });
             const current = vibeManager.getTheme();
             if (!current) return formatResult({ error: 'No theme block found.', mutated: false });
             if (hashOf(current) !== args.hash) return formatResult({ error: 'Hash mismatch. Theme changed since read.', mutated: false });
-            await vibeManager.setTheme(args.newCss);
+            await vibeManager.setTheme(args.css);
             return formatResult({ success: true, mutated: true, entities_changed: ['theme'] });
         }
-        if (name === 'read_transitions') {
-            const css = vibeManager.getTransitions();
-            if (!css) return formatResult({ error: 'No transitions block found.', mutated: false });
-            return formatResult({ success: true, css, hash: hashOf(css), mutated: false });
-        }
-        if (name === 'write_transitions') {
+        if (name === 'transitions') {
+            const action = String(args?.action || '').trim().toLowerCase();
+            if (!action || !['read', 'write'].includes(action)) {
+                return formatResult({ error: 'Invalid or missing action. Must be one of: read, write', mutated: false });
+            }
+            if (action === 'read') {
+                const css = vibeManager.getTransitions();
+                if (!css) return formatResult({ error: 'No transitions block found.', mutated: false });
+                return formatResult({ success: true, css, hash: hashOf(css), mutated: false });
+            }
             if (!args?.css || !args?.hash) return formatResult({ error: 'Missing css/hash.', mutated: false });
             const current = vibeManager.getTransitions();
             if (!current) return formatResult({ error: 'No transitions block found.', mutated: false });
@@ -756,12 +745,16 @@ export const executeTool = async (
             await vibeManager.setTransitions(args.css);
             return formatResult({ success: true, mutated: true, entities_changed: ['transitions'] });
         }
-        if (name === 'read_animations') {
-            const css = vibeManager.getAnimations();
-            if (!css) return formatResult({ error: 'No animations block found.', mutated: false });
-            return formatResult({ success: true, css, hash: hashOf(css), mutated: false });
-        }
-        if (name === 'write_animations') {
+        if (name === 'animations') {
+            const action = String(args?.action || '').trim().toLowerCase();
+            if (!action || !['read', 'write'].includes(action)) {
+                return formatResult({ error: 'Invalid or missing action. Must be one of: read, write', mutated: false });
+            }
+            if (action === 'read') {
+                const css = vibeManager.getAnimations();
+                if (!css) return formatResult({ error: 'No animations block found.', mutated: false });
+                return formatResult({ success: true, css, hash: hashOf(css), mutated: false });
+            }
             if (!args?.css || !args?.hash) return formatResult({ error: 'Missing css/hash.', mutated: false });
             const current = vibeManager.getAnimations();
             if (!current) return formatResult({ error: 'No animations block found.', mutated: false });
@@ -769,11 +762,15 @@ export const executeTool = async (
             await vibeManager.setAnimations(args.css);
             return formatResult({ success: true, mutated: true, entities_changed: ['animations'] });
         }
-        if (name === 'read_global_ui') {
-            const html = vibeManager.getGlobalUI();
-            return formatResult({ success: true, html, hash: hashOf(html), mutated: false });
-        }
-        if (name === 'write_global_ui') {
+        if (name === 'global_ui') {
+            const action = String(args?.action || '').trim().toLowerCase();
+            if (!action || !['read', 'write'].includes(action)) {
+                return formatResult({ error: 'Invalid or missing action. Must be one of: read, write', mutated: false });
+            }
+            if (action === 'read') {
+                const html = vibeManager.getGlobalUI();
+                return formatResult({ success: true, html, hash: hashOf(html), mutated: false });
+            }
             if (args?.html === undefined || !args?.hash) return formatResult({ error: 'Missing html/hash.', mutated: false });
             const current = vibeManager.getGlobalUI();
             if (hashOf(current) !== args.hash) return formatResult({ error: 'Hash mismatch for global UI.', mutated: false });
