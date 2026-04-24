@@ -367,14 +367,6 @@ export const getTools = async (vibeManager: VibeManager): Promise<{ tools: OpenA
         {
             type: 'function',
             function: {
-                name: 'detect_template_version',
-                description: 'Detect whether current deck appears to be V2 or V3.',
-                parameters: { type: 'object', properties: {} }
-            }
-        },
-        {
-            type: 'function',
-            function: {
                 name: 'apply_changes',
                 description: 'Apply multiple tool operations transactionally. On any error, restore the pre-change snapshot.',
                 parameters: {
@@ -827,10 +819,6 @@ export const executeTool = async (
         if (name === 'validate_deck_state') {
             const validation = vibeManager.validateDeckState();
             return formatResult({ success: true, validation, mutated: false });
-        }
-        if (name === 'detect_template_version') {
-            const version = vibeManager.detectTemplateVersion();
-            return formatResult({ success: true, version, mutated: false });
         }
         if (name === 'apply_changes') {
             const operations = Array.isArray(args?.operations) ? args.operations : [];
