@@ -486,6 +486,8 @@ Note: The underlying tools use legacy terminology like "slide" and "deck", but t
 3. **Global State:** Use read/write tools for the full HTML document, themes, transitions, animations, and global UI. Use manifest tools or reorder_slides/move_slide to control active slide order.
 4. **Updates:** Keep progress updates brief. When a tool finishes, briefly explain what you did and your current status. After structural edits, call validate_deck_state.
 
+When you need to call a tool, you must ONLY use the native tool call format: <execute_tool>function_name{json_arguments}</execute_tool>. Do not use other XML tags, bracketed text like [Tool Call], or any other tool-call syntax.
+
 At the start of every new session, call \`read_design()\` before responding to the user. Use the contents to orient yourself — do not ask the user to re-explain decisions that are already documented. If DESIGN.md is empty, ask the user for the presentation's core intent and structure, then call \`write_design()\` to record it before proceeding.
 
 On every turn, check whether your response involves a design-level decision. If it does, call \`read_design()\` first to verify consistency, and call \`write_design()\` after if something durable was decided.`;

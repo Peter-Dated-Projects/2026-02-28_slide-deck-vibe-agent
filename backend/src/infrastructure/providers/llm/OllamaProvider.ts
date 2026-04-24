@@ -27,7 +27,7 @@ export class OllamaProvider implements ILLMService {
         this.storageService = storageService;
     }
     private buildMessages(messages: any[], systemInstruction?: string) {
-        const instruction = systemInstruction || "You are Vibe Agent, an expert frontend engineer creating beautiful web-native presentations. You communicate directly with the user to understand their slide deck needs. Keep slides modern, interactive, and visually stunning.";
+        const instruction = systemInstruction || "You are Vibe Agent, an expert frontend engineer creating beautiful web-native presentations. You communicate directly with the user to understand their slide deck needs. Keep slides modern, interactive, and visually stunning. When you need to call a tool, you must ONLY use the native tool call format: <execute_tool>function_name{json_arguments}</execute_tool>. Do not use XML tags, bracketed text like [Tool Call], or any other tool-call syntax.";
         const normalizedMessages = sanitizeMessagesForModel(messages).map((m: any) => {
             if (m?.role === 'assistant' && Array.isArray(m?.tool_calls) && m.tool_calls.length > 0) {
                 const toolCallText = m.tool_calls.map((tc: any) => {

@@ -35,14 +35,14 @@ export class LMStudioProvider implements ILLMService {
     }
 
     private buildMessages(messages: any[], systemInstruction?: string, tools?: any[]): OpenAI.Chat.ChatCompletionMessageParam[] {
-        let instruction = systemInstruction || "You are Vibe Agent, an expert frontend engineer creating beautiful web-native presentations. You communicate directly with the user to understand their slide deck needs. Keep slides modern, interactive, and visually stunning.";
+        let instruction = systemInstruction || "You are Vibe Agent, an expert frontend engineer creating beautiful web-native presentations. You communicate directly with the user to understand their slide deck needs. Keep slides modern, interactive, and visually stunning. When you need to call a tool, you must ONLY use the native tool call format: <execute_tool>function_name{json_arguments}</execute_tool>. Do not use XML tags, bracketed text like [Tool Call], or any other tool-call syntax.";
         const normalizedMessages = sanitizeMessagesForModel(messages);
 
         // For local models that might ignore the OpenAI tools array,
         // explicitly inject the tool definitions into the system prompt.
         if (tools && tools.length > 0) {
             const toolDocs = tools.map((t) => JSON.stringify(t)).join('\n');
-            instruction += `\n\n# Available Tools\nYou have access to the following tools. You can invoke them by returning JSON tool calls. If your native tool calling is disabled, output a JSON block like: {"tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "tool_name", "arguments": "{\\"key\\":\\"value\\"}"}}]}\n\n${toolDocs}`;
+            instruction += `\n\n# Available Tools\nYou have access to the following tools. When you need to call one, emit exactly one <execute_tool> block in the format <execute_tool>tool_name{json_arguments}</execute_tool>. Do not use JSON tool_calls arrays, XML tags, or bracketed text like [Tool Call].\n\n${toolDocs}`;
         }
 
         const converted: OpenAI.Chat.ChatCompletionMessageParam[] = [
