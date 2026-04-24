@@ -14,7 +14,7 @@ import OpenAI from 'openai';
 import type { ILLMService } from "../../../core/interfaces/ILLMService";
 import type { IDatabaseService } from "../../../core/interfaces/IDatabaseService";
 import type { IStorageService } from "../../../core/interfaces/IStorageService";
-import { ToolStreamManager, extractToolCallsFromText } from "./toolCallParser";
+import { ToolCallStreamSanitizer, ToolStreamManager, extractToolCallsFromText, stripToolCallsFromText } from "./toolCallParser";
 import { sanitizeMessagesForModel } from '../../../core/messageSanitizer';
 
 const DEFAULT_SYSTEM_INSTRUCTION = "You are Vibe Agent, an expert frontend engineer creating beautiful web-native presentations. You communicate directly with the user to understand their slide deck needs. Keep slides modern, interactive, and visually stunning. When you need to call a tool, use the native OpenAI-compatible tool call format when available. If a text fallback is needed, use <execute_tool>function_name{json_arguments}</execute_tool>. Keep any reasoning in <think>...</think> blocks when the model emits it.";
@@ -164,6 +164,7 @@ export class QwenProvider implements ILLMService {
             thinkingContent ? `${THINK_OPEN}${thinkingContent}${THINK_CLOSE}` : '',
             typeof message.content === 'string' ? message.content : '',
         ].filter(Boolean).join('\n\n');
+        const visibleText = stripToolCallsFromText(finalText);
 
         const toolCalls = normalizeToolCalls([
             ...(Array.isArray(message.tool_calls) ? message.tool_calls : []),
@@ -179,7 +180,7 @@ export class QwenProvider implements ILLMService {
         }
 
         return {
-            content: [{ type: 'text', text: finalText }],
+            content: [{ type: 'text', text: visibleText }],
             stop_reason: 'end_turn',
         };
     }
@@ -206,10 +207,12 @@ export class QwenProvider implements ILLMService {
 
         const stream = await this.openai.chat.completions.create(params) as AsyncIterable<any>;
         const toolStreamManager = new ToolStreamManager();
+        const visibleTextStream = new ToolCallStreamSanitizer();
         const textToolCalls: any[] = [];
         const structuredToolCalls: Map<number, { id: string; name: string; arguments: string }> = new Map();
 
-        let fullText = '';
+        let rawFullText = '';
+        let visibleFullText = '';
         let isThinking = false;
 
         const collectTextToolCalls = (calls: any[]) => {
@@ -228,13 +231,18 @@ export class QwenProvider implements ILLMService {
 
             if (!isThinking) {
                 onChunk(THINK_OPEN);
-                fullText += THINK_OPEN;
+                rawFullText += THINK_OPEN;
+                visibleFullText += THINK_OPEN;
                 isThinking = true;
             }
 
             collectTextToolCalls(toolStreamManager.addChunk(token));
-            onChunk(token);
-            fullText += token;
+            rawFullText += token;
+            const visibleToken = visibleTextStream.addChunk(token);
+            if (visibleToken) {
+                onChunk(visibleToken);
+                visibleFullText += visibleToken;
+            }
         };
 
         const emitContent = (token: string) => {
@@ -244,13 +252,18 @@ export class QwenProvider implements ILLMService {
 
             if (isThinking) {
                 onChunk(THINK_CLOSE);
-                fullText += THINK_CLOSE;
+                rawFullText += THINK_CLOSE;
+                visibleFullText += THINK_CLOSE;
                 isThinking = false;
             }
 
             collectTextToolCalls(toolStreamManager.addChunk(token));
-            onChunk(token);
-            fullText += token;
+            rawFullText += token;
+            const visibleToken = visibleTextStream.addChunk(token);
+            if (visibleToken) {
+                onChunk(visibleToken);
+                visibleFullText += visibleToken;
+            }
         };
 
         for await (const chunk of stream) {
@@ -304,7 +317,8 @@ export class QwenProvider implements ILLMService {
 
         if (isThinking) {
             onChunk(THINK_CLOSE);
-            fullText += THINK_CLOSE;
+            rawFullText += THINK_CLOSE;
+            visibleFullText += THINK_CLOSE;
         }
 
         const normalizedToolCalls = normalizeToolCalls([
@@ -317,7 +331,7 @@ export class QwenProvider implements ILLMService {
                 },
             })),
             ...textToolCalls,
-            ...extractToolCallsFromText(fullText),
+            ...extractToolCallsFromText(rawFullText),
         ]);
 
         if (normalizedToolCalls.length > 0) {
@@ -325,6 +339,6 @@ export class QwenProvider implements ILLMService {
             onChunk(`[TOOL_CALLS]${toolCallString}[/TOOL_CALLS]`);
         }
 
-        return fullText;
+        return visibleFullText;
     }
 }

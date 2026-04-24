@@ -14,7 +14,43 @@
  * Tests for extracting tool calls from thinking blocks
  */
 import { describe, expect, it } from 'bun:test';
-import { extractToolCallsFromText } from '../../infrastructure/providers/llm/toolCallParser';
+import { ToolCallStreamSanitizer, ToolStreamManager, extractToolCallsFromText } from '../../infrastructure/providers/llm/toolCallParser';
+
+const STREAM_CHUNK_SIZE = 3;
+
+function chunkAsStream(text: string, chunkSize = STREAM_CHUNK_SIZE): string[] {
+    const chunks: string[] = [];
+    for (let i = 0; i < text.length; i += chunkSize) {
+        chunks.push(text.slice(i, i + chunkSize));
+    }
+    return chunks;
+}
+
+function extractToolCallsFromStream(text: string): any[] {
+    const manager = new ToolStreamManager();
+    const calls: any[] = [];
+    for (const chunk of chunkAsStream(text)) {
+        calls.push(...manager.addChunk(chunk));
+    }
+    return calls;
+}
+
+function sanitizeVisibleTextFromStream(text: string): { visibleText: string; emissions: string[] } {
+    const sanitizer = new ToolCallStreamSanitizer();
+    const emissions: string[] = [];
+
+    for (const chunk of chunkAsStream(text)) {
+        emissions.push(sanitizer.addChunk(chunk));
+    }
+
+    emissions.push(sanitizer.flush());
+
+    return {
+        visibleText: emissions.join(''),
+        emissions,
+    };
+}
+
 describe('extractToolCallsFromText', () => {
     it('should extract tool call from JSON with singular tool_call object', () => {
         const text = `
@@ -28,7 +64,7 @@ describe('extractToolCallsFromText', () => {
             }
         }}
         `;
-        const toolCalls = extractToolCallsFromText(text);
+        const toolCalls = extractToolCallsFromStream(text);
         expect(toolCalls).toHaveLength(1);
         const firstToolCall = toolCalls[0];
         expect(firstToolCall).toBeDefined();
@@ -50,7 +86,7 @@ describe('extractToolCallsFromText', () => {
             }
         ]}
         `;
-        const toolCalls = extractToolCallsFromText(text);
+        const toolCalls = extractToolCallsFromStream(text);
         expect(toolCalls).toHaveLength(1);
         const firstToolCall = toolCalls[0];
         expect(firstToolCall).toBeDefined();
@@ -72,7 +108,7 @@ describe('extractToolCallsFromText', () => {
             </invoke>
         </function_calls>
         `;
-        const toolCalls = extractToolCallsFromText(text);
+        const toolCalls = extractToolCallsFromStream(text);
         expect(toolCalls.length).toBeGreaterThan(0);
         const firstToolCall = toolCalls[0];
         expect(firstToolCall).toBeDefined();
@@ -98,7 +134,7 @@ describe('extractToolCallsFromText', () => {
             }
         ]}
         `;
-        const toolCalls = extractToolCallsFromText(text);
+        const toolCalls = extractToolCallsFromStream(text);
         expect(toolCalls.length).toBe(2);
         const firstToolCall = toolCalls[0];
         const secondToolCall = toolCalls[1];
@@ -124,7 +160,7 @@ describe('extractToolCallsFromText', () => {
         </think>
         I'll update the slide background color for you.
         `;
-        const toolCalls = extractToolCallsFromText(text);
+        const toolCalls = extractToolCallsFromStream(text);
         expect(toolCalls).toHaveLength(1);
         const firstToolCall = toolCalls[0];
         expect(firstToolCall).toBeDefined();
@@ -135,7 +171,7 @@ describe('extractToolCallsFromText', () => {
         const text = `
         <execute_tool>read_full_html_document{"page":1}</execute_tool>
         `;
-        const toolCalls = extractToolCallsFromText(text);
+        const toolCalls = extractToolCallsFromStream(text);
         expect(toolCalls).toHaveLength(1);
         const firstToolCall = toolCalls[0];
         expect(firstToolCall).toBeDefined();
@@ -146,7 +182,7 @@ describe('extractToolCallsFromText', () => {
         const text = `
         <execute_tool> theme{action:<|"|>write<|"|>,css:<|"|>body { color: red; } .slide { padding: 4rem; }<|"|>,hash:<|"|>abc123<|"|>} </execute_tool>
         `;
-        const toolCalls = extractToolCallsFromText(text);
+        const toolCalls = extractToolCallsFromStream(text);
         expect(toolCalls).toHaveLength(1);
         const firstToolCall = toolCalls[0];
         expect(firstToolCall).toBeDefined();
@@ -158,14 +194,36 @@ describe('extractToolCallsFromText', () => {
         expect(args.css).toContain('.slide { padding: 4rem; }');
         expect(args.hash).toBe('abc123');
     });
+    it('should strip tool call blocks from visible stream output', () => {
+        const text = 'Before <execute_tool>read_slide{"page":1}</execute_tool> after';
+        const { visibleText } = sanitizeVisibleTextFromStream(text);
+        expect(visibleText).toBe('Before  after');
+    });
+    it('should hide tool-call payload while streaming 3 chars at a time', () => {
+        const text = 'Before <execute_tool>read_slide{"page":1}</execute_tool> after';
+        const { visibleText, emissions } = sanitizeVisibleTextFromStream(text);
+
+        expect(visibleText).toBe('Before  after');
+        expect(emissions.join('')).not.toContain('read_slide');
+        expect(emissions.join('')).not.toContain('"page"');
+    });
     it('should not extract malformed tool calls', () => {
         const text = `Some text with { broken json ]}`;
-        const toolCalls = extractToolCallsFromText(text);
+        const toolCalls = extractToolCallsFromStream(text);
         expect(toolCalls).toHaveLength(0);
     });
     it('should return empty array when no tool calls found', () => {
         const text = 'Just some regular assistant text with no tool calls.';
-        const toolCalls = extractToolCallsFromText(text);
+        const toolCalls = extractToolCallsFromStream(text);
         expect(toolCalls).toHaveLength(0);
+    });
+    it('should keep one-shot extraction parity with stream extraction', () => {
+        const text = 'Before <execute_tool>read_full_html_document{"page":1}</execute_tool> after';
+        const direct = extractToolCallsFromText(text);
+        const streamed = extractToolCallsFromStream(text);
+
+        expect(streamed).toHaveLength(direct.length);
+        expect(streamed[0]?.function?.name).toBe(direct[0]?.function?.name);
+        expect(streamed[0]?.function?.arguments).toBe(direct[0]?.function?.arguments);
     });
 });

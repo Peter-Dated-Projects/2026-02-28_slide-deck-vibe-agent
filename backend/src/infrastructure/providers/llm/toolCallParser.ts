@@ -71,6 +71,120 @@ function extractBalancedObject(source: string, startIndex: number): string | nul
     return null;
 }
 
+function findNextToolCallStartIndex(source: string): number {
+    const startMarkers = ['<execute_tool>', '<tool_call>', '<function_calls>', '<|tool_call>'];
+    let nextIndex = -1;
+
+    for (const marker of startMarkers) {
+        const markerIndex = source.indexOf(marker);
+        if (markerIndex >= 0 && (nextIndex < 0 || markerIndex < nextIndex)) {
+            nextIndex = markerIndex;
+        }
+    }
+
+    const jsonPatterns = [/\{\s*"?\$?tool_calls"?\s*:/g, /\{\s*"?\$?tool_call"?\s*:/g];
+    for (const pattern of jsonPatterns) {
+        pattern.lastIndex = 0;
+        const match = pattern.exec(source);
+        if (match && match.index >= 0 && (nextIndex < 0 || match.index < nextIndex)) {
+            nextIndex = match.index;
+        }
+    }
+
+    return nextIndex;
+}
+
+function getPendingStartPrefixLength(source: string): number {
+    if (!source) {
+        return 0;
+    }
+
+    const startCandidates = [
+        '<execute_tool>',
+        '<tool_call>',
+        '<function_calls>',
+        '<|tool_call>',
+        '{"tool_calls"',
+        '{"tool_call"',
+        '{"$tool_calls"',
+        '{"$tool_call"',
+    ];
+
+    const maxCandidateLength = Math.max(...startCandidates.map((candidate) => candidate.length));
+    const maxSuffixLength = Math.min(source.length, maxCandidateLength - 1);
+
+    for (let length = maxSuffixLength; length > 0; length--) {
+        const suffix = source.slice(-length);
+        for (const candidate of startCandidates) {
+            if (candidate.startsWith(suffix)) {
+                return length;
+            }
+        }
+    }
+
+    return 0;
+}
+
+function consumeToolCallBlockFromStart(source: string): number | null {
+    if (source.startsWith('<execute_tool>')) {
+        const closeIndex = source.indexOf('</execute_tool>');
+        return closeIndex >= 0 ? closeIndex + '</execute_tool>'.length : null;
+    }
+
+    if (source.startsWith('<tool_call>')) {
+        const closeIndex = source.indexOf('</tool_call>');
+        return closeIndex >= 0 ? closeIndex + '</tool_call>'.length : null;
+    }
+
+    if (source.startsWith('<function_calls>')) {
+        const closeIndex = source.indexOf('</function_calls>');
+        return closeIndex >= 0 ? closeIndex + '</function_calls>'.length : null;
+    }
+
+    if (source.startsWith('<|tool_call>')) {
+        const closeIndex = source.indexOf('<tool_call|>');
+        return closeIndex >= 0 ? closeIndex + '<tool_call|>'.length : null;
+    }
+
+    if (/^\{\s*"?\$?tool_calls"?\s*:/.test(source) || /^\{\s*"?\$?tool_call"?\s*:/.test(source)) {
+        const balanced = extractBalancedObject(source, 0);
+        return balanced ? balanced.length : null;
+    }
+
+    return null;
+}
+
+export function stripToolCallsFromText(text: string): string {
+    if (!text) {
+        return '';
+    }
+
+    let remaining = text;
+    let visible = '';
+
+    while (remaining) {
+        const startIndex = findNextToolCallStartIndex(remaining);
+        if (startIndex < 0) {
+            visible += remaining;
+            break;
+        }
+
+        if (startIndex > 0) {
+            visible += remaining.slice(0, startIndex);
+            remaining = remaining.slice(startIndex);
+        }
+
+        const consumedLength = consumeToolCallBlockFromStart(remaining);
+        if (consumedLength === null) {
+            break;
+        }
+
+        remaining = remaining.slice(consumedLength);
+    }
+
+    return visible;
+}
+
 function parseLooseArguments(rawArgs: string): Record<string, any> {
     const normalizedToken = '<|Q|>';
     const tokenNormalized = rawArgs.replace(/<\|"\|>/g, normalizedToken);
@@ -328,6 +442,64 @@ export function extractToolCallsFromText(text: string): ParsedToolCall[] {
     }
 
     return toolCalls;
+}
+
+export class ToolCallStreamSanitizer {
+    private buffer = '';
+
+    addChunk(chunk: string): string {
+        if (!chunk) {
+            return '';
+        }
+
+        this.buffer += chunk;
+        return this.drain(false);
+    }
+
+    flush(): string {
+        return this.drain(true);
+    }
+
+    private drain(finalize: boolean): string {
+        let remaining = this.buffer;
+        let visible = '';
+
+        while (remaining) {
+            const startIndex = findNextToolCallStartIndex(remaining);
+            if (startIndex < 0) {
+                if (finalize) {
+                    visible += remaining;
+                    remaining = '';
+                } else {
+                    const pendingPrefixLength = getPendingStartPrefixLength(remaining);
+                    const visibleLength = remaining.length - pendingPrefixLength;
+                    if (visibleLength > 0) {
+                        visible += remaining.slice(0, visibleLength);
+                    }
+                    remaining = remaining.slice(visibleLength);
+                }
+                break;
+            }
+
+            if (startIndex > 0) {
+                visible += remaining.slice(0, startIndex);
+                remaining = remaining.slice(startIndex);
+            }
+
+            const consumedLength = consumeToolCallBlockFromStart(remaining);
+            if (consumedLength === null) {
+                if (finalize) {
+                    remaining = '';
+                }
+                break;
+            }
+
+            remaining = remaining.slice(consumedLength);
+        }
+
+        this.buffer = remaining;
+        return visible;
+    }
 }
 /**
  * Normalizes a parsed tool call object to our standard format

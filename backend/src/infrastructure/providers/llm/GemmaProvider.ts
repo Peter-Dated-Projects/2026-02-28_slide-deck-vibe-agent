@@ -13,7 +13,7 @@
 import type { ILLMService } from "../../../core/interfaces/ILLMService";
 import type { IDatabaseService } from "../../../core/interfaces/IDatabaseService";
 import type { IStorageService } from "../../../core/interfaces/IStorageService";
-import { ToolStreamManager, extractToolCallsFromText } from "./toolCallParser";
+import { ToolCallStreamSanitizer, ToolStreamManager, extractToolCallsFromText, stripToolCallsFromText } from "./toolCallParser";
 import { sanitizeMessagesForModel } from '../../../core/messageSanitizer';
 
 const DEFAULT_SYSTEM_INSTRUCTION = "You are Vibe Agent, an expert frontend engineer creating beautiful web-native presentations. You communicate directly with the user to understand their slide deck needs. Keep slides modern, interactive, and visually stunning. Gemma 4 reasoning uses the thought channel: emit <|channel>thought ... <channel|> when thinking. When you need to call a tool, emit exactly one Gemma 4 tool call block using <|tool_call>call:function_name{json_arguments}<tool_call|>. Do not use XML tags, bracketed text like [Tool Call], or <execute_tool> syntax.";
@@ -204,11 +204,11 @@ export class GemmaProvider implements ILLMService {
         const rawThinking = typeof data?.message?.thinking === 'string' ? data.message.thinking : '';
         const rawContent = typeof data?.message?.content === 'string' ? data.message.content : '';
         const parsed = rawThinking ? { thinking: rawThinking, content: rawContent } : splitGemmaThoughtChannel(rawContent);
-        const visible = composeVisibleText(parsed.thinking, parsed.content);
+        const visible = stripToolCallsFromText(composeVisibleText(parsed.thinking, parsed.content));
 
         const toolCalls = normalizeToolCalls([
             ...(Array.isArray(data?.message?.tool_calls) ? data.message.tool_calls : []),
-            ...extractToolCallsFromText(visible),
+            ...extractToolCallsFromText(rawContent),
         ]);
 
         if (toolCalls.length > 0) {
@@ -263,11 +263,13 @@ export class GemmaProvider implements ILLMService {
         const reader = response.body!.getReader();
         const decoder = new TextDecoder();
         let ndjsonBuffer = '';
-        let fullText = '';
+        let rawFullText = '';
+        let visibleFullText = '';
         let isThinking = false;
         const toolCalls: any[] = [];
         const collectedTextToolCalls: any[] = [];
         const toolStreamManager = new ToolStreamManager();
+        const visibleTextStream = new ToolCallStreamSanitizer();
 
         const collectTextToolCalls = (calls: any[]) => {
             for (const toolCall of normalizeToolCalls(calls)) {
@@ -285,13 +287,18 @@ export class GemmaProvider implements ILLMService {
 
             if (!isThinking) {
                 onChunk(THINK_OPEN);
-                fullText += THINK_OPEN;
+                rawFullText += THINK_OPEN;
+                visibleFullText += THINK_OPEN;
                 isThinking = true;
             }
 
             collectTextToolCalls(toolStreamManager.addChunk(token));
-            onChunk(token);
-            fullText += token;
+            rawFullText += token;
+            const visibleToken = visibleTextStream.addChunk(token);
+            if (visibleToken) {
+                onChunk(visibleToken);
+                visibleFullText += visibleToken;
+            }
         };
 
         const emitContent = (token: string) => {
@@ -301,13 +308,18 @@ export class GemmaProvider implements ILLMService {
 
             if (isThinking) {
                 onChunk(THINK_CLOSE);
-                fullText += THINK_CLOSE;
+                rawFullText += THINK_CLOSE;
+                visibleFullText += THINK_CLOSE;
                 isThinking = false;
             }
 
             collectTextToolCalls(toolStreamManager.addChunk(token));
-            onChunk(token);
-            fullText += token;
+            rawFullText += token;
+            const visibleToken = visibleTextStream.addChunk(token);
+            if (visibleToken) {
+                onChunk(visibleToken);
+                visibleFullText += visibleToken;
+            }
         };
 
         const processJson = (json: any): boolean => {
@@ -330,7 +342,8 @@ export class GemmaProvider implements ILLMService {
             if (json?.done) {
                 if (isThinking) {
                     onChunk(THINK_CLOSE);
-                    fullText += THINK_CLOSE;
+                    rawFullText += THINK_CLOSE;
+                    visibleFullText += THINK_CLOSE;
                     isThinking = false;
                 }
                 return true;
@@ -389,13 +402,14 @@ export class GemmaProvider implements ILLMService {
 
         if (isThinking) {
             onChunk(THINK_CLOSE);
-            fullText += THINK_CLOSE;
+            rawFullText += THINK_CLOSE;
+            visibleFullText += THINK_CLOSE;
         }
 
         const finalToolCalls = normalizeToolCalls([
             ...toolCalls,
             ...collectedTextToolCalls,
-            ...extractToolCallsFromText(fullText),
+            ...extractToolCallsFromText(rawFullText),
         ]);
 
         if (finalToolCalls.length > 0) {
@@ -403,6 +417,6 @@ export class GemmaProvider implements ILLMService {
             onChunk(`[TOOL_CALLS]${tcStr}[/TOOL_CALLS]`);
         }
 
-        return fullText;
+        return visibleFullText;
     }
 }
