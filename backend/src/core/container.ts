@@ -15,8 +15,8 @@ import type { ILLMService } from './interfaces/ILLMService';
 import type { IStorageService } from './interfaces/IStorageService';
 import type { IDatabaseService } from './interfaces/IDatabaseService';
 import type { ICacheService } from './interfaces/ICacheService';
+import { GemmaProvider } from '../infrastructure/providers/llm/GemmaProvider';
 import { QwenProvider } from '../infrastructure/providers/llm/QwenProvider';
-import { OllamaProvider } from '../infrastructure/providers/llm/OllamaProvider';
 import { MinioProvider } from '../infrastructure/providers/storage/MinioProvider';
 import { GCPStorageProvider } from '../infrastructure/providers/storage/GCPStorageProvider';
 import { PgDatabaseProvider } from '../infrastructure/providers/db/PgDatabaseProvider';
@@ -45,11 +45,11 @@ export const storageService: IStorageService = isLocal
         projectId: process.env.GCP_PROJECT_ID,
     });
 // 3. Initialize LLM Provider
-// If local, we can use Ollama. Otherwise use Claude.
+// If local, we can use Gemma 4 via Ollama. Otherwise use Qwen 3.5.
 export const llmService: ILLMService = isLocal
-    ? new OllamaProvider(
-        process.env.OLLAMA_BASE_URL || 'http://localhost:11434',
-        process.env.OLLAMA_MODEL_KEY || 'llama3.2',
+    ? new GemmaProvider(
+        process.env.GEMMA_BASE_URL || process.env.OLLAMA_BASE_URL || 'http://localhost:11434',
+        process.env.GEMMA_MODEL_KEY || process.env.OLLAMA_MODEL_KEY || 'gemma4',
         dbService,
         storageService
     )

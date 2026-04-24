@@ -73,9 +73,7 @@ function extractBalancedObject(source: string, startIndex: number): string | nul
 
 function parseLooseArguments(rawArgs: string): Record<string, any> {
     const normalizedToken = '<|Q|>';
-    const tokenNormalized = rawArgs
-        .replace(/<\|">\|/g, normalizedToken)
-        .replace(/<\|"\|>/g, normalizedToken);
+    const tokenNormalized = rawArgs.replace(/<\|"\|>/g, normalizedToken);
 
     // Gemma-style key/value payloads: key:<|"|>value<|"|>
     const tokenValuePattern = /([A-Za-z_][A-Za-z0-9_]*)\s*:\s*<\|Q\|>([\s\S]*?)<\|Q\|>/g;
@@ -337,7 +335,7 @@ export function extractToolCallsFromText(text: string): ParsedToolCall[] {
 function normalizeToolCall(obj: any, index: number): ParsedToolCall | null {
     if (!obj) return null;
     // Handle different tool call structures
-    const id = obj.id || obj.index !== undefined ? `tool_call_${obj.index}` : `tool_call_${index}`;
+    const id = obj.id || (obj.index !== undefined ? `tool_call_${obj.index}` : `tool_call_${index}`);
     let name = '';
     let args = '';
     // Extract function name and arguments
@@ -365,4 +363,53 @@ function normalizeToolCall(obj: any, index: number): ParsedToolCall | null {
         };
     }
     return null;
+}
+
+/**
+ * Incrementally parses streamed tokens and emits only newly discovered tool calls.
+ */
+export class ToolStreamManager {
+    private buffer = '';
+    private emittedCounts = new Map<string, number>();
+
+    addChunk(chunk: string): ParsedToolCall[] {
+        if (!chunk) {
+            return [];
+        }
+
+        this.buffer += chunk;
+
+        const parsed = extractToolCallsFromText(this.buffer);
+        if (parsed.length === 0) {
+            return [];
+        }
+
+        const encounteredCounts = new Map<string, number>();
+        const newCalls: ParsedToolCall[] = [];
+
+        for (const call of parsed) {
+            const signature = `${call.function.name}\n${call.function.arguments}`;
+            const encountered = (encounteredCounts.get(signature) ?? 0) + 1;
+            encounteredCounts.set(signature, encountered);
+
+            const alreadyEmitted = this.emittedCounts.get(signature) ?? 0;
+            if (encountered > alreadyEmitted) {
+                newCalls.push(call);
+            }
+        }
+
+        for (const [signature, count] of encounteredCounts.entries()) {
+            const alreadyEmitted = this.emittedCounts.get(signature) ?? 0;
+            if (count > alreadyEmitted) {
+                this.emittedCounts.set(signature, count);
+            }
+        }
+
+        return newCalls;
+    }
+
+    reset(): void {
+        this.buffer = '';
+        this.emittedCounts.clear();
+    }
 }

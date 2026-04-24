@@ -98,17 +98,37 @@ export class VibeManager {
     private static escapeRegex(value: string): string {
         return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     }
+    private static markerBoundaryPattern(marker: string): string {
+        if (!marker.trimStart().startsWith('<!--')) {
+            return VibeManager.escapeRegex(marker);
+        }
+        const tokenMatch = marker.match(/VIBE_[A-Z0-9_]+/);
+        if (!tokenMatch) {
+            return VibeManager.escapeRegex(marker);
+        }
+        const token = VibeManager.escapeRegex(tokenMatch[0]);
+        // Supports all marker variants we use:
+        // 1) <!-- TOKEN -->
+        // 2) <!-- TOKEN: annotation -->
+        // 3) <!-- <!-- TOKEN --> --> (legacy nested wrapper)
+        return `<!--\\s*(?:<!--\\s*)?${token}(?:\\s*-->\\s*)?(?::[^\\r\\n]*?)?-->`;
+    }
     private getMarkerBlock(pairs: Array<{ start: string; end: string }>): { content: string; start: string; end: string } | null {
         for (const pair of pairs) {
-            const escapedStart = VibeManager.escapeRegex(pair.start);
-            const escapedEnd = VibeManager.escapeRegex(pair.end);
-            const pattern = new RegExp(`${escapedStart}\\s*([\\s\\S]*?)\\s*${escapedEnd}`, 'i');
+            const startPattern = VibeManager.markerBoundaryPattern(pair.start);
+            const endPattern = VibeManager.markerBoundaryPattern(pair.end);
+            const pattern = new RegExp(`(${startPattern})\\s*([\\s\\S]*?)\\s*(${endPattern})`, 'i');
             const match = pattern.exec(this.content);
             if (match) {
+                const matchedStart = match[1];
+                const matchedEnd = match[3];
+                if (!matchedStart || !matchedEnd) {
+                    continue;
+                }
                 return {
-                    content: (match[1] || '').trim(),
-                    start: pair.start,
-                    end: pair.end
+                    content: (match[2] || '').trim(),
+                    start: matchedStart,
+                    end: matchedEnd
                 };
             }
         }
@@ -167,6 +187,10 @@ export class VibeManager {
     getTheme(): string {
         const block = this.getMarkerBlock([
             {
+                start: '/* <!-- VIBE_THEME_START -->',
+                end: '/* <!-- VIBE_THEME_END --> */'
+            },
+            {
                 start: '/* <!-- VIBE_THEME_START --> */',
                 end: '/* <!-- VIBE_THEME_END --> */'
             },
@@ -180,6 +204,10 @@ export class VibeManager {
     async setTheme(css: string): Promise<void> {
         await this.setMarkerBlock(
             [
+                {
+                    start: '/* <!-- VIBE_THEME_START -->',
+                    end: '/* <!-- VIBE_THEME_END --> */'
+                },
                 {
                     start: '/* <!-- VIBE_THEME_START --> */',
                     end: '/* <!-- VIBE_THEME_END --> */'
@@ -195,6 +223,10 @@ export class VibeManager {
     getTransitions(): string {
         const block = this.getMarkerBlock([
             {
+                start: '/* <!-- VIBE_TRANSITIONS_START -->',
+                end: '/* <!-- VIBE_TRANSITIONS_END --> */'
+            },
+            {
                 start: '/* <!-- VIBE_TRANSITIONS_START --> */',
                 end: '/* <!-- VIBE_TRANSITIONS_END --> */'
             },
@@ -208,6 +240,10 @@ export class VibeManager {
     async setTransitions(css: string): Promise<void> {
         await this.setMarkerBlock(
             [
+                {
+                    start: '/* <!-- VIBE_TRANSITIONS_START -->',
+                    end: '/* <!-- VIBE_TRANSITIONS_END --> */'
+                },
                 {
                     start: '/* <!-- VIBE_TRANSITIONS_START --> */',
                     end: '/* <!-- VIBE_TRANSITIONS_END --> */'
@@ -223,6 +259,10 @@ export class VibeManager {
     getAnimations(): string {
         const block = this.getMarkerBlock([
             {
+                start: '/* <!-- VIBE_ANIMATIONS_START -->',
+                end: '/* <!-- VIBE_ANIMATIONS_END --> */'
+            },
+            {
                 start: '/* <!-- VIBE_ANIMATIONS_START --> */',
                 end: '/* <!-- VIBE_ANIMATIONS_END --> */'
             },
@@ -236,6 +276,10 @@ export class VibeManager {
     async setAnimations(css: string): Promise<void> {
         await this.setMarkerBlock(
             [
+                {
+                    start: '/* <!-- VIBE_ANIMATIONS_START -->',
+                    end: '/* <!-- VIBE_ANIMATIONS_END --> */'
+                },
                 {
                     start: '/* <!-- VIBE_ANIMATIONS_START --> */',
                     end: '/* <!-- VIBE_ANIMATIONS_END --> */'

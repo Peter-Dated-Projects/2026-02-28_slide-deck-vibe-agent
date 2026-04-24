@@ -13,12 +13,12 @@
 /**
  * Ollama Conversation Integration Test (Jest)
  *
- * Verifies that we can maintain a multi-turn conversation with a local Ollama instance.
- * Requires OLLAMA_MODEL_KEY in .env.test. OLLAMA_BASE_URL defaults to http://localhost:11434.
+ * Verifies that we can maintain a multi-turn conversation with the local Gemma 4 provider.
+ * Requires GEMMA_MODEL_KEY in .env.test. GEMMA_BASE_URL defaults to http://localhost:11434.
  */
 import { describe, expect, beforeAll, it } from "bun:test";
 import '../config';
-import { OllamaProvider } from '../infrastructure/providers/llm/OllamaProvider';
+import { GemmaProvider } from '../infrastructure/providers/llm/GemmaProvider';
 import type { IDatabaseService } from '../core/interfaces/IDatabaseService';
 import type { IStorageService } from '../core/interfaces/IStorageService';
 const dbStub = {} as IDatabaseService;
@@ -30,13 +30,13 @@ const USER_MESSAGES = [
 ];
 // Check if the user ran 'bun test integration'
 const isIntegrationRun = process.argv.join(' ').includes('integration');
-describe.skipIf(!isIntegrationRun)('Ollama LLM - Conversation', () => {
-    let provider: OllamaProvider;
+describe.skipIf(!isIntegrationRun)('Gemma LLM - Conversation', () => {
+    let provider: GemmaProvider;
     beforeAll(() => {
-        const model = process.env.OLLAMA_MODEL_KEY;
-        if (!model) throw new Error('OLLAMA_MODEL_KEY is not set in .env.test');
-        const baseUrl = process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
-        provider = new OllamaProvider(baseUrl, model, dbStub, storageStub);
+        const model = process.env.GEMMA_MODEL_KEY || process.env.OLLAMA_MODEL_KEY;
+        if (!model) throw new Error('GEMMA_MODEL_KEY is not set in .env.test');
+        const baseUrl = process.env.GEMMA_BASE_URL || process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
+        provider = new GemmaProvider(baseUrl, model, dbStub, storageStub);
     });
     it('should complete a 3-turn conversation and return non-empty responses', async () => {
         const conversationId = 'jest-test-' + Date.now();

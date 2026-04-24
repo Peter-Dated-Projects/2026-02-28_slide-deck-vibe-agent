@@ -444,7 +444,16 @@ When you need to call a tool, you must ONLY use the native tool call format: <ex
 
 At the start of every new session, call \`design({\"action\":\"read\"})\` before responding to the user. Use the contents to orient yourself - do not ask the user to re-explain decisions that are already documented. If DESIGN.md is empty, ask the user for the presentation's core intent and structure, then call \`design({\"action\":\"write\",\"section\":...,\"content\":...})\` to record it before proceeding.
 
-On every turn, check whether your response involves a design-level decision. If it does, call \`design({\"action\":\"read\"})\` first to verify consistency, and call \`design({\"action\":\"write\",\"section\":...,\"content\":...})\` after if something durable was decided.`;
+On every turn, check whether your response involves a design-level decision. If it does, call \`design({\"action\":\"read\"})\` first to verify consistency, and call \`design({\"action\":\"write\",\"section\":...,\"content\":...})\` after if something durable was decided.
+
+Before making any mutating change to the deck (for example \`write_slide\`, \`add_slide\`, \`delete_slide\`, \`move_slide\`, \`reorder_slides\`, \`manifest\` write, \`theme\` write, \`transitions\` write, \`animations\` write, \`global_ui\` write, or \`apply_changes\`), you MUST ensure DESIGN.md is filled out and current.
+
+Required workflow:
+1. Call \`design({\"action\":\"read\"})\`.
+2. If any of the four sections (intent, structure, visual_language, constraints) are missing, vague, or outdated for the current request, ask concise clarifying questions if needed and then write the missing/updated sections with \`design({\"action\":\"write\",...})\`.
+3. Only after DESIGN.md is updated and coherent should you execute mutating deck tools.
+
+Treat DESIGN.md as the source of truth for planning. If the user's request conflicts with it, update DESIGN.md first, then apply code/content changes.`;
     return { tools, systemInstruction };
 };
 /**
