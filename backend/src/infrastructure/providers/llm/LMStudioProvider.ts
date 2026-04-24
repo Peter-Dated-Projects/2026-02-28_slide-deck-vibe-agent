@@ -13,6 +13,7 @@
 import OpenAI from 'openai';
 import type { ILLMService } from "../../../core/interfaces/ILLMService";
 import { extractToolCallsFromText } from "./toolCallParser";
+import { sanitizeMessagesForModel } from '../../../core/messageSanitizer';
 
 /**
  * LM Studio provider.
@@ -35,6 +36,7 @@ export class LMStudioProvider implements ILLMService {
 
     private buildMessages(messages: any[], systemInstruction?: string, tools?: any[]): OpenAI.Chat.ChatCompletionMessageParam[] {
         let instruction = systemInstruction || "You are Vibe Agent, an expert frontend engineer creating beautiful web-native presentations. You communicate directly with the user to understand their slide deck needs. Keep slides modern, interactive, and visually stunning.";
+        const normalizedMessages = sanitizeMessagesForModel(messages);
 
         // For local models that might ignore the OpenAI tools array,
         // explicitly inject the tool definitions into the system prompt.
@@ -47,7 +49,7 @@ export class LMStudioProvider implements ILLMService {
             { role: 'system', content: instruction },
         ];
 
-        for (const m of messages) {
+        for (const m of normalizedMessages) {
             // Assistant message that made tool calls — convert to plain text
             if (m.role === 'assistant' && Array.isArray(m.tool_calls) && m.tool_calls.length > 0) {
                 const toolCallText = m.tool_calls.map((tc: any) => {

@@ -1,4 +1,5 @@
 import { llmService, dbService as db } from '../core/container';
+import { normalizeMessageContentForModel } from '../core/messageSanitizer';
 
 /**
  * Heuristic to estimate token count.
@@ -61,7 +62,7 @@ export class ContextManager {
         totalTokens += estimateTokens(summary);
 
         for (const msg of rawMessages) {
-            totalTokens += estimateTokens(msg.content);
+            totalTokens += estimateTokens(normalizeMessageContentForModel(msg.content));
             if (msg.tool_calls) {
                 totalTokens += estimateTokens(JSON.stringify(msg.tool_calls));
             }
@@ -129,7 +130,7 @@ export class ContextManager {
 
             // Format conversation segment for the LLM
             const segmentText = messagesToCompress.map(m => {
-                const text = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
+                const text = normalizeMessageContentForModel(m.content);
                 return `[${m.role.toUpperCase()}]: ${text}`;
             }).join('\n\n');
 

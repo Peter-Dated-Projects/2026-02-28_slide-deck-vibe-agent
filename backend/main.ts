@@ -18,6 +18,7 @@ import * as userController from './src/controllers/user';
 import * as projectController from './src/controllers/project';
 import { requireAuth, type AuthRequest } from './src/middleware/auth';
 import { dbService as db } from './src/core/container';
+import { normalizeMessageContentForModel } from './src/core/messageSanitizer';
 import { chatWithAgent, chatWithAgentStream } from './src/services/agent';
 import { loadDeckHtmlForProject, loadDesignForProject, saveDesignForProject } from './src/services/projectDeck';
 import { config } from './src/config';
@@ -70,24 +71,18 @@ const normalizeAssistantContentBlocks = (blocks: any[]): any[] => {
     if (!Array.isArray(blocks) || blocks.length === 0) {
         return blocks;
     }
-    const hasTextBlock = blocks.some((block: any) => {
-        if (block?.type !== 'text') return false;
-        const value = typeof block?.text === 'string' ? block.text : block?.content;
-        return typeof value === 'string' && value.trim().length > 0;
-    });
-    if (hasTextBlock) {
-        return blocks;
-    }
-    // If model only produced think/tool blocks, promote the final think text into a visible text block.
-    for (let i = blocks.length - 1; i >= 0; i--) {
-        const block = blocks[i];
-        if (block?.type !== 'think') continue;
-        const thinkText = typeof block?.text === 'string' ? block.text : block?.content;
-        if (typeof thinkText === 'string' && thinkText.trim().length > 0) {
-            return [...blocks, { type: 'text', text: thinkText.trim() }];
-        }
-    }
     return blocks;
+};
+const mapStoredMessageForModel = (row: any) => {
+    const raw = row.content;
+    const text = normalizeMessageContentForModel(raw);
+    return {
+        role: row.role as string,
+        content: text,
+        tool_calls: row.tool_calls,
+        tool_results: row.tool_results,
+        tool_call_id: row.tool_call_id
+    };
 };
 app.use(cors({
   origin: process.env.FRONTEND_URL,
@@ -205,24 +200,7 @@ app.post('/api/chat', requireAuth, async (req: AuthRequest, res: express.Respons
             'SELECT role, content, tool_calls, tool_call_id, tool_results FROM messages WHERE conversation_id = $1 AND is_compressed = FALSE ORDER BY created_at ASC',
             [currentConvId]
         );
-        const mapMessagesNonStream = (rows: any[]) => rows.map((row: any) => {
-            const raw = row.content;
-            let text: string;
-            if (typeof raw === 'string') {
-                text = raw;
-            } else if (raw?.text) {
-                text = raw.text;
-            } else if (Array.isArray(raw)) {
-                text = raw.map((b: any) => {
-                    if (b.type === 'text') return b.text || b.content || "";
-                    if (b.type === 'think') return `<think>\n${b.text || b.content || ""}\n</think>`;
-                    return "";
-                }).filter(Boolean).join('\n');
-            } else {
-                text = JSON.stringify(raw);
-            }
-            return { role: row.role as string, content: text };
-        });
+        const mapMessagesNonStream = (rows: any[]) => rows.map(mapStoredMessageForModel);
         let messagesContext: any[] = mapMessagesNonStream(historyResult.rows);
 
         // Budget check — run compression silently (no SSE in non-streaming path)
@@ -328,30 +306,7 @@ app.post('/api/chat/stream', requireAuth, async (req: AuthRequest, res: express.
             [currentConvId]
         );
         
-        const mapMessages = (rows: any[]) => rows.map((row: any) => {
-            const raw = row.content;
-            let text: string;
-            if (typeof raw === 'string') {
-                text = raw;
-            } else if (raw?.text) {
-                text = raw.text;
-            } else if (Array.isArray(raw)) {
-                text = raw.map((b: any) => {
-                    if (b.type === 'text') return b.text || b.content || "";
-                    if (b.type === 'think') return `<think>\n${b.text || b.content || ""}\n</think>`;
-                    return "";
-                }).filter(Boolean).join('\n');
-            } else {
-                text = JSON.stringify(raw);
-            }
-            return { 
-                role: row.role as string, 
-                content: text,
-                tool_calls: row.tool_calls,
-                tool_results: row.tool_results,
-                tool_call_id: row.tool_call_id
-            };
-        });
+        const mapMessages = (rows: any[]) => rows.map(mapStoredMessageForModel);
 
         let messagesContext = mapMessages(uncompressedMessagesResult.rows);
 

@@ -16,6 +16,7 @@ import * as fs from 'fs/promises';
 import * as os from 'os';
 import { VibeManager } from '../core/vibeManager';
 import { getTools, executeTool, type AgentRuntimeState, type AgentTaskItem, type OnLayoutRequest } from '../core/tools';
+import { sanitizeMessagesForModel } from '../core/messageSanitizer';
 import { loadDeckHtmlForProject, saveDeckHtmlForProject, loadDesignForProject, saveDesignForProject } from './projectDeck';
 import { ContextManager } from './contextManager';
 const buildSystemInstructionWithTaskList = (baseInstruction: string, runtimeState: AgentRuntimeState) => {
@@ -88,18 +89,15 @@ const sanitizeToolCalls = (toolCalls: any[]): any[] => {
         .filter(Boolean);
 };
 const sanitizeMessagesForLlm = (messages: any[]): any[] => {
-    return messages.map((msg: any) => {
-        const base: any = {
-            role: msg?.role,
-            content: typeof msg?.content === 'string' ? msg.content : String(msg?.content ?? '')
-        };
+    const sanitized = sanitizeMessagesForModel(messages);
+    return sanitized.map((msg: any) => {
         if (Array.isArray(msg?.tool_calls) && msg.tool_calls.length > 0) {
-            base.tool_calls = sanitizeToolCalls(msg.tool_calls);
+            return {
+                ...msg,
+                tool_calls: sanitizeToolCalls(msg.tool_calls)
+            };
         }
-        if (typeof msg?.tool_call_id === 'string' && msg.tool_call_id.trim()) {
-            base.tool_call_id = msg.tool_call_id;
-        }
-        return base;
+        return msg;
     });
 };
 const loadConversationTaskList = async (conversationId: string): Promise<AgentTaskItem[]> => {
