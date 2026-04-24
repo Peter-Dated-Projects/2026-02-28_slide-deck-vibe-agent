@@ -99,8 +99,8 @@ ${Array.from({ length: 120 }, (_value, index) => `LINE ${index + 1}`).join('\n')
             hash: hashOf(initialSlideInnerHtml)
         });
     });
-    it('read_html_document returns the full HTML document and hash', async () => {
-        const result = await executeTool(vibeManager, 'read_html_document', {});
+    it('read_full_html_document returns the full HTML document and hash', async () => {
+        const result = await executeTool(vibeManager, 'read_full_html_document', {});
         const parsed = JSON.parse(result);
         expect(parsed.success).toBe(true);
         expect(parsed.mutated).toBe(false);
@@ -108,11 +108,11 @@ ${Array.from({ length: 120 }, (_value, index) => `LINE ${index + 1}`).join('\n')
         expect(parsed.hash).toBe(hashOf(fixtureHtml));
         expect(parsed.max_length).toBe(fixtureHtml.split(/\r?\n/).length);
     });
-    it('read_html_document paginates 50-line sections with max_length metadata', async () => {
+    it('read_full_html_document paginates 50-line sections with max_length metadata', async () => {
         await fs.writeFile(tempFilePath, longFixtureHtml, { encoding: 'utf-8' });
         vibeManager = await VibeManager.create(tempFilePath);
 
-        const firstPageResult = await executeTool(vibeManager, 'read_html_document', { page: 1, sections: 1 });
+        const firstPageResult = await executeTool(vibeManager, 'read_full_html_document', { page: 1, sections: 1 });
         const firstPageParsed = JSON.parse(firstPageResult);
         const longLines = longFixtureHtml.split(/\r?\n/);
         expect(firstPageParsed.success).toBe(true);
@@ -124,7 +124,7 @@ ${Array.from({ length: 120 }, (_value, index) => `LINE ${index + 1}`).join('\n')
         expect(firstPageParsed.max_length).toBe(longLines.length);
         expect(firstPageParsed.html).toBe(longLines.slice(0, 50).join('\n'));
 
-        const secondPageResult = await executeTool(vibeManager, 'read_html_document', { page: 2, sections: 2 });
+        const secondPageResult = await executeTool(vibeManager, 'read_full_html_document', { page: 2, sections: 2 });
         const secondPageParsed = JSON.parse(secondPageResult);
         expect(secondPageParsed.success).toBe(true);
         expect(secondPageParsed.page).toBe(2);
@@ -209,11 +209,11 @@ ${Array.from({ length: 120 }, (_value, index) => `LINE ${index + 1}`).join('\n')
         expect(writeSlideTool.function.description).toContain('slide_id only');
         expect(systemInstruction).toContain('Use `slide_id` (component ID) for all write operations');
     });
-    it('getTools includes read_html_document for full document access', async () => {
+    it('getTools includes read_full_html_document for full document access', async () => {
         const { tools } = await getTools(vibeManager);
-        const readHtmlDocumentTool = tools.find((tool: any) => tool.type === 'function' && tool.function.name === 'read_html_document');
+        const readHtmlDocumentTool = tools.find((tool: any) => tool.type === 'function' && tool.function.name === 'read_full_html_document');
         expect(readHtmlDocumentTool).toBeDefined();
-        if (!readHtmlDocumentTool) throw new Error('read_html_document tool is not registered');
+        if (!readHtmlDocumentTool) throw new Error('read_full_html_document tool is not registered');
         expect(readHtmlDocumentTool.function.description).toContain('entire HTML document');
         expect((readHtmlDocumentTool.function.parameters as any)?.properties?.page?.type).toBe('number');
         expect((readHtmlDocumentTool.function.parameters as any)?.properties?.sections?.type).toBe('number');

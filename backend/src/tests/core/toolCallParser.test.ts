@@ -23,7 +23,7 @@ describe('extractToolCallsFromText', () => {
             "id": "call_single_1",
             "type": "function",
             "function": {
-                "name": "read_html_document",
+                "name": "read_full_html_document",
                 "arguments": "{\\"page\\": 1}"
             }
         }}
@@ -33,7 +33,7 @@ describe('extractToolCallsFromText', () => {
         const firstToolCall = toolCalls[0];
         expect(firstToolCall).toBeDefined();
         if (!firstToolCall) throw new Error('Expected first tool call');
-        expect(firstToolCall.function.name).toBe('read_html_document');
+        expect(firstToolCall.function.name).toBe('read_full_html_document');
     });
 
     it('should extract tool calls from JSON with tool_calls array', () => {
@@ -133,14 +133,14 @@ describe('extractToolCallsFromText', () => {
     });
     it('should extract tool calls from execute_tool tags', () => {
         const text = `
-        <execute_tool>read_html_document{"page":1}</execute_tool>
+        <execute_tool>read_full_html_document{"page":1}</execute_tool>
         `;
         const toolCalls = extractToolCallsFromText(text);
         expect(toolCalls).toHaveLength(1);
         const firstToolCall = toolCalls[0];
         expect(firstToolCall).toBeDefined();
         if (!firstToolCall) throw new Error('Expected first tool call');
-        expect(firstToolCall.function.name).toBe('read_html_document');
+        expect(firstToolCall.function.name).toBe('read_full_html_document');
     });
     it('should extract execute_tool calls when arguments include CSS braces', () => {
         const text = `

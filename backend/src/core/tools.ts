@@ -269,7 +269,7 @@ export const getTools = async (vibeManager: VibeManager): Promise<{ tools: OpenA
         {
             type: 'function',
             function: {
-                name: 'read_html_document',
+                name: 'read_full_html_document',
                 description: 'Read the HTML document in 50-line sections. Provide page and sections on every call; returns the requested chunk plus the document line count.',
                 parameters: {
                     type: 'object',
@@ -670,7 +670,7 @@ export const executeTool = async (
             await vibeManager.setManifest(args.manifest);
             return formatResult({ success: true, mutated: true, entities_changed: ['manifest'] });
         }
-        if (name === 'read_html_document') {
+        if (name === 'read_full_html_document') {
             const page = Number(args?.page || 1);
             const sections = Number(args?.sections || 1);
             if (isNaN(page) || isNaN(sections) || page < 1 || sections < 1) {
