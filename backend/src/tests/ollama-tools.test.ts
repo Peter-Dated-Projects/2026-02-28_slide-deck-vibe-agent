@@ -13,9 +13,9 @@
 /**
  * Ollama Tool Calling Integration Test (Jest)
  *
- * Verifies that Ollama can trigger a locally-defined dummy tool call.
+ * Verifies that the local Gemma 4 provider can trigger a locally-defined dummy tool call.
  * The tool is NOT a real production tool — it's a one-time echo function defined here only.
- * Requires OLLAMA_MODEL_KEY in .env.test. OLLAMA_BASE_URL defaults to http://localhost:11434.
+ * Requires GEMMA_MODEL_KEY in .env.test. GEMMA_BASE_URL defaults to http://localhost:11434.
  */
 import '../config';
 // One-time dummy tool for testing purposes only
@@ -36,14 +36,14 @@ const DUMMY_TOOL = {
         }
     }
 };
-describe('Ollama LLM - Tool Calling', () => {
+describe('Gemma LLM - Tool Calling', () => {
     let baseUrl: string;
     let model: string;
     beforeAll(() => {
-        const modelKey = process.env.OLLAMA_MODEL_KEY;
-        if (!modelKey) throw new Error('OLLAMA_MODEL_KEY is not set in .env.test');
+        const modelKey = process.env.GEMMA_MODEL_KEY || process.env.OLLAMA_MODEL_KEY;
+        if (!modelKey) throw new Error('GEMMA_MODEL_KEY is not set in .env.test');
         model = modelKey;
-        baseUrl = process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
+        baseUrl = process.env.GEMMA_BASE_URL || process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
     });
     it('should trigger the echo_test dummy tool call', async () => {
         const response = await fetch(`${baseUrl}/api/chat`, {

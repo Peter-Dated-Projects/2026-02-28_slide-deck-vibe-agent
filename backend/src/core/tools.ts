@@ -11,9 +11,10 @@
  */
 
 import OpenAI from 'openai';
+import { createHash } from 'node:crypto';
 import { VibeManager } from './vibeManager';
 import { layoutRequestStore, type LayoutResponse } from './layoutRequestStore';
-import * as crypto from 'crypto';
+
 const HTML_DOCUMENT_LINES_PER_SECTION = 50;
 type ToolResult = {
     success?: boolean;
@@ -31,7 +32,7 @@ export interface AgentRuntimeState {
     tasks: AgentTaskItem[];
 }
 const hashOf = (value: unknown): string =>
-    crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
+    createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const normalizeEntities = (entities: string[]): string[] => [...new Set(entities)];
 const formatResult = (result: ToolResult): string => {
     return JSON.stringify({
@@ -233,26 +234,19 @@ export const getTools = async (vibeManager: VibeManager): Promise<{ tools: OpenA
         {
             type: 'function',
             function: {
-                name: 'read_manifest',
-                description: 'Read the current vibe manifest JSON and return its content hash.',
-                parameters: {
-                    type: 'object',
-                    properties: {}
-                }
-            }
-        },
-        {
-            type: 'function',
-            function: {
-                name: 'write_manifest',
-                description: 'Write manifest JSON with OCC hash validation from read_manifest.',
+                name: 'manifest',
+                description: 'Read or write manifest JSON. Set action to read or write. For write, provide manifest and hash from a prior read.',
                 parameters: {
                     type: 'object',
                     properties: {
+                        action: {
+                            type: 'string',
+                            enum: ['read', 'write']
+                        },
                         manifest: { type: 'object' },
                         hash: { type: 'string' }
                     },
-                    required: ['manifest', 'hash']
+                    required: ['action']
                 }
             }
         },
@@ -276,7 +270,7 @@ export const getTools = async (vibeManager: VibeManager): Promise<{ tools: OpenA
         {
             type: 'function',
             function: {
-                name: 'read_html_document',
+                name: 'read_full_html_document',
                 description: 'Read the HTML document in 50-line sections. Provide page and sections on every call; returns the requested chunk plus the document line count.',
                 parameters: {
                     type: 'object',
@@ -290,92 +284,76 @@ export const getTools = async (vibeManager: VibeManager): Promise<{ tools: OpenA
         {
             type: 'function',
             function: {
-                name: 'read_theme',
-                description: 'Read deck-wide theme CSS and return hash.',
-                parameters: { type: 'object', properties: {} }
-            }
-        },
-        {
-            type: 'function',
-            function: {
-                name: 'write_theme',
-                description: 'Write deck-wide theme CSS with OCC hash validation.',
+                name: 'theme',
+                description: 'Read or write deck-wide theme CSS. Set action to read or write. For write, provide css and hash from a prior read.',
                 parameters: {
                     type: 'object',
                     properties: {
-                        newCss: { type: 'string' },
-                        hash: { type: 'string' }
-                    },
-                    required: ['newCss', 'hash']
-                }
-            }
-        },
-        {
-            type: 'function',
-            function: {
-                name: 'read_transitions',
-                description: 'Read transitions CSS and return hash.',
-                parameters: { type: 'object', properties: {} }
-            }
-        },
-        {
-            type: 'function',
-            function: {
-                name: 'write_transitions',
-                description: 'Write transitions CSS with OCC hash validation.',
-                parameters: {
-                    type: 'object',
-                    properties: {
+                        action: {
+                            type: 'string',
+                            enum: ['read', 'write']
+                        },
                         css: { type: 'string' },
                         hash: { type: 'string' }
                     },
-                    required: ['css', 'hash']
+                    required: ['action']
                 }
             }
         },
         {
             type: 'function',
             function: {
-                name: 'read_animations',
-                description: 'Read animations CSS and return hash.',
-                parameters: { type: 'object', properties: {} }
-            }
-        },
-        {
-            type: 'function',
-            function: {
-                name: 'write_animations',
-                description: 'Write animations CSS with OCC hash validation.',
+                name: 'transitions',
+                description: 'Read or write transitions CSS. Set action to read or write. For write, provide css and hash from a prior read.',
                 parameters: {
                     type: 'object',
                     properties: {
+                        action: {
+                            type: 'string',
+                            enum: ['read', 'write']
+                        },
                         css: { type: 'string' },
                         hash: { type: 'string' }
                     },
-                    required: ['css', 'hash']
+                    required: ['action']
                 }
             }
         },
         {
             type: 'function',
             function: {
-                name: 'read_global_ui',
-                description: 'Read global UI HTML and return hash.',
-                parameters: { type: 'object', properties: {} }
+                name: 'animations',
+                description: 'Read or write animations CSS. Set action to read or write. For write, provide css and hash from a prior read.',
+                parameters: {
+                    type: 'object',
+                    properties: {
+                        action: {
+                            type: 'string',
+                            enum: ['read', 'write']
+                        },
+                        css: { type: 'string' },
+                        hash: { type: 'string' }
+                    },
+                    required: ['action']
+                }
             }
         },
         {
             type: 'function',
             function: {
-                name: 'write_global_ui',
-                description: 'Write global UI HTML with OCC hash validation.',
+                name: 'global_ui',
+                description: 'Read or write global UI HTML. Set action to read or write. For write, provide html and hash from a prior read.',
                 parameters: {
                     type: 'object',
                     properties: {
+                        action: {
+                            type: 'string',
+                            enum: ['read', 'write']
+                        },
                         html: { type: 'string' },
                         hash: { type: 'string' }
                     },
-                    required: ['html', 'hash']
+                    required: ['action']
                 }
             }
         },
@@ -384,22 +362,6 @@ export const getTools = async (vibeManager: VibeManager): Promise<{ tools: OpenA
             function: {
                 name: 'validate_deck_state',
                 description: 'Validate consistency between HTML slide IDs and manifest.active_slides.',
-                parameters: { type: 'object', properties: {} }
-            }
-        },
-        {
-            type: 'function',
-            function: {
-                name: 'detect_template_version',
-                description: 'Detect whether current deck appears to be V2 or V3.',
-                parameters: { type: 'object', properties: {} }
-            }
-        },
-        {
-            type: 'function',
-            function: {
-                name: 'migrate_template_to_v3',
-                description: 'Migrate a legacy V2 template to V3 UUID markers and initialize manifest/global UI markers.',
                 parameters: { type: 'object', properties: {} }
             }
         },
@@ -444,34 +406,27 @@ export const getTools = async (vibeManager: VibeManager): Promise<{ tools: OpenA
         {
             type: 'function',
             function: {
-                name: 'read_design',
-                description: 'Read the current contents of DESIGN.md. Call this at session start and whenever you need design context before making or evaluating an edit.',
-                parameters: {
-                    type: 'object',
-                    properties: {},
-                    required: []
-                }
-            }
-        },
-        {
-            type: 'function',
-            function: {
-                name: 'write_design',
-                description: 'Overwrite a named section of DESIGN.md. Only call this when a durable design decision has been confirmed by the user. Do not call this for conversational content, slide-level edits, or anything that belongs in the edit log.',
+                name: 'design',
+                description: 'Read or write DESIGN.md. Set action to read or write. For write, provide section and content.',
                 parameters: {
                     type: 'object',
                     properties: {
+                        action: {
+                            type: 'string',
+                            enum: ['read', 'write'],
+                            description: 'Whether to read DESIGN.md or write a section.'
+                        },
                         section: {
                             type: 'string',
                             enum: ['intent', 'structure', 'visual_language', 'constraints'],
-                            description: 'The section of DESIGN.md to update.'
+                            description: 'Required when action is write. The section of DESIGN.md to update.'
                         },
                         content: {
                             type: 'string',
-                            description: 'The new content for the section. Use short declarative statements. Do not include the section header — just the content.'
+                            description: 'Required when action is write. The new content for the section. Use short declarative statements. Do not include the section header - just the content.'
                         }
                     },
-                    required: ['section', 'content']
+                    required: ['action']
                 }
             }
         }
@@ -488,9 +443,18 @@ Note: The underlying tools use legacy terminology like "slide" and "deck", but t
 
 When you need to call a tool, you must ONLY use the native tool call format: <execute_tool>function_name{json_arguments}</execute_tool>. Do not use other XML tags, bracketed text like [Tool Call], or any other tool-call syntax.
 
-At the start of every new session, call \`read_design()\` before responding to the user. Use the contents to orient yourself — do not ask the user to re-explain decisions that are already documented. If DESIGN.md is empty, ask the user for the presentation's core intent and structure, then call \`write_design()\` to record it before proceeding.
+At the start of every new session, call \`design({\"action\":\"read\"})\` before responding to the user. Use the contents to orient yourself - do not ask the user to re-explain decisions that are already documented. If DESIGN.md is empty, ask the user for the presentation's core intent and structure, then call \`design({\"action\":\"write\",\"section\":...,\"content\":...})\` to record it before proceeding.
 
-On every turn, check whether your response involves a design-level decision. If it does, call \`read_design()\` first to verify consistency, and call \`write_design()\` after if something durable was decided.`;
+On every turn, check whether your response involves a design-level decision. If it does, call \`design({\"action\":\"read\"})\` first to verify consistency, and call \`design({\"action\":\"write\",\"section\":...,\"content\":...})\` after if something durable was decided.
+
+Before making any mutating change to the deck (for example \`write_slide\`, \`add_slide\`, \`delete_slide\`, \`move_slide\`, \`reorder_slides\`, \`manifest\` write, \`theme\` write, \`transitions\` write, \`animations\` write, \`global_ui\` write, or \`apply_changes\`), you MUST ensure DESIGN.md is filled out and current.
+
+Required workflow:
+1. Call \`design({\"action\":\"read\"})\`.
+2. If any of the four sections (intent, structure, visual_language, constraints) are missing, vague, or outdated for the current request, ask concise clarifying questions if needed and then write the missing/updated sections with \`design({\"action\":\"write\",...})\`.
+3. Only after DESIGN.md is updated and coherent should you execute mutating deck tools.
+
+Treat DESIGN.md as the source of truth for planning. If the user's request conflicts with it, update DESIGN.md first, then apply code/content changes.`;
     return { tools, systemInstruction };
 };
 /**
@@ -697,11 +661,15 @@ export const executeTool = async (
             await vibeManager.reorderManifestSlides(reordered);
             return formatResult({ success: true, active_slides: reordered, mutated: true, entities_changed: ['manifest'] });
         }
-        if (name === 'read_manifest') {
-            const manifest = vibeManager.getManifest();
-            return formatResult({ success: true, manifest, hash: hashOf(manifest), mutated: false });
-        }
-        if (name === 'write_manifest') {
+        if (name === 'manifest') {
+            const action = String(args?.action || '').trim().toLowerCase();
+            if (!action || !['read', 'write'].includes(action)) {
+                return formatResult({ error: 'Invalid or missing action. Must be one of: read, write', mutated: false });
+            }
+            if (action === 'read') {
+                const manifest = vibeManager.getManifest();
+                return formatResult({ success: true, manifest, hash: hashOf(manifest), mutated: false });
+            }
             if (!args?.manifest) return formatResult({ error: 'Missing manifest payload.', mutated: false });
             if (!args?.hash) return formatResult({ error: 'Missing hash. Read manifest first.', mutated: false });
             const current = vibeManager.getManifest();
@@ -712,7 +680,7 @@ export const executeTool = async (
             await vibeManager.setManifest(args.manifest);
             return formatResult({ success: true, mutated: true, entities_changed: ['manifest'] });
         }
-        if (name === 'read_html_document') {
+        if (name === 'read_full_html_document') {
             const page = Number(args?.page || 1);
             const sections = Number(args?.sections || 1);
             if (isNaN(page) || isNaN(sections) || page < 1 || sections < 1) {
@@ -744,26 +712,34 @@ export const executeTool = async (
             await vibeManager.reorderManifestSlides(args.active_slides);
             return formatResult({ success: true, mutated: true, entities_changed: ['manifest'] });
         }
-        if (name === 'read_theme') {
-            const css = vibeManager.getTheme();
-            if (!css) return formatResult({ error: 'No theme block found.', mutated: false });
-            return formatResult({ success: true, css, hash: hashOf(css), mutated: false });
-        }
-        if (name === 'write_theme') {
-            if (!args?.newCss) return formatResult({ error: 'Missing newCss.', mutated: false });
+        if (name === 'theme') {
+            const action = String(args?.action || '').trim().toLowerCase();
+            if (!action || !['read', 'write'].includes(action)) {
+                return formatResult({ error: 'Invalid or missing action. Must be one of: read, write', mutated: false });
+            }
+            if (action === 'read') {
+                const css = vibeManager.getTheme();
+                if (!css) return formatResult({ error: 'No theme block found.', mutated: false });
+                return formatResult({ success: true, css, hash: hashOf(css), mutated: false });
+            }
+            if (!args?.css) return formatResult({ error: 'Missing css.', mutated: false });
             if (!args?.hash) return formatResult({ error: 'Missing hash. Read theme first.', mutated: false });
             const current = vibeManager.getTheme();
             if (!current) return formatResult({ error: 'No theme block found.', mutated: false });
             if (hashOf(current) !== args.hash) return formatResult({ error: 'Hash mismatch. Theme changed since read.', mutated: false });
-            await vibeManager.setTheme(args.newCss);
+            await vibeManager.setTheme(args.css);
             return formatResult({ success: true, mutated: true, entities_changed: ['theme'] });
         }
-        if (name === 'read_transitions') {
-            const css = vibeManager.getTransitions();
-            if (!css) return formatResult({ error: 'No transitions block found.', mutated: false });
-            return formatResult({ success: true, css, hash: hashOf(css), mutated: false });
-        }
-        if (name === 'write_transitions') {
+        if (name === 'transitions') {
+            const action = String(args?.action || '').trim().toLowerCase();
+            if (!action || !['read', 'write'].includes(action)) {
+                return formatResult({ error: 'Invalid or missing action. Must be one of: read, write', mutated: false });
+            }
+            if (action === 'read') {
+                const css = vibeManager.getTransitions();
+                if (!css) return formatResult({ error: 'No transitions block found.', mutated: false });
+                return formatResult({ success: true, css, hash: hashOf(css), mutated: false });
+            }
             if (!args?.css || !args?.hash) return formatResult({ error: 'Missing css/hash.', mutated: false });
             const current = vibeManager.getTransitions();
             if (!current) return formatResult({ error: 'No transitions block found.', mutated: false });
@@ -771,12 +747,16 @@ export const executeTool = async (
             await vibeManager.setTransitions(args.css);
             return formatResult({ success: true, mutated: true, entities_changed: ['transitions'] });
         }
-        if (name === 'read_animations') {
-            const css = vibeManager.getAnimations();
-            if (!css) return formatResult({ error: 'No animations block found.', mutated: false });
-            return formatResult({ success: true, css, hash: hashOf(css), mutated: false });
-        }
-        if (name === 'write_animations') {
+        if (name === 'animations') {
+            const action = String(args?.action || '').trim().toLowerCase();
+            if (!action || !['read', 'write'].includes(action)) {
+                return formatResult({ error: 'Invalid or missing action. Must be one of: read, write', mutated: false });
+            }
+            if (action === 'read') {
+                const css = vibeManager.getAnimations();
+                if (!css) return formatResult({ error: 'No animations block found.', mutated: false });
+                return formatResult({ success: true, css, hash: hashOf(css), mutated: false });
+            }
             if (!args?.css || !args?.hash) return formatResult({ error: 'Missing css/hash.', mutated: false });
             const current = vibeManager.getAnimations();
             if (!current) return formatResult({ error: 'No animations block found.', mutated: false });
@@ -784,11 +764,15 @@ export const executeTool = async (
             await vibeManager.setAnimations(args.css);
             return formatResult({ success: true, mutated: true, entities_changed: ['animations'] });
         }
-        if (name === 'read_global_ui') {
-            const html = vibeManager.getGlobalUI();
-            return formatResult({ success: true, html, hash: hashOf(html), mutated: false });
-        }
-        if (name === 'write_global_ui') {
+        if (name === 'global_ui') {
+            const action = String(args?.action || '').trim().toLowerCase();
+            if (!action || !['read', 'write'].includes(action)) {
+                return formatResult({ error: 'Invalid or missing action. Must be one of: read, write', mutated: false });
+            }
+            if (action === 'read') {
+                const html = vibeManager.getGlobalUI();
+                return formatResult({ success: true, html, hash: hashOf(html), mutated: false });
+            }
             if (args?.html === undefined || !args?.hash) return formatResult({ error: 'Missing html/hash.', mutated: false });
             const current = vibeManager.getGlobalUI();
             if (hashOf(current) !== args.hash) return formatResult({ error: 'Hash mismatch for global UI.', mutated: false });
@@ -822,11 +806,15 @@ export const executeTool = async (
                 return formatResult({ error: `Layout analysis failed: ${err.message}`, mutated: false });
             }
         }
-        if (name === 'read_design') {
-            const content = await vibeManager.readDesign();
-            return formatResult({ success: true, content, hash: hashOf(content), mutated: false });
-        }
-        if (name === 'write_design') {
+        if (name === 'design') {
+            const action = String(args?.action || '').trim().toLowerCase();
+            if (!action || !['read', 'write'].includes(action)) {
+                return formatResult({ error: 'Invalid or missing action. Must be one of: read, write', mutated: false });
+            }
+            if (action === 'read') {
+                const content = await vibeManager.readDesign();
+                return formatResult({ success: true, content, hash: hashOf(content), mutated: false });
+            }
             const section = args?.section;
             const content = args?.content;
             if (!section || !['intent', 'structure', 'visual_language', 'constraints'].includes(section)) {
@@ -841,19 +829,6 @@ export const executeTool = async (
         if (name === 'validate_deck_state') {
             const validation = vibeManager.validateDeckState();
             return formatResult({ success: true, validation, mutated: false });
-        }
-        if (name === 'detect_template_version') {
-            const version = vibeManager.detectTemplateVersion();
-            return formatResult({ success: true, version, mutated: false });
-        }
-        if (name === 'migrate_template_to_v3') {
-            const migration = await vibeManager.migrateToV3();
-            return formatResult({
-                success: true,
-                migration,
-                mutated: migration.migrated,
-                entities_changed: migration.migrated ? ['slides', 'manifest', 'global_ui'] : []
-            });
         }
         if (name === 'apply_changes') {
             const operations = Array.isArray(args?.operations) ? args.operations : [];

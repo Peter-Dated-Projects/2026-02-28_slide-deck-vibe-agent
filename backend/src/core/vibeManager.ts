@@ -98,17 +98,116 @@ export class VibeManager {
     private static escapeRegex(value: string): string {
         return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     }
+    private static findOpeningTagRange(html: string, tagName: 'section' | 'div', className?: string): { start: number; end: number } | null {
+        const classPattern = className
+            ? `[^>]*class=["'][^"']*\\b${VibeManager.escapeRegex(className)}\\b[^"']*["'][^>]*`
+            : '[^>]*';
+        const openTagPattern = new RegExp(`<${tagName}\\b${classPattern}>`, 'i');
+        const match = openTagPattern.exec(html);
+        if (!match || match.index === undefined) {
+            return null;
+        }
+        return { start: match.index, end: match.index + match[0].length };
+    }
+    private static findMatchingTagClose(html: string, openTagEndIndex: number, tagName: 'section' | 'div'): number {
+        const tagPattern = new RegExp(`</?${tagName}\\b[^>]*>`, 'ig');
+        tagPattern.lastIndex = openTagEndIndex;
+        let depth = 1;
+        let match: RegExpExecArray | null;
+        while ((match = tagPattern.exec(html)) !== null) {
+            const tag = match[0];
+            if (/^<\s*\/\s*/i.test(tag)) {
+                depth--;
+                if (depth === 0) {
+                    return match.index;
+                }
+                continue;
+            }
+            if (!/\/\s*>\s*$/i.test(tag)) {
+                depth++;
+            }
+        }
+        return -1;
+    }
+    private static extractInnerContent(html: string, tagName: 'section' | 'div', className?: string): string | null {
+        const range = VibeManager.findOpeningTagRange(html, tagName, className);
+        if (!range) {
+            return null;
+        }
+        const closeIndex = VibeManager.findMatchingTagClose(html, range.end, tagName);
+        if (closeIndex < 0) {
+            return null;
+        }
+        return html.slice(range.end, closeIndex).trim();
+    }
+    private static replaceInnerContent(html: string, tagName: 'section' | 'div', className: string | undefined, innerContent: string): string {
+        const range = VibeManager.findOpeningTagRange(html, tagName, className);
+        if (!range) {
+            throw new Error(`Expected a <${tagName}> wrapper${className ? ` with class ${className}` : ''} but none was found.`);
+        }
+        const closeIndex = VibeManager.findMatchingTagClose(html, range.end, tagName);
+        if (closeIndex < 0) {
+            throw new Error(`Expected a matching </${tagName}> wrapper${className ? ` for class ${className}` : ''} but none was found.`);
+        }
+        return `${html.slice(0, range.end)}\n${innerContent.trim()}\n${html.slice(closeIndex)}`;
+    }
+    private static normalizeSlideToolContent(newHtml: string): string {
+        let content = newHtml.trim();
+        const sectionInner = VibeManager.extractInnerContent(content, 'section', 'slide');
+        if (sectionInner !== null) {
+            content = sectionInner;
+        }
+        const boxInner = VibeManager.extractInnerContent(content, 'div', 'slide-aspect-ratio-box');
+        if (boxInner !== null) {
+            content = boxInner;
+        }
+        return content.trim();
+    }
+    private static renderSlideTemplate(slideId: string, innerHtml: string, sectionOpenTag?: string): string {
+        const normalizedId = String(slideId || '').replace(/^legacy-/, '');
+        const openTag =
+            sectionOpenTag?.trim() ||
+            `<section class="slide" id="slide-${normalizedId.slice(0, 8)}">`;
+        const indentedInner = innerHtml.trim()
+            ? innerHtml
+                .trim()
+                .split(/\r?\n/)
+                .map((line) => `                ${line}`)
+                .join('\n')
+            : '';
+        return `${openTag}\n            <div class="slide-aspect-ratio-box">\n${indentedInner ? `${indentedInner}\n` : ''}            </div>\n        </section>`;
+    }
+    private static markerBoundaryPattern(marker: string): string {
+        if (!marker.trimStart().startsWith('<!--')) {
+            return VibeManager.escapeRegex(marker);
+        }
+        const tokenMatch = marker.match(/VIBE_[A-Z0-9_]+/);
+        if (!tokenMatch) {
+            return VibeManager.escapeRegex(marker);
+        }
+        const token = VibeManager.escapeRegex(tokenMatch[0]);
+        // Supports all marker variants we use:
+        // 1) <!-- TOKEN -->
+        // 2) <!-- TOKEN: annotation -->
+        // 3) <!-- <!-- TOKEN --> --> (legacy nested wrapper)
+        return `<!--\\s*(?:<!--\\s*)?${token}(?:\\s*-->\\s*)?(?::[^\\r\\n]*?)?-->`;
+    }
     private getMarkerBlock(pairs: Array<{ start: string; end: string }>): { content: string; start: string; end: string } | null {
         for (const pair of pairs) {
-            const escapedStart = VibeManager.escapeRegex(pair.start);
-            const escapedEnd = VibeManager.escapeRegex(pair.end);
-            const pattern = new RegExp(`${escapedStart}\\s*([\\s\\S]*?)\\s*${escapedEnd}`, 'i');
+            const startPattern = VibeManager.markerBoundaryPattern(pair.start);
+            const endPattern = VibeManager.markerBoundaryPattern(pair.end);
+            const pattern = new RegExp(`(${startPattern})\\s*([\\s\\S]*?)\\s*(${endPattern})`, 'i');
             const match = pattern.exec(this.content);
             if (match) {
+                const matchedStart = match[1];
+                const matchedEnd = match[3];
+                if (!matchedStart || !matchedEnd) {
+                    continue;
+                }
                 return {
-                    content: (match[1] || '').trim(),
-                    start: pair.start,
-                    end: pair.end
+                    content: (match[2] || '').trim(),
+                    start: matchedStart,
+                    end: matchedEnd
                 };
             }
         }
@@ -167,6 +266,10 @@ export class VibeManager {
     getTheme(): string {
         const block = this.getMarkerBlock([
             {
+                start: '/* <!-- VIBE_THEME_START -->',
+                end: '/* <!-- VIBE_THEME_END --> */'
+            },
+            {
                 start: '/* <!-- VIBE_THEME_START --> */',
                 end: '/* <!-- VIBE_THEME_END --> */'
             },
@@ -180,6 +283,10 @@ export class VibeManager {
     async setTheme(css: string): Promise<void> {
         await this.setMarkerBlock(
             [
+                {
+                    start: '/* <!-- VIBE_THEME_START -->',
+                    end: '/* <!-- VIBE_THEME_END --> */'
+                },
                 {
                     start: '/* <!-- VIBE_THEME_START --> */',
                     end: '/* <!-- VIBE_THEME_END --> */'
@@ -195,6 +302,10 @@ export class VibeManager {
     getTransitions(): string {
         const block = this.getMarkerBlock([
             {
+                start: '/* <!-- VIBE_TRANSITIONS_START -->',
+                end: '/* <!-- VIBE_TRANSITIONS_END --> */'
+            },
+            {
                 start: '/* <!-- VIBE_TRANSITIONS_START --> */',
                 end: '/* <!-- VIBE_TRANSITIONS_END --> */'
             },
@@ -208,6 +319,10 @@ export class VibeManager {
     async setTransitions(css: string): Promise<void> {
         await this.setMarkerBlock(
             [
+                {
+                    start: '/* <!-- VIBE_TRANSITIONS_START -->',
+                    end: '/* <!-- VIBE_TRANSITIONS_END --> */'
+                },
                 {
                     start: '/* <!-- VIBE_TRANSITIONS_START --> */',
                     end: '/* <!-- VIBE_TRANSITIONS_END --> */'
@@ -223,6 +338,10 @@ export class VibeManager {
     getAnimations(): string {
         const block = this.getMarkerBlock([
             {
+                start: '/* <!-- VIBE_ANIMATIONS_START -->',
+                end: '/* <!-- VIBE_ANIMATIONS_END --> */'
+            },
+            {
                 start: '/* <!-- VIBE_ANIMATIONS_START --> */',
                 end: '/* <!-- VIBE_ANIMATIONS_END --> */'
             },
@@ -236,6 +355,10 @@ export class VibeManager {
     async setAnimations(css: string): Promise<void> {
         await this.setMarkerBlock(
             [
+                {
+                    start: '/* <!-- VIBE_ANIMATIONS_START -->',
+                    end: '/* <!-- VIBE_ANIMATIONS_END --> */'
+                },
                 {
                     start: '/* <!-- VIBE_ANIMATIONS_START --> */',
                     end: '/* <!-- VIBE_ANIMATIONS_END --> */'
@@ -375,15 +498,20 @@ export class VibeManager {
     async setSlide(identifier: string | number, newHtml: string): Promise<void> {
         const target = this.resolveSlide(this.listSlides(), identifier);
         if (!target) throw new Error(`Slide ${identifier} not found`);
+        const normalizedInner = VibeManager.normalizeSlideToolContent(newHtml);
+        const existingSectionOpenTag = target.content.match(/<section\b[^>]*>/i)?.[0];
+        const updatedSlide = VibeManager.renderSlideTemplate(target.id, normalizedInner, existingSectionOpenTag);
         const escapedStart = VibeManager.escapeRegex(target.startMarker);
         const escapedEnd = VibeManager.escapeRegex(target.endMarker);
         const pattern = new RegExp(`(${escapedStart})[\\s\\S]*?(${escapedEnd})`, 'i');
-        this.content = this.content.replace(pattern, `$1\n        ${newHtml.trim()}\n        $2`);
+        this.content = this.content.replace(pattern, `$1\n        ${updatedSlide.trim()}\n        $2`);
         await this.save();
     }
     async addSlide(newHtml: string, customId?: string): Promise<string> {
         const id = customId || randomUUID();
-        const newBlock = `\n        <!-- VIBE_SLIDE_ID:${id}_START -->\n        ${newHtml.trim()}\n        <!-- VIBE_SLIDE_ID:${id}_END -->\n`;
+        const normalizedInner = VibeManager.normalizeSlideToolContent(newHtml);
+        const renderedSlide = VibeManager.renderSlideTemplate(id, normalizedInner);
+        const newBlock = `\n        <!-- VIBE_SLIDE_ID:${id}_START -->\n        ${renderedSlide}\n        <!-- VIBE_SLIDE_ID:${id}_END -->\n`;
         const container = this.getSlideContainerBlock();
         this.content = this.content.replace(container.end, `${newBlock}        ${container.end}`);
         const manifest = this.getManifest();

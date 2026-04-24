@@ -99,8 +99,8 @@ ${Array.from({ length: 120 }, (_value, index) => `LINE ${index + 1}`).join('\n')
             hash: hashOf(initialSlideInnerHtml)
         });
     });
-    it('read_html_document returns the full HTML document and hash', async () => {
-        const result = await executeTool(vibeManager, 'read_html_document', {});
+    it('read_full_html_document returns the full HTML document and hash', async () => {
+        const result = await executeTool(vibeManager, 'read_full_html_document', {});
         const parsed = JSON.parse(result);
         expect(parsed.success).toBe(true);
         expect(parsed.mutated).toBe(false);
@@ -108,11 +108,11 @@ ${Array.from({ length: 120 }, (_value, index) => `LINE ${index + 1}`).join('\n')
         expect(parsed.hash).toBe(hashOf(fixtureHtml));
         expect(parsed.max_length).toBe(fixtureHtml.split(/\r?\n/).length);
     });
-    it('read_html_document paginates 50-line sections with max_length metadata', async () => {
+    it('read_full_html_document paginates 50-line sections with max_length metadata', async () => {
         await fs.writeFile(tempFilePath, longFixtureHtml, { encoding: 'utf-8' });
         vibeManager = await VibeManager.create(tempFilePath);
 
-        const firstPageResult = await executeTool(vibeManager, 'read_html_document', { page: 1, sections: 1 });
+        const firstPageResult = await executeTool(vibeManager, 'read_full_html_document', { page: 1, sections: 1 });
         const firstPageParsed = JSON.parse(firstPageResult);
         const longLines = longFixtureHtml.split(/\r?\n/);
         expect(firstPageParsed.success).toBe(true);
@@ -124,7 +124,7 @@ ${Array.from({ length: 120 }, (_value, index) => `LINE ${index + 1}`).join('\n')
         expect(firstPageParsed.max_length).toBe(longLines.length);
         expect(firstPageParsed.html).toBe(longLines.slice(0, 50).join('\n'));
 
-        const secondPageResult = await executeTool(vibeManager, 'read_html_document', { page: 2, sections: 2 });
+        const secondPageResult = await executeTool(vibeManager, 'read_full_html_document', { page: 2, sections: 2 });
         const secondPageParsed = JSON.parse(secondPageResult);
         expect(secondPageParsed.success).toBe(true);
         expect(secondPageParsed.page).toBe(2);
@@ -137,7 +137,7 @@ ${Array.from({ length: 120 }, (_value, index) => `LINE ${index + 1}`).join('\n')
         const readResult = await executeTool(vibeManager, 'read_slide', { slide_id: slide1Id });
         const readParsed = JSON.parse(readResult);
         const hash = readParsed.slides[0].hash;
-        const updatedInnerHtml = '<section class="slide"><h1>Updated Title</h1></section>';
+        const updatedInnerHtml = '<h1>Updated Title</h1>';
         const writeResult = await executeTool(vibeManager, 'write_slide', {
             slide_id: slide1Id,
             newHtml: updatedInnerHtml,
@@ -154,12 +154,14 @@ ${Array.from({ length: 120 }, (_value, index) => `LINE ${index + 1}`).join('\n')
             }
         ]);
         const currentSlide = vibeManager.getSlide(slide1Id);
-        expect(currentSlide).toBe(updatedInnerHtml);
+        expect(currentSlide).toContain('<section class="slide"');
+        expect(currentSlide).toContain('<div class="slide-aspect-ratio-box">');
+        expect(currentSlide).toContain('<h1>Updated Title</h1>');
     });
     it('write_slide rejects missing slide_id', async () => {
         const writeResult = await executeTool(vibeManager, 'write_slide', {
             index: 1,
-            newHtml: '<section class="slide"><h1>Should Not Apply</h1></section>',
+            newHtml: '<h1>Should Not Apply</h1>',
             hash: 'unused'
         });
         const parsed = JSON.parse(writeResult);
@@ -176,12 +178,12 @@ ${Array.from({ length: 120 }, (_value, index) => `LINE ${index + 1}`).join('\n')
             writes: [
                 {
                     slide_id: slide1Id,
-                    newHtml: '<section class="slide"><h1>Batch Updated One</h1></section>',
+                    newHtml: '<h1>Batch Updated One</h1>',
                     hash: firstHash
                 },
                 {
                     slide_id: slide2Id,
-                    newHtml: '<section class="slide"><h2>Batch Updated Two</h2></section>',
+                    newHtml: '<h2>Batch Updated Two</h2>',
                     hash: 'bad-hash'
                 }
             ]
@@ -193,7 +195,9 @@ ${Array.from({ length: 120 }, (_value, index) => `LINE ${index + 1}`).join('\n')
         expect(parsed.writes[0].success).toBe(true);
         expect(parsed.writes[1].success).toBe(false);
         expect(parsed.writes[1].error).toContain('Hash mismatch');
-        expect(vibeManager.getSlide(slide1Id)).toBe('<section class="slide"><h1>Batch Updated One</h1></section>');
+        expect(vibeManager.getSlide(slide1Id)).toContain('<section class="slide"');
+        expect(vibeManager.getSlide(slide1Id)).toContain('<div class="slide-aspect-ratio-box">');
+        expect(vibeManager.getSlide(slide1Id)).toContain('<h1>Batch Updated One</h1>');
         expect(vibeManager.getSlide(slide2Id)).toBe(secondSlideInnerHtml);
     });
     it('getTools advertises slide_id requirement for write_slide', async () => {
@@ -206,14 +210,15 @@ ${Array.from({ length: 120 }, (_value, index) => `LINE ${index + 1}`).join('\n')
             { required: ['slide_id', 'newHtml', 'hash'] },
             { required: ['writes'] }
         ]);
-        expect(writeSlideTool.function.description).toContain('slide_id only');
+        expect(writeSlideTool.function.description).toContain('tool injects it into the existing <section class="slide"> and <div class="slide-aspect-ratio-box"> wrappers');
         expect(systemInstruction).toContain('Use `slide_id` (component ID) for all write operations');
+        expect(systemInstruction).toContain('For `add_slide` and `write_slide`, provide only the inner HTML for the `slide-aspect-ratio-box`');
     });
-    it('getTools includes read_html_document for full document access', async () => {
+    it('getTools includes read_full_html_document for full document access', async () => {
         const { tools } = await getTools(vibeManager);
-        const readHtmlDocumentTool = tools.find((tool: any) => tool.type === 'function' && tool.function.name === 'read_html_document');
+        const readHtmlDocumentTool = tools.find((tool: any) => tool.type === 'function' && tool.function.name === 'read_full_html_document');
         expect(readHtmlDocumentTool).toBeDefined();
-        if (!readHtmlDocumentTool) throw new Error('read_html_document tool is not registered');
+        if (!readHtmlDocumentTool) throw new Error('read_full_html_document tool is not registered');
         expect(readHtmlDocumentTool.function.description).toContain('entire HTML document');
         expect((readHtmlDocumentTool.function.parameters as any)?.properties?.page?.type).toBe('number');
         expect((readHtmlDocumentTool.function.parameters as any)?.properties?.sections?.type).toBe('number');

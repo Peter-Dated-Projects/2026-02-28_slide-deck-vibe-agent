@@ -45,10 +45,10 @@ export class ContextManager {
 
     /**
      * Returns the token budget threshold (80% of context window).
-     * Context window size is configurable via CONTEXT_WINDOW_SIZE env var (defaults to 8192).
+     * Context window size is configurable via CONTEXT_WINDOW_SIZE env var (defaults to 16000).
      */
     private static get TOKEN_BUDGET_THRESHOLD(): number {
-        const windowSize = parseInt(process.env.CONTEXT_WINDOW_SIZE || '8192', 10);
+        const windowSize = parseInt(process.env.CONTEXT_WINDOW_SIZE || '16000', 10);
         return Math.floor(windowSize * 0.8);
     }
 
