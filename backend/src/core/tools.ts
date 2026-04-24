@@ -11,9 +11,10 @@
  */
 
 import OpenAI from 'openai';
+import { createHash } from 'node:crypto';
 import { VibeManager } from './vibeManager';
 import { layoutRequestStore, type LayoutResponse } from './layoutRequestStore';
-import * as crypto from 'crypto';
+
 const HTML_DOCUMENT_LINES_PER_SECTION = 50;
 type ToolResult = {
     success?: boolean;
@@ -31,7 +32,7 @@ export interface AgentRuntimeState {
     tasks: AgentTaskItem[];
 }
 const hashOf = (value: unknown): string =>
-    crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
+    createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const normalizeEntities = (entities: string[]): string[] => [...new Set(entities)];
 const formatResult = (result: ToolResult): string => {
     return JSON.stringify({

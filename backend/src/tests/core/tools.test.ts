@@ -137,7 +137,7 @@ ${Array.from({ length: 120 }, (_value, index) => `LINE ${index + 1}`).join('\n')
         const readResult = await executeTool(vibeManager, 'read_slide', { slide_id: slide1Id });
         const readParsed = JSON.parse(readResult);
         const hash = readParsed.slides[0].hash;
-        const updatedInnerHtml = '<section class="slide"><h1>Updated Title</h1></section>';
+        const updatedInnerHtml = '<h1>Updated Title</h1>';
         const writeResult = await executeTool(vibeManager, 'write_slide', {
             slide_id: slide1Id,
             newHtml: updatedInnerHtml,
@@ -154,12 +154,14 @@ ${Array.from({ length: 120 }, (_value, index) => `LINE ${index + 1}`).join('\n')
             }
         ]);
         const currentSlide = vibeManager.getSlide(slide1Id);
-        expect(currentSlide).toBe(updatedInnerHtml);
+        expect(currentSlide).toContain('<section class="slide"');
+        expect(currentSlide).toContain('<div class="slide-aspect-ratio-box">');
+        expect(currentSlide).toContain('<h1>Updated Title</h1>');
     });
     it('write_slide rejects missing slide_id', async () => {
         const writeResult = await executeTool(vibeManager, 'write_slide', {
             index: 1,
-            newHtml: '<section class="slide"><h1>Should Not Apply</h1></section>',
+            newHtml: '<h1>Should Not Apply</h1>',
             hash: 'unused'
         });
         const parsed = JSON.parse(writeResult);
@@ -176,12 +178,12 @@ ${Array.from({ length: 120 }, (_value, index) => `LINE ${index + 1}`).join('\n')
             writes: [
                 {
                     slide_id: slide1Id,
-                    newHtml: '<section class="slide"><h1>Batch Updated One</h1></section>',
+                    newHtml: '<h1>Batch Updated One</h1>',
                     hash: firstHash
                 },
                 {
                     slide_id: slide2Id,
-                    newHtml: '<section class="slide"><h2>Batch Updated Two</h2></section>',
+                    newHtml: '<h2>Batch Updated Two</h2>',
                     hash: 'bad-hash'
                 }
             ]
@@ -193,7 +195,9 @@ ${Array.from({ length: 120 }, (_value, index) => `LINE ${index + 1}`).join('\n')
         expect(parsed.writes[0].success).toBe(true);
         expect(parsed.writes[1].success).toBe(false);
         expect(parsed.writes[1].error).toContain('Hash mismatch');
-        expect(vibeManager.getSlide(slide1Id)).toBe('<section class="slide"><h1>Batch Updated One</h1></section>');
+        expect(vibeManager.getSlide(slide1Id)).toContain('<section class="slide"');
+        expect(vibeManager.getSlide(slide1Id)).toContain('<div class="slide-aspect-ratio-box">');
+        expect(vibeManager.getSlide(slide1Id)).toContain('<h1>Batch Updated One</h1>');
         expect(vibeManager.getSlide(slide2Id)).toBe(secondSlideInnerHtml);
     });
     it('getTools advertises slide_id requirement for write_slide', async () => {
@@ -206,8 +210,9 @@ ${Array.from({ length: 120 }, (_value, index) => `LINE ${index + 1}`).join('\n')
             { required: ['slide_id', 'newHtml', 'hash'] },
             { required: ['writes'] }
         ]);
-        expect(writeSlideTool.function.description).toContain('slide_id only');
+        expect(writeSlideTool.function.description).toContain('tool injects it into the existing <section class="slide"> and <div class="slide-aspect-ratio-box"> wrappers');
         expect(systemInstruction).toContain('Use `slide_id` (component ID) for all write operations');
+        expect(systemInstruction).toContain('For `add_slide` and `write_slide`, provide only the inner HTML for the `slide-aspect-ratio-box`');
     });
     it('getTools includes read_full_html_document for full document access', async () => {
         const { tools } = await getTools(vibeManager);

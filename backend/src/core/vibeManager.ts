@@ -98,6 +98,71 @@ export class VibeManager {
     private static escapeRegex(value: string): string {
         return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     }
+    private static findOpeningTagRange(html: string, tagName: 'section' | 'div', className?: string): { start: number; end: number } | null {
+        const classPattern = className
+            ? `[^>]*class=["'][^"']*\\b${VibeManager.escapeRegex(className)}\\b[^"']*["'][^>]*`
+            : '[^>]*';
+        const openTagPattern = new RegExp(`<${tagName}\\b${classPattern}>`, 'i');
+        const match = openTagPattern.exec(html);
+        if (!match || match.index === undefined) {
+            return null;
+        }
+        return { start: match.index, end: match.index + match[0].length };
+    }
+    private static findMatchingTagClose(html: string, openTagEndIndex: number, tagName: 'section' | 'div'): number {
+        const tagPattern = new RegExp(`</?${tagName}\\b[^>]*>`, 'ig');
+        tagPattern.lastIndex = openTagEndIndex;
+        let depth = 1;
+        let match: RegExpExecArray | null;
+        while ((match = tagPattern.exec(html)) !== null) {
+            const tag = match[0];
+            if (/^<\s*\/\s*/i.test(tag)) {
+                depth--;
+                if (depth === 0) {
+                    return match.index;
+                }
+                continue;
+            }
+            if (!/\/\s*>\s*$/i.test(tag)) {
+                depth++;
+            }
+        }
+        return -1;
+    }
+    private static extractInnerContent(html: string, tagName: 'section' | 'div', className?: string): string | null {
+        const range = VibeManager.findOpeningTagRange(html, tagName, className);
+        if (!range) {
+            return null;
+        }
+        const closeIndex = VibeManager.findMatchingTagClose(html, range.end, tagName);
+        if (closeIndex < 0) {
+            return null;
+        }
+        return html.slice(range.end, closeIndex).trim();
+    }
+    private static replaceInnerContent(html: string, tagName: 'section' | 'div', className: string | undefined, innerContent: string): string {
+        const range = VibeManager.findOpeningTagRange(html, tagName, className);
+        if (!range) {
+            throw new Error(`Expected a <${tagName}> wrapper${className ? ` with class ${className}` : ''} but none was found.`);
+        }
+        const closeIndex = VibeManager.findMatchingTagClose(html, range.end, tagName);
+        if (closeIndex < 0) {
+            throw new Error(`Expected a matching </${tagName}> wrapper${className ? ` for class ${className}` : ''} but none was found.`);
+        }
+        return `${html.slice(0, range.end)}\n${innerContent.trim()}\n${html.slice(closeIndex)}`;
+    }
+    private static normalizeSlideToolContent(newHtml: string): string {
+        let content = newHtml.trim();
+        const sectionInner = VibeManager.extractInnerContent(content, 'section', 'slide');
+        if (sectionInner !== null) {
+            content = sectionInner;
+        }
+        const boxInner = VibeManager.extractInnerContent(content, 'div', 'slide-aspect-ratio-box');
+        if (boxInner !== null) {
+            content = boxInner;
+        }
+        return content.trim();
+    }
     private static markerBoundaryPattern(marker: string): string {
         if (!marker.trimStart().startsWith('<!--')) {
             return VibeManager.escapeRegex(marker);
@@ -419,15 +484,21 @@ export class VibeManager {
     async setSlide(identifier: string | number, newHtml: string): Promise<void> {
         const target = this.resolveSlide(this.listSlides(), identifier);
         if (!target) throw new Error(`Slide ${identifier} not found`);
+        const normalizedInner = VibeManager.normalizeSlideToolContent(newHtml);
+        const updatedSlide = VibeManager.replaceInnerContent(target.content, 'div', 'slide-aspect-ratio-box', normalizedInner);
         const escapedStart = VibeManager.escapeRegex(target.startMarker);
         const escapedEnd = VibeManager.escapeRegex(target.endMarker);
-        const pattern = new RegExp(`(${escapedStart})[\\s\\S]*?(${escapedEnd})`, 'i');
-        this.content = this.content.replace(pattern, `$1\n        ${newHtml.trim()}\n        $2`);
+        const pattern = new RegExp(`(${escapedStart})[\s\S]*?(${escapedEnd})`, 'i');
+        this.content = this.content.replace(pattern, `$1\n        ${updatedSlide.trim()}\n        $2`);
         await this.save();
     }
     async addSlide(newHtml: string, customId?: string): Promise<string> {
         const id = customId || randomUUID();
-        const newBlock = `\n        <!-- VIBE_SLIDE_ID:${id}_START -->\n        ${newHtml.trim()}\n        <!-- VIBE_SLIDE_ID:${id}_END -->\n`;
+        const normalizedInner = VibeManager.normalizeSlideToolContent(newHtml);
+        const indentedInner = normalizedInner
+            ? normalizedInner.split(/\r?\n/).map((line) => `                ${line}`).join('\n')
+            : '';
+        const newBlock = `\n        <!-- VIBE_SLIDE_ID:${id}_START -->\n        <section class="slide" id="slide-${id.slice(0, 8)}">\n            <div class="slide-aspect-ratio-box">\n${indentedInner ? `${indentedInner}\n` : ''}            </div>\n        </section>\n        <!-- VIBE_SLIDE_ID:${id}_END -->\n`;
         const container = this.getSlideContainerBlock();
         this.content = this.content.replace(container.end, `${newBlock}        ${container.end}`);
         const manifest = this.getManifest();

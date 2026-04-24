@@ -55,30 +55,22 @@ describe('VibeManager', () => {
         const firstSlide = manager.listSlides()[0];
         if (!firstSlide) throw new Error('Expected at least one slide in template');
         const firstSlideId = firstSlide.id;
-        const slideInnerHtml = `
-          <section class="slide">
-              <div class="slide-aspect-ratio-box">
-                  <h1>Modified Slide 1</h1>
-              </div>
-          </section>
-        `;
+        const slideInnerHtml = '<h1>Modified Slide 1</h1>';
         await manager.setSlide(firstSlideId, slideInnerHtml);
         const freshManager = await VibeManager.create(testTemplatePath);
         const savedSlide = freshManager.getSlide(firstSlideId);
+        expect(savedSlide).toContain('<section class="slide"');
+        expect(savedSlide).toContain('<div class="slide-aspect-ratio-box">');
         expect(savedSlide).toContain('<h1>Modified Slide 1</h1>');
     });
     it('appends a new slide and syncs manifest', async () => {
         const manager = await VibeManager.create(testTemplatePath);
-        const newSlideHtml = `
-          <section class="slide">
-              <div class="slide-aspect-ratio-box">
-                  <h1>Injected Slide</h1>
-              </div>
-          </section>
-        `;
+        const newSlideHtml = '<h1>Injected Slide</h1>';
         const newId = await manager.addSlide(newSlideHtml);
         const freshManager = await VibeManager.create(testTemplatePath);
         const savedSlide = freshManager.getSlide(newId);
+        expect(savedSlide).toContain('<section class="slide"');
+        expect(savedSlide).toContain('<div class="slide-aspect-ratio-box">');
         expect(savedSlide).toContain('<h1>Injected Slide</h1>');
         const manifest = freshManager.getManifest();
         expect(manifest.active_slides).toContain(newId);
