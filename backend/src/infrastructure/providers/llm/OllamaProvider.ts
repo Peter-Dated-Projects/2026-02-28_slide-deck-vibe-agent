@@ -14,6 +14,7 @@ import type { ILLMService } from "../../../core/interfaces/ILLMService";
 import type { IDatabaseService } from "../../../core/interfaces/IDatabaseService";
 import type { IStorageService } from "../../../core/interfaces/IStorageService";
 import { extractToolCallsFromText } from "./toolCallParser";
+import { sanitizeMessagesForModel } from '../../../core/messageSanitizer';
 export class OllamaProvider implements ILLMService {
     private baseUrl: string;
     private model: string;
@@ -27,7 +28,7 @@ export class OllamaProvider implements ILLMService {
     }
     private buildMessages(messages: any[], systemInstruction?: string) {
         const instruction = systemInstruction || "You are Vibe Agent, an expert frontend engineer creating beautiful web-native presentations. You communicate directly with the user to understand their slide deck needs. Keep slides modern, interactive, and visually stunning.";
-        const normalizedMessages = messages.map((m: any) => {
+        const normalizedMessages = sanitizeMessagesForModel(messages).map((m: any) => {
             if (m?.role === 'assistant' && Array.isArray(m?.tool_calls) && m.tool_calls.length > 0) {
                 const toolCallText = m.tool_calls.map((tc: any) => {
                     const name = tc?.function?.name || 'unknown';
