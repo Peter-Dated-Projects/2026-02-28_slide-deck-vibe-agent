@@ -38,7 +38,7 @@ The database will be reset. No legacy adapter or batch migration. Existing Vibe 
 |---|---|---|
 | **Phase 1** | Foundation & Infrastructure (DB tables, WS server, persistence, uploads) | **Complete** |
 | **Phase 2** | Core Renderer — `CrdtCanvas.tsx` with `y-indexeddb` + connection indicator | **Complete** |
-| Phase 3 | AI Tool Redesign — atomic CRDT mutations replacing all 21 legacy tools | Pending |
+| **Phase 3** | AI Tool Redesign — atomic CRDT mutations replacing all 21 legacy tools | **Complete** |
 | Phase 4 | Hard Cutover — delete legacy code (`tools.ts`, `vibeManager.ts`, `SlideRenderer.tsx`, etc.), reset DB | Pending |
 
 ---

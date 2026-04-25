@@ -3,53 +3,50 @@
  * (c) 2026 Freedom, LLC.
  * This file is part of the SlideDeckVibeAgent System.
  *
- * All Rights Reserved. This code is the confidential and proprietary 
- * information of Freedom, LLC ("Confidential Information"). You shall not 
- * disclose such Confidential Information and shall use it only in accordance 
+ * All Rights Reserved. This code is the confidential and proprietary
+ * information of Freedom, LLC ("Confidential Information"). You shall not
+ * disclose such Confidential Information and shall use it only in accordance
  * with the terms of the license agreement you entered into with Freedom, LLC.
  * ---------------------------------------------------------------------------
  */
 
 import { llmService, dbService as db } from '../core/container';
-import * as path from 'path';
-import * as fs from 'fs/promises';
-import * as os from 'os';
-import { VibeManager } from '../core/vibeManager';
-import { getTools, executeTool, type AgentRuntimeState, type AgentTaskItem, type OnLayoutRequest } from '../core/tools';
+import { getCrdtTools, CRDT_SYSTEM_INSTRUCTION } from '../core/crdt/crdtTools';
+import { executeCrdtTool } from '../core/crdt/crdtExecutor';
 import { sanitizeMessagesForModel } from '../core/messageSanitizer';
-import { loadDeckHtmlForProject, saveDeckHtmlForProject, loadDesignForProject, saveDesignForProject } from './projectDeck';
 import { ContextManager } from './contextManager';
-const buildSystemInstructionWithTaskList = (baseInstruction: string, runtimeState: AgentRuntimeState) => {
+import type { AgentRuntimeState, AgentTaskItem } from '../core/tools';
+
+// ─── helpers ─────────────────────────────────────────────────────────────────
+
+const buildSystemInstructionWithTaskList = (
+    baseInstruction: string,
+    runtimeState: AgentRuntimeState
+) => {
     if (!runtimeState.tasks.length) {
         return `${baseInstruction}\n\nCurrent task checklist: (none yet)`;
     }
     const checklist = runtimeState.tasks
-        .map((task: AgentRuntimeState['tasks'][number]) => `${task.done ? '[x]' : '[ ]'} ${task.id}: ${task.title}`)
+        .map((t) => `${t.done ? '[x]' : '[ ]'} ${t.id}: ${t.title}`)
         .join('\n');
     return `${baseInstruction}\n\nCurrent task checklist:\n${checklist}`;
 };
+
 const normalizeTaskList = (raw: unknown): AgentTaskItem[] => {
-    if (!Array.isArray(raw)) {
-        return [];
-    }
-    const normalized: AgentTaskItem[] = [];
-    const seenIds = new Set<string>();
+    if (!Array.isArray(raw)) return [];
+    const seen = new Set<string>();
+    const result: AgentTaskItem[] = [];
     for (const entry of raw) {
         const item = entry as Partial<AgentTaskItem> | null | undefined;
-        const id = String(item?.id || '').trim();
-        const title = String(item?.title || '').trim();
-        if (!id || !title || seenIds.has(id)) {
-            continue;
-        }
-        seenIds.add(id);
-        normalized.push({
-            id,
-            title,
-            done: Boolean(item?.done)
-        });
+        const id = String(item?.id ?? '').trim();
+        const title = String(item?.title ?? '').trim();
+        if (!id || !title || seen.has(id)) continue;
+        seen.add(id);
+        result.push({ id, title, done: Boolean(item?.done) });
     }
-    return normalized;
+    return result;
 };
+
 const parseToolArguments = (raw: unknown): Record<string, unknown> => {
     if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
         return raw as Record<string, unknown>;
@@ -61,259 +58,257 @@ const parseToolArguments = (raw: unknown): Record<string, unknown> => {
                 return parsed as Record<string, unknown>;
             }
         } catch {
-            // fall through to empty object
+            // fall through
         }
     }
     return {};
 };
+
 const sanitizeToolCalls = (toolCalls: any[]): any[] => {
-    if (!Array.isArray(toolCalls)) {
-        return [];
-    }
+    if (!Array.isArray(toolCalls)) return [];
     return toolCalls
         .map((tc: any, index: number) => {
             const name = tc?.function?.name;
-            if (typeof name !== 'string' || !name.trim()) {
-                return null;
-            }
+            if (typeof name !== 'string' || !name.trim()) return null;
             return {
                 id: typeof tc?.id === 'string' && tc.id.trim() ? tc.id : `tool_call_${index}`,
                 type: tc?.type || 'function',
                 function: {
                     name: name.trim(),
                     index: tc?.function?.index,
-                    arguments: parseToolArguments(tc?.function?.arguments)
-                }
+                    arguments: parseToolArguments(tc?.function?.arguments),
+                },
             };
         })
         .filter(Boolean);
 };
+
 const sanitizeMessagesForLlm = (messages: any[]): any[] => {
     const sanitized = sanitizeMessagesForModel(messages);
     return sanitized.map((msg: any) => {
         if (Array.isArray(msg?.tool_calls) && msg.tool_calls.length > 0) {
-            return {
-                ...msg,
-                tool_calls: sanitizeToolCalls(msg.tool_calls)
-            };
+            return { ...msg, tool_calls: sanitizeToolCalls(msg.tool_calls) };
         }
         return msg;
     });
 };
-const loadConversationTaskList = async (conversationId: string): Promise<AgentTaskItem[]> => {
-    const result = await db.query('SELECT task_list FROM conversations WHERE id = $1', [conversationId]);
-    const rawTasks = result.rows[0]?.task_list;
-    return normalizeTaskList(rawTasks);
+
+// ─── DB helpers ───────────────────────────────────────────────────────────────
+
+const getProjectIdForConversation = async (conversationId: string): Promise<string> => {
+    const res = await db.query('SELECT project_id FROM conversations WHERE id = $1', [conversationId]);
+    const projectId = res.rows[0]?.project_id;
+    if (!projectId) throw new Error(`Project ID not found for conversation ${conversationId}`);
+    return projectId;
 };
-const persistConversationTaskList = async (conversationId: string, tasks: AgentTaskItem[]) => {
+
+const loadConversationTaskList = async (conversationId: string): Promise<AgentTaskItem[]> => {
+    const result = await db.query(
+        'SELECT task_list FROM conversations WHERE id = $1',
+        [conversationId]
+    );
+    return normalizeTaskList(result.rows[0]?.task_list);
+};
+
+const persistConversationTaskList = async (
+    conversationId: string,
+    tasks: AgentTaskItem[]
+): Promise<void> => {
     await db.query(
         'UPDATE conversations SET task_list = $1::jsonb, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
         [JSON.stringify(tasks), conversationId]
     );
 };
-const createConversationVibeManager = async (conversationId: string) => {
-    const res = await db.query('SELECT project_id FROM conversations WHERE id = $1', [conversationId]);
-    const projectId = res.rows[0]?.project_id;
-    if (!projectId) throw new Error("Project ID not found for conversation");
-    const { html } = await loadDeckHtmlForProject(projectId);
-    const designMd = await loadDesignForProject(projectId);
-    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'vibe-agent-'));
-    const tempFilePath = path.join(tempDir, `${projectId}.html`);
-    const designFilePath = path.join(tempDir, 'DESIGN.md');
-    await fs.writeFile(tempFilePath, html, { encoding: 'utf-8' });
-    await fs.writeFile(designFilePath, designMd, { encoding: 'utf-8' });
-    const vibeManager = await VibeManager.create(tempFilePath);
-    const persist = async () => {
-        const updatedHtml = await fs.readFile(tempFilePath, { encoding: 'utf-8' });
-        await saveDeckHtmlForProject(projectId, updatedHtml);
-        try {
-            const updatedDesign = await fs.readFile(designFilePath, { encoding: 'utf-8' });
-            await saveDesignForProject(projectId, updatedDesign);
-        } catch (e) {
-            // design file might not exist or be accessible, ignore
-        }
-    };
-    const cleanup = async () => {
-        await fs.rm(tempDir, { recursive: true, force: true });
-    };
-    return { vibeManager, persist, cleanup };
-};
+
+// ─── public API ───────────────────────────────────────────────────────────────
+
 export const chatWithAgent = async (conversationId: string, messages: any[]) => {
-    const { vibeManager, persist, cleanup } = await createConversationVibeManager(conversationId);
-    const { tools, systemInstruction } = await getTools(vibeManager);
-    const runtimeState: AgentRuntimeState = { tasks: await loadConversationTaskList(conversationId) };
+    const projectId = await getProjectIdForConversation(conversationId);
+    const tools = getCrdtTools();
+    const runtimeState: AgentRuntimeState = {
+        tasks: await loadConversationTaskList(conversationId),
+    };
+    const memRes = await db.query(
+        'SELECT edit_log, summary FROM conversations WHERE id = $1',
+        [conversationId]
+    );
+    const { edit_log: editLog = '', summary: convSummary = '' } = memRes.rows[0] || {};
+
     let currentMessages = [...messages];
     let turnCount = 0;
     const maxTurns = 100;
 
-    // Fetch context memory for assembleContext
-    const memRes = await db.query('SELECT edit_log, summary FROM conversations WHERE id = $1', [conversationId]);
-    const { edit_log: editLog = '', summary: convSummary = '' } = memRes.rows[0] || {};
+    while (turnCount < maxTurns) {
+        turnCount++;
+        const dynamicInstruction = buildSystemInstructionWithTaskList(
+            CRDT_SYSTEM_INSTRUCTION,
+            runtimeState
+        );
+        const assembledContext = ContextManager.assembleContext(
+            dynamicInstruction,
+            editLog,
+            convSummary,
+            currentMessages
+        );
+        const result = await llmService.chatWithAgent(
+            conversationId,
+            sanitizeMessagesForLlm(assembledContext.messages),
+            tools,
+            assembledContext.systemInstruction
+        );
 
-    try {
-        while (turnCount < maxTurns) {
-            turnCount++;
-            const dynamicSystemInstruction = buildSystemInstructionWithTaskList(systemInstruction, runtimeState);
-            const assembledContext = ContextManager.assembleContext(dynamicSystemInstruction, editLog, convSummary, currentMessages);
-            const result = await llmService.chatWithAgent(
-                conversationId,
-                sanitizeMessagesForLlm(assembledContext.messages),
-                tools,
-                assembledContext.systemInstruction
-            );
-            if (result.stop_reason === 'tool_calls' && result.tool_calls) {
-                const safeToolCalls = sanitizeToolCalls(result.tool_calls);
-                if (safeToolCalls.length === 0) {
-                    return { content: [{ type: 'text', text: "I received malformed tool calls from the model." }], stop_reason: 'error' as any };
-                }
-                // Add assistant's tool calls to history
-                currentMessages.push({
-                    role: 'assistant',
-                    content: '',
-                    tool_calls: safeToolCalls
-                });
-                // Execute all tools
-                for (const tc of safeToolCalls) {
-                    const name = tc.function.name;
-                    const args = parseToolArguments(tc.function.arguments);
-                    const output = await executeTool(vibeManager, name, args, runtimeState);
-                    try {
-                        const parsed = JSON.parse(output);
-                        if (parsed?.mutated) {
-                            await persist();
-                        }
-                        if (parsed?.success && (name === 'create_tasks' || name === 'update_task_status')) {
-                            await persistConversationTaskList(conversationId, runtimeState.tasks);
-                        }
-                    } catch {
-                        // keep going even if tool output is non-JSON
-                    }
-                    // Add tool result to history
-                    currentMessages.push({
-                        role: 'tool',
-                        tool_call_id: tc.id,
-                        content: output
-                    });
-                }
-                // Loop back to LLM with the tool results
-            } else {
-                // Final response or stop
-                return result;
+        if (result.stop_reason === 'tool_calls' && result.tool_calls) {
+            const safeToolCalls = sanitizeToolCalls(result.tool_calls);
+            if (safeToolCalls.length === 0) {
+                return {
+                    content: [{ type: 'text', text: 'I received malformed tool calls from the model.' }],
+                    stop_reason: 'error' as any,
+                };
             }
+            currentMessages.push({ role: 'assistant', content: '', tool_calls: safeToolCalls });
+            for (const tc of safeToolCalls) {
+                const name = tc.function.name;
+                const args = parseToolArguments(tc.function.arguments);
+                const output = await executeCrdtTool(
+                    projectId,
+                    name,
+                    args,
+                    runtimeState,
+                    conversationId
+                );
+                try {
+                    const parsed = JSON.parse(output);
+                    if (parsed?.success && (name === 'create_tasks' || name === 'update_task_status')) {
+                        await persistConversationTaskList(conversationId, runtimeState.tasks);
+                    }
+                } catch {
+                    // non-JSON output is fine
+                }
+                currentMessages.push({ role: 'tool', tool_call_id: tc.id, content: output });
+            }
+        } else {
+            return result;
         }
-        return { content: [{ type: 'text', text: "I've hit the maximum number of tool execution steps." }], stop_reason: 'max_turns' };
-    } finally {
-        await cleanup();
     }
+
+    return {
+        content: [{ type: 'text', text: "I've hit the maximum number of tool execution steps." }],
+        stop_reason: 'max_turns' as any,
+    };
 };
+
 export const chatWithAgentStream = async (
     conversationId: string,
     messages: any[],
-    onChunk: (token: string) => void,
-    onLayoutRequest?: OnLayoutRequest
+    onChunk: (token: string) => void
 ): Promise<string> => {
-    const { vibeManager, persist, cleanup } = await createConversationVibeManager(conversationId);
-    const { tools, systemInstruction } = await getTools(vibeManager);
-    const runtimeState: AgentRuntimeState = { tasks: await loadConversationTaskList(conversationId) };
-    try {
-        if (!llmService.chatWithAgentStream) {
-            // Fallback: non-streaming, emit full text as one chunk
-            const result = await chatWithAgent(conversationId, messages);
-            const text = result.content
-                .filter((b: any) => b.type === 'text')
-                .map((b: any) => b.text)
-                .join('\n');
-            onChunk(text);
-            return text;
-        }
-        let currentMessages = [...messages];
-        let turnCount = 0;
-        const maxTurns = 100;
-        
-        // Fetch context memory
-        const memRes = await db.query('SELECT edit_log, summary FROM conversations WHERE id = $1', [conversationId]);
-        const { edit_log: editLog = '', summary: convSummary = '' } = memRes.rows[0] || {};
-        
-        while (turnCount < maxTurns) {
-            turnCount++;
-        const dynamicSystemInstruction = buildSystemInstructionWithTaskList(systemInstruction, runtimeState);
-        const assembledContext = ContextManager.assembleContext(dynamicSystemInstruction, editLog, convSummary, currentMessages);
-        
+    const projectId = await getProjectIdForConversation(conversationId);
+    const tools = getCrdtTools();
+    const runtimeState: AgentRuntimeState = {
+        tasks: await loadConversationTaskList(conversationId),
+    };
+
+    if (!llmService.chatWithAgentStream) {
+        const result = await chatWithAgent(conversationId, messages);
+        const text = result.content
+            .filter((b: any) => b.type === 'text')
+            .map((b: any) => b.text)
+            .join('\n');
+        onChunk(text);
+        return text;
+    }
+
+    const memRes = await db.query(
+        'SELECT edit_log, summary FROM conversations WHERE id = $1',
+        [conversationId]
+    );
+    const { edit_log: editLog = '', summary: convSummary = '' } = memRes.rows[0] || {};
+
+    let currentMessages = [...messages];
+    let turnCount = 0;
+    const maxTurns = 100;
+
+    while (turnCount < maxTurns) {
+        turnCount++;
+        const dynamicInstruction = buildSystemInstructionWithTaskList(
+            CRDT_SYSTEM_INSTRUCTION,
+            runtimeState
+        );
+        const assembledContext = ContextManager.assembleContext(
+            dynamicInstruction,
+            editLog,
+            convSummary,
+            currentMessages
+        );
+
         let localToolCalls: any[] = [];
         let localText = '';
-        // Wrap the callback to intercept the tool_calls event
+
         const wrappedCallback = (token: string) => {
             if (token.startsWith('[TOOL_CALLS]') && token.endsWith('[/TOOL_CALLS]')) {
-                 try {
-                     const jsonStr = token.substring(12, token.length - 13);
-                     const parsed = JSON.parse(jsonStr);
-                     if (parsed.tool_calls) {
-                         localToolCalls = parsed.tool_calls;
-                     }
-                 } catch (e) {
-                     console.error("Error parsing streaming tool calls", e);
-                 }
-                 // pass to frontend so it can display them
-                 onChunk(token);
+                try {
+                    const jsonStr = token.substring(12, token.length - 13);
+                    const parsed = JSON.parse(jsonStr);
+                    if (parsed.tool_calls) localToolCalls = parsed.tool_calls;
+                } catch (e) {
+                    console.error('[agent] error parsing streaming tool calls', e);
+                }
+                onChunk(token);
             } else {
-                  // Stream text tokens immediately so think blocks remain visible even on tool-call turns.
-                  onChunk(token);
-                  localText += token;
+                onChunk(token);
+                localText += token;
             }
         };
-           await llmService.chatWithAgentStream(
-               conversationId,
-               sanitizeMessagesForLlm(assembledContext.messages),
-               wrappedCallback,
-               tools,
-               assembledContext.systemInstruction
-           );
+
+        await llmService.chatWithAgentStream(
+            conversationId,
+            sanitizeMessagesForLlm(assembledContext.messages),
+            wrappedCallback,
+            tools,
+            assembledContext.systemInstruction
+        );
+
         if (localToolCalls.length > 0) {
-             const safeToolCalls = sanitizeToolCalls(localToolCalls);
-             if (safeToolCalls.length === 0) {
-                 return "I received malformed tool calls from the model.";
-             }
-             currentMessages.push({
-                 role: 'assistant',
-                 content: '',
-                 tool_calls: safeToolCalls
-             });
-             for (const tc of safeToolCalls) {
-                 const name = tc.function.name;
-                 const args = parseToolArguments(tc.function.arguments);
-                 const output = await executeTool(vibeManager, name, args, runtimeState, onLayoutRequest);
-                 let shouldRefreshPresentation = false;
-                 try {
-                     const parsed = JSON.parse(output);
-                     if (parsed?.mutated) {
-                         await persist();
-                         shouldRefreshPresentation = true;
-                     }
-                     if (parsed?.success && (name === 'create_tasks' || name === 'update_task_status')) {
-                         await persistConversationTaskList(conversationId, runtimeState.tasks);
-                     }
-                 } catch {
-                     // keep going even if tool output is non-JSON
-                 }
-                 currentMessages.push({
-                     role: 'tool',
-                     tool_call_id: tc.id,
-                     content: output
-                 });
-                 // Optionally stream back the tool result so the UI knows it finished
-                 onChunk(`\n[TOOL_RESULT]${JSON.stringify({ id: tc.id, result: output })}[/TOOL_RESULT]\n`);
-                 if (shouldRefreshPresentation) {
-                     // Signal the frontend to refetch the presentation endpoint (which hydrates from Redis cache first).
-                     onChunk('[PRESENTATION_UPDATED]');
-                 }
-             }
-             // Loop again to give LLM the results
+            const safeToolCalls = sanitizeToolCalls(localToolCalls);
+            if (safeToolCalls.length === 0) {
+                return 'I received malformed tool calls from the model.';
+            }
+            currentMessages.push({ role: 'assistant', content: '', tool_calls: safeToolCalls });
+
+            for (const tc of safeToolCalls) {
+                const name = tc.function.name;
+                const args = parseToolArguments(tc.function.arguments);
+                const output = await executeCrdtTool(
+                    projectId,
+                    name,
+                    args,
+                    runtimeState,
+                    conversationId
+                );
+
+                try {
+                    const parsed = JSON.parse(output);
+                    if (parsed?.success && (name === 'create_tasks' || name === 'update_task_status')) {
+                        await persistConversationTaskList(conversationId, runtimeState.tasks);
+                    }
+                    // CRDT mutations are persisted automatically via the doc update listener;
+                    // signal the frontend that the presentation changed for any mutation.
+                    if (parsed?.mutated) {
+                        onChunk('[PRESENTATION_UPDATED]');
+                    }
+                } catch {
+                    // non-JSON output is fine
+                }
+
+                currentMessages.push({ role: 'tool', tool_call_id: tc.id, content: output });
+                onChunk(
+                    `\n[TOOL_RESULT]${JSON.stringify({ id: tc.id, result: output })}[/TOOL_RESULT]\n`
+                );
+            }
         } else {
-             return localText;
+            return localText;
         }
-        }
-        return "I've hit the maximum number of tool execution steps.";
-    } finally {
-        await cleanup();
     }
+
+    return "I've hit the maximum number of tool execution steps.";
 };
