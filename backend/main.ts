@@ -20,9 +20,8 @@ import { requireAuth, type AuthRequest } from './src/middleware/auth';
 import { dbService as db } from './src/core/container';
 import { normalizeMessageContentForModel } from './src/core/messageSanitizer';
 import { chatWithAgent, chatWithAgentStream } from './src/services/agent';
-import { loadDeckHtmlForProject, loadDesignForProject, saveDesignForProject } from './src/services/projectDeck';
+import { loadDesignForProject, saveDesignForProject } from './src/services/projectDeck';
 import { config } from './src/config';
-import { layoutRequestStore } from './src/core/layoutRequestStore';
 import { ContextManager } from './src/services/contextManager';
 import { mountCrdtWebsocket } from './src/routes/crdtWebsocket';
 import { uploadsRouter } from './src/routes/uploads';
@@ -119,7 +118,7 @@ app.get('/api/conversations', requireAuth, async (req: AuthRequest, res: express
                     c.id,
                     c.project_id AS "projectId",
                     c.title,
-                    COALESCE(p.theme_data ->> 'name', 'Untitled Project') AS "projectName",
+                    COALESCE(p.name, 'Untitled Project') AS "projectName",
                     c.created_at AS "createdAt",
                     c.updated_at AS "updatedAt"
                 FROM conversations c
@@ -132,7 +131,7 @@ app.get('/api/conversations', requireAuth, async (req: AuthRequest, res: express
                     c.id,
                     c.project_id AS "projectId",
                     c.title,
-                    COALESCE(p.theme_data ->> 'name', 'Untitled Project') AS "projectName",
+                    COALESCE(p.name, 'Untitled Project') AS "projectName",
                     c.created_at AS "createdAt",
                     c.updated_at AS "updatedAt"
                 FROM conversations c
@@ -182,11 +181,6 @@ app.post('/api/chat', requireAuth, async (req: AuthRequest, res: express.Respons
                 [userId, incomingProjectId, getTitleFromFirstRequest(message)]
             );
             currentConvId = convResult.rows[0].id;
-            // Add conversation to project array
-            await db.query(
-                'UPDATE projects SET conversation_ids = array_append(conversation_ids, $1::UUID) WHERE id = $2',
-                [currentConvId, incomingProjectId]
-            );
         }
         await updateTitleFromFirstRequestIfNeeded(currentConvId, message);
         // Save user message
@@ -269,11 +263,6 @@ app.post('/api/chat/stream', requireAuth, async (req: AuthRequest, res: express.
                 [userId, incomingProjectId, getTitleFromFirstRequest(message)]
             );
             currentConvId = convResult.rows[0].id;
-            // Add conversation to project array
-            await db.query(
-                'UPDATE projects SET conversation_ids = array_append(conversation_ids, $1::UUID) WHERE id = $2',
-                [currentConvId, incomingProjectId]
-            );
         }
         await updateTitleFromFirstRequestIfNeeded(currentConvId, message);
         const conversationMetaResult = await db.query(
@@ -281,7 +270,7 @@ app.post('/api/chat/stream', requireAuth, async (req: AuthRequest, res: express.
                 SELECT
                     c.title,
                     c.project_id,
-                    COALESCE(p.theme_data ->> 'name', 'Untitled Project') AS project_name
+                    COALESCE(p.name, 'Untitled Project') AS project_name
                 FROM conversations c
                 LEFT JOIN projects p ON p.id = c.project_id
                 WHERE c.id = $1
@@ -329,11 +318,6 @@ app.post('/api/chat/stream', requireAuth, async (req: AuthRequest, res: express.
         let contentBlocks: any[] = [];
         let accumulatedText = "";
         const thinkTimers: { startTime: number; endTime?: number }[] = [];
-        // Stream tokens to client
-        const onLayoutRequest = (requestId: string, slideId: string) => {
-            send('layout_request', JSON.stringify({ requestId, slideId }));
-        };
-
         const fullText = await chatWithAgentStream(currentConvId, messagesContext, (token) => {
             if (token.startsWith('[TOOL_CALLS]') && token.endsWith('[/TOOL_CALLS]')) {
                 try {
@@ -435,7 +419,7 @@ app.post('/api/chat/stream', requireAuth, async (req: AuthRequest, res: express.
                     send('token_text', JSON.stringify({ token }));
                 }
             }
-        }, onLayoutRequest);
+        });
         // Persist full response and tool metadata
         if (fullText || streamedToolCalls.length > 0 || streamedToolResults.length > 0) {
             const normalizedContentBlocks = normalizeAssistantContentBlocks(contentBlocks);
@@ -480,7 +464,7 @@ app.get('/api/conversations/:conversationId/messages', requireAuth, async (req: 
                 SELECT
                     c.user_id,
                     c.title,
-                    COALESCE(p.theme_data ->> 'name', 'Untitled Project') AS project_name
+                    COALESCE(p.name, 'Untitled Project') AS project_name
                 FROM conversations c
                 LEFT JOIN projects p ON p.id = c.project_id
                 WHERE c.id = $1
@@ -567,54 +551,6 @@ app.patch('/api/conversations/:conversationId/title', requireAuth, async (req: A
         res.status(500).json({ error: 'Internal server error' });
     }
 });
-// Layout Analysis Response Route (Protected)
-app.post('/api/layout-response', requireAuth, async (req: AuthRequest, res: express.Response): Promise<void> => {
-    try {
-        const { requestId, layoutData } = req.body;
-        if (!requestId || typeof requestId !== 'string') {
-            res.status(400).json({ error: 'requestId is required' });
-            return;
-        }
-        if (!layoutData || typeof layoutData !== 'object') {
-            res.status(400).json({ error: 'layoutData is required' });
-            return;
-        }
-        const resolved = layoutRequestStore.resolveRequest(requestId, layoutData);
-        if (!resolved) {
-            res.status(404).json({ error: 'No pending layout request found for this requestId (may have timed out)' });
-            return;
-        }
-        res.json({ success: true });
-    } catch (error) {
-        console.error('Error handling layout response:', error);
-        res.status(500).json({ error: 'Internal server error' });
-    }
-});
-// Presentation Data Route (Protected)
-app.get('/api/presentation/:projectId', requireAuth, async (req: AuthRequest, res: express.Response): Promise<void> => {
-     try {
-         const { projectId } = req.params;
-         const userId = req.user!.userId;
-         const projResult = await db.query(
-             'SELECT p.id FROM projects p JOIN conversations c ON c.id = ANY(p.conversation_ids) WHERE p.id = $1 AND c.user_id = $2 LIMIT 1', 
-             [projectId, userId]
-         );
-         if (projResult.rows.length === 0) {
-             res.status(404).json({ error: 'Presentation not found' });
-             return;
-         }
-         const { html, cacheHit } = await loadDeckHtmlForProject(projectId as string);
-         const dbResult = await db.query('SELECT minio_object_key, theme_data FROM projects WHERE id = $1', [projectId]);
-         res.json({
-             slides: dbResult.rows,
-             html,
-             cacheHit
-         });
-     } catch (error) {
-         console.error('Error fetching presentation:', error);
-         res.status(500).json({ error: 'Error fetching presentation' });
-     }
-});
 
 // Design Document Route (Protected)
 app.get('/api/projects/:projectId/design', requireAuth, async (req: AuthRequest, res: express.Response): Promise<void> => {
@@ -622,7 +558,7 @@ app.get('/api/projects/:projectId/design', requireAuth, async (req: AuthRequest,
         const { projectId } = req.params;
         const userId = req.user!.userId;
         const projResult = await db.query(
-            'SELECT p.id FROM projects p JOIN conversations c ON c.id = ANY(p.conversation_ids) WHERE p.id = $1 AND c.user_id = $2 LIMIT 1', 
+            'SELECT p.id FROM projects p JOIN conversations c ON c.project_id = p.id WHERE p.id = $1 AND c.user_id = $2 LIMIT 1', 
             [projectId, userId]
         );
         if (projResult.rows.length === 0) {
@@ -649,7 +585,7 @@ app.put('/api/projects/:projectId/design', requireAuth, async (req: AuthRequest,
         }
 
         const projResult = await db.query(
-            'SELECT p.id FROM projects p JOIN conversations c ON c.id = ANY(p.conversation_ids) WHERE p.id = $1 AND c.user_id = $2 LIMIT 1', 
+            'SELECT p.id FROM projects p JOIN conversations c ON c.project_id = p.id WHERE p.id = $1 AND c.user_id = $2 LIMIT 1', 
             [projectId, userId]
         );
         if (projResult.rows.length === 0) {

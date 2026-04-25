@@ -15,7 +15,7 @@ import { crdtDocManager } from './docManager';
 import { getSlides, getElements, getTheme, readSlideOrder, readTheme, readElement } from './schema';
 import { computeLayout, type LayoutSpec } from './layout';
 import { loadDesignForProject, saveDesignForProject } from '../../services/projectDeck';
-import type { AgentRuntimeState, AgentTaskItem } from '../tools';
+import type { AgentRuntimeState, AgentTaskItem } from '../agentTypes';
 
 // ─── public entry point ───────────────────────────────────────────────────────
 

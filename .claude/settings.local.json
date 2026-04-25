@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "Bash(bun add *)",
-      "Bash(bun run *)"
+      "Bash(bun run *)",
+      "Bash(xargs ls *)",
+      "Bash(bun test *)"
     ]
   }
 }

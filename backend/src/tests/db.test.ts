@@ -165,25 +165,23 @@ describe('Database Integration Tests', () => {
             expect(result.rows[2].role).toBe('assistant');
         });
     });
-    describe('Slides Table R/W', () => {
-        let slideId: string;
-        it('should create a slide', async () => {
+    describe('Projects Table R/W', () => {
+        let projectId: string;
+        it('should create a project', async () => {
             const result = await db.query(
-                `INSERT INTO projects (conversation_ids, minio_object_key, theme_data) 
-                 VALUES ($1, $2, $3) RETURNING id`,
-                [[testConversationId], 'slides/test-user-hash/1.json', JSON.stringify({ theme: 'dark' })]
+                `INSERT INTO projects (name) VALUES ($1) RETURNING id`,
+                ['Test Project']
             );
             expect(result.rows.length).toBe(1);
-            slideId = result.rows[0].id;
+            projectId = result.rows[0].id;
         });
-        it('should read the slide information', async () => {
+        it('should read the project', async () => {
             const result = await db.query(
                 'SELECT * FROM projects WHERE id = $1',
-                [slideId]
+                [projectId]
             );
             expect(result.rows.length).toBe(1);
-            expect(result.rows[0].conversation_ids).toContain(testConversationId);
-            expect(result.rows[0].minio_object_key).toBe('slides/test-user-hash/1.json');
+            expect(result.rows[0].name).toBe('Test Project');
         });
     });
 });

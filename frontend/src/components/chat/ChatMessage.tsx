@@ -172,14 +172,18 @@ const ExecuteToolBlock: React.FC<ExecuteToolBlockProps> = ({
   const [expanded, setExpanded] = useState(false);
   // Human-friendly label
   const labelMap: Record<string, string> = {
-    write_design: "Writing design spec",
-    read_design: "Reading design spec",
-    write_slide: "Updating slide",
-    read_slide: "Reading slide",
-    write_theme: "Updating theme",
-    read_theme: "Reading theme",
-    write_css: "Updating CSS",
-    read_css: "Reading CSS",
+    create_tasks: "Planning tasks",
+    update_task_status: "Updating task",
+    design: "Editing design spec",
+    read_presentation: "Reading presentation",
+    create_slide: "Creating slide",
+    delete_slide: "Deleting slide",
+    reorder_slides: "Reordering slides",
+    duplicate_slide: "Duplicating slide",
+    add_element: "Adding element",
+    update_element: "Updating element",
+    delete_element: "Deleting element",
+    update_theme: "Updating theme",
   };
   const resolvedToolName = toolName || "unknown";
   const friendlyLabel = labelMap[resolvedToolName] || `Running ${resolvedToolName}`;

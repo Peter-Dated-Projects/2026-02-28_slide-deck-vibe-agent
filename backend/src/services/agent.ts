@@ -15,7 +15,7 @@ import { getCrdtTools, CRDT_SYSTEM_INSTRUCTION } from '../core/crdt/crdtTools';
 import { executeCrdtTool } from '../core/crdt/crdtExecutor';
 import { sanitizeMessagesForModel } from '../core/messageSanitizer';
 import { ContextManager } from './contextManager';
-import type { AgentRuntimeState, AgentTaskItem } from '../core/tools';
+import type { AgentRuntimeState, AgentTaskItem } from '../core/agentTypes';
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
