@@ -21,12 +21,7 @@ import React, {
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import api, { getAccessToken } from "../api";
-import {
-  SlideRenderer,
-  type SlideData,
-  type SlideRendererHandle,
-} from "../components/SlideRenderer";
-import { extractLayoutFromIframe } from "../lib/layoutExtractor";
+import { CrdtCanvas } from "../components/CrdtCanvas";
 import { ChatMessage, type ChatMessageData } from "../components/chat/ChatMessage";
 import { TaskListBar, type AgentTask } from "../components/chat/TaskListBar";
 import {
@@ -239,8 +234,6 @@ const ChatPage: React.FC = () => {
   const [messages, setMessages] = useState<ChatMessageData[]>([]);
   const [input, setInput] = useState("");
   const [historyLoading, setHistoryLoading] = useState(false);
-  const [slides, setSlides] = useState<SlideData[]>([]);
-  const [currentSlideIndex] = useState(0);
   const [showSettings, setShowSettings] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [sidebarWidth, setSidebarWidth] = usePersistentWidth({
@@ -268,7 +261,6 @@ const ChatPage: React.FC = () => {
   const startWidth = useRef(0);
   const userScrolledUp = useRef(false);
   const liveConversationMessagesRef = useRef<Record<string, ChatMessageData[]>>({});
-  const slideRendererRef = useRef<SlideRendererHandle>(null);
   const conversationActivity = useSyncExternalStore(
     subscribeConversationActivity,
     getConversationActivitySnapshot,
@@ -434,11 +426,9 @@ const ChatPage: React.FC = () => {
       return;
     }
     setHistoryLoading(true);
-    Promise.all([
-      api.get(`/conversations/${conversationId}/messages`),
-      projectId ? fetchPresentation(projectId) : Promise.resolve(),
-    ])
-      .then(([msgRes]) => {
+    if (projectId) fetchDesign(projectId);
+    api.get(`/conversations/${conversationId}/messages`)
+      .then((msgRes) => {
         const hydratedMessages: ChatMessageData[] = (msgRes.data.messages ?? []).map(
           (m: {
             id: string;
@@ -511,31 +501,14 @@ const ChatPage: React.FC = () => {
     return () => clearTimeout(timer);
   }, [conversationId, deckTitle, projectId]);
   // ─────────────────────────────────────────────────────
-  // Slide fetching
+  // Design doc fetching (CRDT canvas self-syncs via WebSocket)
   // ─────────────────────────────────────────────────────
-  const fetchPresentation = async (id: string) => {
+  const fetchDesign = async (id: string) => {
     try {
-      const res = await api.get(`/presentation/${id}`);
-      if (res.data.slides && res.data.slides.length > 0) {
-        const formattedSlides: SlideData[] = res.data.slides.map((s: any, i: number) => ({
-          id: s.minio_object_key || `slide-${i}`,
-          title: `Slide ${i + 1}`,
-          content: "Loading slide content...",
-          layoutType: "title",
-          minio_object_key: s.minio_object_key,
-          theme_data: s.theme_data,
-        }));
-        const presentationHtml = typeof res.data.html === "string" ? res.data.html : "";
-        setSlides(formattedSlides.map((slide) => ({ ...slide, rawHtml: presentationHtml })));
-      }
-      try {
-        const designRes = await api.get(`/projects/${id}/design`);
-        setDesignContent(designRes.data.design || "");
-      } catch (err) {
-        console.error("Failed to fetch design:", err);
-      }
-    } catch (error) {
-      console.error("Failed to fetch presentation:", error);
+      const designRes = await api.get(`/projects/${id}/design`);
+      setDesignContent(designRes.data.design || "");
+    } catch (err) {
+      console.error("Failed to fetch design:", err);
     }
   };
 
@@ -804,11 +777,6 @@ const ChatPage: React.FC = () => {
       let thinkMode: "undecided" | "enabled" | "disabled" = "undecided";
       let toolCallsCache: any[] = [];
       let toolResultsCache: any[] = [];
-      const requestPresentationRefresh = () => {
-        if (projectId) {
-          fetchPresentation(projectId);
-        }
-      };
       const attemptUpdateState = () => {
         // Deep copy the blocks because they might still mutate
         const snapshotBlocks = JSON.parse(JSON.stringify(contentBlocks));
@@ -870,7 +838,7 @@ const ChatPage: React.FC = () => {
                 });
               }
             } else if (eventName === "presentation_updated") {
-              requestPresentationRefresh();
+              // CRDT canvas self-updates via WebSocket — no action needed
             } else if (eventName === "token" || eventName === "token_text") {
               const tokenStr = data.token;
               pendingTokens = true;
@@ -903,7 +871,7 @@ const ChatPage: React.FC = () => {
                   }
                 } catch (e) {}
               } else if (tokenStr === "[PRESENTATION_UPDATED]") {
-                requestPresentationRefresh();
+                // CRDT canvas self-updates via WebSocket — no action needed
               } else if (tokenStr === "[COMPRESSING_MEMORY]") {
                 setIsCompressingMemory(true);
                 pendingTokens = true;
@@ -1015,71 +983,6 @@ const ChatPage: React.FC = () => {
                   setDeckTitle(data.projectName);
                 }
               }
-            } else if (eventName === "layout_request") {
-              // The backend is asking us to compute the layout of a slide
-              const { requestId: layoutRequestId, slideId: layoutSlideId } = data;
-              if (layoutRequestId && layoutSlideId) {
-                (async () => {
-                  try {
-                    const iframe = slideRendererRef.current?.getIframe?.();
-                    if (!iframe) {
-                      // No iframe available — send an error response
-                      await api.post("/layout-response", {
-                        requestId: layoutRequestId,
-                        layoutData: {
-                          slideId: layoutSlideId,
-                          viewportWidth: 1920,
-                          viewportHeight: 1080,
-                          tree: {
-                            tag: "body",
-                            x: 0,
-                            y: 0,
-                            width: 0,
-                            height: 0,
-                            children: [],
-                            text: "Slide iframe not available",
-                          },
-                        },
-                      });
-                      return;
-                    }
-                    const result = await extractLayoutFromIframe(iframe, layoutRequestId);
-                    await api.post("/layout-response", {
-                      requestId: layoutRequestId,
-                      layoutData: {
-                        slideId: layoutSlideId,
-                        viewportWidth: result.viewportWidth,
-                        viewportHeight: result.viewportHeight,
-                        tree: result.tree,
-                      },
-                    });
-                  } catch (layoutErr) {
-                    console.error("Layout extraction failed:", layoutErr);
-                    // Attempt to send a fallback so the backend doesn't hang
-                    try {
-                      await api.post("/layout-response", {
-                        requestId: layoutRequestId,
-                        layoutData: {
-                          slideId: layoutSlideId,
-                          viewportWidth: 1920,
-                          viewportHeight: 1080,
-                          tree: {
-                            tag: "body",
-                            x: 0,
-                            y: 0,
-                            width: 0,
-                            height: 0,
-                            children: [],
-                            text: "Extraction error",
-                          },
-                        },
-                      });
-                    } catch {
-                      /* best effort */
-                    }
-                  }
-                })();
-              }
             } else if (eventName === "done") {
               const bufferedChunk = enqueueGemmaTokenText("", true);
               if (bufferedChunk) {
@@ -1187,8 +1090,6 @@ const ChatPage: React.FC = () => {
           replace: true,
         });
       }
-      // Refetch slides
-      if (projectId) fetchPresentation(projectId);
     } catch (error: any) {
       console.error("Chat error:", error);
       const thinkingElapsed = Math.floor((Date.now() - thinkingStartedAt) / 1000);
@@ -1238,7 +1139,6 @@ const ChatPage: React.FC = () => {
   // ─────────────────────────────────────────────────────
   const isEmpty = messages.length === 0 && !isCurrentConversationBusy && !historyLoading;
   const activeChatLabel = conversationTitle.trim() || "New Chat";
-  const activeSlideHtml = slides[currentSlideIndex]?.rawHtml ?? "";
   return (
     <div className="h-screen w-screen flex bg-background text-foreground overflow-hidden font-sans">
       {/* Full-screen overlay during resize to capture events over iframes */}
@@ -1542,38 +1442,16 @@ const ChatPage: React.FC = () => {
               backgroundSize: "24px 24px",
             }}
           />
-          {slides.length === 0 ? (
-            <div className="absolute inset-x-2 bottom-2 top-0 flex flex-col items-center justify-center text-muted-foreground space-y-4">
-              <Presentation className="w-16 h-16 opacity-30" />
-              <p className="text-xl font-medium tracking-wide">Canvas is empty</p>
-            </div>
-          ) : (
-            <>
-              {/* Slides fill the canvas below the top bar */}
-              <div className="absolute inset-x-2 bottom-2 top-0">
-                {slides.map((slide, idx) => (
-                  <div
-                    key={slide.id || idx}
-                    className={cn(
-                      "absolute inset-0 transition-all duration-700 ease-[cubic-bezier(0.23,1,0.32,1)]",
-                      idx === currentSlideIndex
-                        ? "opacity-100 translate-x-0 z-10"
-                        : idx < currentSlideIndex
-                          ? "opacity-0 -translate-x-full z-0"
-                          : "opacity-0 translate-x-full z-0",
-                    )}
-                  >
-                    <SlideRenderer
-                      ref={idx === currentSlideIndex ? slideRendererRef : undefined}
-                      slide={slide}
-                      theme={slide.theme_data || slides[0]?.theme_data}
-                      isActive={idx === currentSlideIndex}
-                    />
-                  </div>
-                ))}
+          <div className="absolute inset-x-2 bottom-2 top-0">
+            {projectId ? (
+              <CrdtCanvas projectId={projectId} />
+            ) : (
+              <div className="w-full h-full flex flex-col items-center justify-center text-muted-foreground space-y-4">
+                <Presentation className="w-16 h-16 opacity-30" />
+                <p className="text-xl font-medium tracking-wide">Canvas is empty</p>
               </div>
-            </>
-          )}
+            )}
+          </div>
         </div>
         <div
           className={cn(
@@ -1581,42 +1459,18 @@ const ChatPage: React.FC = () => {
             rightPanelTab === "html" ? "opacity-100" : "opacity-0 pointer-events-none",
           )}
         >
-          <div className="h-9 shrink-0 border-b border-zinc-800/80 px-3 flex items-center justify-between bg-[#252526]">
+          <div className="h-9 shrink-0 border-b border-zinc-800/80 px-3 flex items-center bg-[#252526]">
             <span className="text-[11px] uppercase tracking-[0.14em] text-zinc-400">
               Slide HTML
             </span>
-            <span className="text-[11px] text-zinc-500">{activeSlideHtml.length} chars</span>
           </div>
-          {activeSlideHtml ? (
-            <div className="flex-1 min-h-0 overflow-auto custom-scrollbar">
-              <Editor
-                height="100%"
-                defaultLanguage="html"
-                value={activeSlideHtml}
-                theme="vs-dark"
-                options={{
-                  readOnly: true,
-                  minimap: { enabled: false },
-                  lineNumbers: "on",
-                  fontSize: 12,
-                  lineHeight: 20,
-                  wordWrap: "on",
-                  scrollBeyondLastLine: false,
-                  renderLineHighlight: "line",
-                  automaticLayout: true,
-                  tabSize: 2,
-                }}
-              />
-            </div>
-          ) : (
-            <div className="flex-1 min-h-0 flex flex-col items-center justify-center text-center px-6 text-zinc-400 space-y-2">
-              <Code2 className="h-7 w-7 opacity-70" />
-              <p className="text-sm">No generated HTML available yet.</p>
-              <p className="text-xs text-zinc-500">
-                Ask Vibe to generate or update slides to populate this editor.
-              </p>
-            </div>
-          )}
+          <div className="flex-1 min-h-0 flex flex-col items-center justify-center text-center px-6 text-zinc-400 space-y-2">
+            <Code2 className="h-7 w-7 opacity-70" />
+            <p className="text-sm">HTML view is not available in CRDT mode.</p>
+            <p className="text-xs text-zinc-500">
+              Elements are stored as structured data and rendered by the canvas.
+            </p>
+          </div>
         </div>
         <div
           className={cn(
