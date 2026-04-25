@@ -13,6 +13,7 @@
 import type { Request, Response } from 'express';
 import { cacheService, dbService as db, storageService } from '../core/container';
 import { config } from '../config';
+import { generatePreviewForProject } from '../services/previewRenderer';
 
 const PROJECTS_CACHE_PREFIX = 'projects:list:';
 const PROJECTS_CACHE_TTL_SECONDS = Math.max(5, Math.min(config.redis.ttlSeconds, 30));
@@ -145,7 +146,45 @@ export const createProject = async (req: Request, res: Response): Promise<void> 
 };
 
 export const generateProjectPreview = async (req: Request, res: Response): Promise<void> => {
-    res.status(501).json({ error: 'Preview generation not yet implemented for CRDT engine.' });
+    try {
+        const userId = (req as any).user?.userId;
+        const rawProjectId = req.params.projectId;
+        const projectId = Array.isArray(rawProjectId) ? rawProjectId[0] : rawProjectId;
+
+        if (!userId) {
+            res.status(401).json({ error: 'Unauthorized' });
+            return;
+        }
+        if (!projectId) {
+            res.status(400).json({ error: 'Project ID is required' });
+            return;
+        }
+
+        const ownership = await db.query(
+            'SELECT 1 FROM conversations WHERE project_id = $1 AND user_id = $2 LIMIT 1',
+            [projectId, userId]
+        );
+        if (ownership.rows.length === 0) {
+            res.status(404).json({ error: 'Project not found' });
+            return;
+        }
+
+        // Fire-and-forget: rendering can take several seconds; the frontend polls
+        // /api/projects until projects.preview_url appears.
+        generatePreviewForProject(projectId)
+            .then(() => invalidateProjectsCache(userId))
+            .catch((error) => {
+                console.error(
+                    `[projectController] Preview generation failed for project ${projectId}:`,
+                    error
+                );
+            });
+
+        res.status(202).json({ status: 'pending' });
+    } catch (error) {
+        console.error('Error scheduling project preview:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
 };
 
 export const updateProjectName = async (req: Request, res: Response): Promise<void> => {
