@@ -4,7 +4,8 @@
       "Bash(bun add *)",
       "Bash(bun run *)",
       "Bash(xargs ls *)",
-      "Bash(bun test *)"
+      "Bash(bun test *)",
+      "Bash(grep -E \"\\\\.\\(sql|ts\\)$\")"
     ]
   }
 }

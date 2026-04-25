@@ -14,6 +14,7 @@ import type { Request, Response } from 'express';
 import { cacheService, dbService as db, storageService } from '../core/container';
 import { config } from '../config';
 import { generatePreviewForProject } from '../services/previewRenderer';
+import { seedHelloWorldSlide } from '../core/crdt/seed';
 
 const PROJECTS_CACHE_PREFIX = 'projects:list:';
 const PROJECTS_CACHE_TTL_SECONDS = Math.max(5, Math.min(config.redis.ttlSeconds, 30));
@@ -127,6 +128,12 @@ export const createProject = async (req: Request, res: Response): Promise<void> 
             [userId, projectId, defaultTitle]
         );
         const conversationId = convResult.rows[0].id;
+
+        try {
+            await seedHelloWorldSlide(projectId);
+        } catch (err) {
+            console.error(`[projectController] Failed to seed first slide for ${projectId}:`, err);
+        }
 
         await invalidateProjectsCache(userId);
         res.status(201).json({

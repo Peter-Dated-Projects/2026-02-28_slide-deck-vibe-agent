@@ -114,7 +114,8 @@ export function mountCrdtWebsocket(server: HttpServer): void {
     const wss = new WebSocketServer({ noServer: true });
 
     server.on('upgrade', (req, socket, head) => {
-        const match = PATH_REGEX.exec(req.url ?? '');
+        const url = new URL(req.url ?? '', 'http://localhost');
+        const match = PATH_REGEX.exec(url.pathname);
         if (!match) return;
 
         const auth = extractAuth(req);
