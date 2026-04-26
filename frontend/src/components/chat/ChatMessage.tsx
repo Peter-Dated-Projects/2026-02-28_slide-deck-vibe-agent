@@ -36,39 +36,48 @@ interface ThinkingBlockViewProps {
 const ThinkingBlockView: React.FC<ThinkingBlockViewProps> = ({ text, startTime, endTime }) => {
     const [expanded, setExpanded] = useState(false);
     const [now, setNow] = useState(Date.now());
+    const restored = startTime === 0;
+    const live = !endTime && !restored;
     useEffect(() => {
-        if (endTime) return;
+        if (!live) return;
         const id = setInterval(() => setNow(Date.now()), 500);
         return () => clearInterval(id);
-    }, [endTime]);
+    }, [live]);
     const elapsed = Math.max(0, Math.floor(((endTime ?? now) - startTime) / 1000));
-    const live = !endTime;
-    const label = live ? `Agent thinking for ${elapsed}s…` : `Agent thought for ${elapsed}s`;
+    const label = restored
+        ? "Agent thought"
+        : live
+            ? `Agent thinking for ${elapsed}s…`
+            : `Agent thought for ${elapsed}s`;
     return (
         <div className="mb-1 w-full">
             <button
                 onClick={() => setExpanded((v) => !v)}
                 className={cn(
-                    "flex items-center gap-2 text-[10px] font-medium px-2.5 py-1 rounded-lg transition-all duration-200 w-full border text-muted-foreground hover:text-foreground",
-                    live ? "border-primary/30 bg-primary/5 hover:bg-primary/10" : "border-border bg-muted/30 hover:bg-muted/60"
+                    "flex items-center gap-2 text-[10px] font-medium px-2.5 py-1 rounded-lg transition-all duration-200 w-full border hover:text-foreground",
+                    live
+                        ? "border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/15 text-amber-700"
+                        : "border-amber-500/30 bg-amber-500/5 hover:bg-amber-500/10 text-amber-700/90"
                 )}
             >
-                <Brain className={cn("w-3 h-3 flex-shrink-0", live ? "text-primary animate-pulse" : "text-muted-foreground")} />
+                <div
+                    className={cn(
+                        "w-3 h-3 flex-shrink-0 flex items-center justify-center rounded bg-amber-500/20 text-amber-600",
+                        live && "animate-pulse"
+                    )}
+                >
+                    <Brain className="w-2 h-2" />
+                </div>
                 <span className="flex-1 text-left">{label}</span>
                 {expanded ? <ChevronDown className="w-2.5 h-2.5" /> : <ChevronRight className="w-2.5 h-2.5" />}
             </button>
-            <div className={cn("grid transition-[grid-template-rows] duration-200 ease-out", expanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]")}>
-                <div className="min-h-0 overflow-hidden">
-                    <div
-                        className={cn(
-                            "mt-1.5 ml-2 pl-3 border-l-2 text-[10px] leading-relaxed whitespace-pre-wrap text-muted-foreground overflow-y-auto custom-scrollbar max-h-[160px]",
-                            live ? "border-primary/40" : "border-border"
-                        )}
-                    >
-                        {text || <span className="italic opacity-60">{live ? "Thinking…" : "No thinking content."}</span>}
-                    </div>
+            {expanded && (
+                <div className="mt-1.5 ml-2 pl-3 border-l-2 border-amber-500/40 text-[10px] leading-relaxed text-muted-foreground space-y-1">
+                    <pre className="bg-background/50 rounded p-2 font-mono text-[9px] overflow-x-auto whitespace-pre-wrap text-foreground max-h-[200px] overflow-y-auto custom-scrollbar">
+{text || (live ? "Thinking…" : "No thinking content.")}
+                    </pre>
                 </div>
-            </div>
+            )}
         </div>
     );
 };

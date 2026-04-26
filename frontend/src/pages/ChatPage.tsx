@@ -224,7 +224,7 @@ const ChatPage: React.FC = () => {
                     role: m.role,
                     content: hydrateStoredContent(m),
                 }));
-                reset(hydrated);
+                reset(groupAssistantTurns(hydrated));
                 if (res.data.title) setConversationTitle(res.data.title);
                 if (res.data.projectName) setDeckTitle(res.data.projectName);
                 userScrolledUp.current = false;
@@ -725,9 +725,9 @@ function hydrateStoredContent(row: any): any {
         if (b.type === "text" && typeof b.text === "string") {
             out.push({ type: "text", text: b.text });
         } else if (b.type === "thinking" && typeof b.text === "string") {
-            // Stored thinking has no live timer; show it as a completed block.
-            const ts = Date.now();
-            out.push({ type: "thinking", text: b.text, startTime: ts, endTime: ts });
+            // startTime: 0 is the "restored from storage" sentinel — the view shows
+            // "Agent thought" (no elapsed timer) since we never persisted timestamps.
+            out.push({ type: "thinking", text: b.text, startTime: 0, endTime: 0 });
         } else if (b.type === "tool_call" && typeof b.name === "string") {
             const args = b.args && typeof b.args === "object" && !Array.isArray(b.args) ? b.args : {};
             out.push({ type: "tool_call", call: { id: String(b.id ?? ""), name: b.name, args } });
@@ -737,6 +737,29 @@ function hydrateStoredContent(row: any): any {
                 id: String(b.id ?? ""),
                 result: typeof b.result === "string" ? b.result : JSON.stringify(b.result ?? ""),
             });
+        }
+    }
+    return out;
+}
+
+/**
+ * Each assistant turn is its own DB row (so each row's `blocks` keeps strict
+ * stream order). For display, fold consecutive assistant rows back into a single
+ * bubble — that matches what the user sees during live streaming.
+ */
+function groupAssistantTurns(rows: ChatMessageData[]): ChatMessageData[] {
+    const out: ChatMessageData[] = [];
+    for (const row of rows) {
+        const last = out[out.length - 1];
+        if (
+            row.role === "assistant" &&
+            last?.role === "assistant" &&
+            Array.isArray(last.content) &&
+            Array.isArray(row.content)
+        ) {
+            out[out.length - 1] = { ...last, content: [...last.content, ...row.content] };
+        } else {
+            out.push(row);
         }
     }
     return out;
