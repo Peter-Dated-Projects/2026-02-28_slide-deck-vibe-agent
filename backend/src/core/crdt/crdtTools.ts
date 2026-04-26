@@ -27,7 +27,9 @@ Always call design({action: "read"}) first. If DESIGN.md is empty, fill it in be
 4. Keep the task checklist current: create_tasks() to plan, update_task_status() as you go.
 
 ## Element types and content
-- text  → content: { html: "<p>...</p>" }   (HTML rendered inside element)
+- text  → content: { html: "<p>...</p>", level?: 'h1'|'h2'|'h3'|'body', bold?, italic?, underline?, strikethrough? }
+        level controls the standardized font size (h1=64, h2=48, h3=32, body=24).
+        bold/italic/underline/strikethrough are booleans applied to the whole element.
 - image → content: { url: "https://...", alt?: "..." }  (URL only — never base64)
 - shape → content: { fill: "#3b82f6", borderRadius?: "8px" }
 
@@ -280,7 +282,7 @@ function getCrdtToolsRaw(): OpenAIToolShape[] {
                         content: {
                             type: 'object',
                             description:
-                                'Type-specific content. text: {html}, image: {url, alt?}, shape: {fill, borderRadius?}.',
+                                "Type-specific content. text: {html, level?: 'h1'|'h2'|'h3'|'body', bold?, italic?, underline?, strikethrough?}, image: {url, alt?}, shape: {fill, borderRadius?}.",
                             additionalProperties: true,
                         },
                         layout_spec: {
@@ -311,7 +313,8 @@ function getCrdtToolsRaw(): OpenAIToolShape[] {
                         content: {
                             type: 'object',
                             additionalProperties: true,
-                            description: 'Replacement content object.',
+                            description:
+                                "Replacement content object. text: {html, level?: 'h1'|'h2'|'h3'|'body', bold?, italic?, underline?, strikethrough?}, image: {url, alt?}, shape: {fill, borderRadius?}.",
                         },
                         layout_spec: {
                             ...layoutSpecSchema,
