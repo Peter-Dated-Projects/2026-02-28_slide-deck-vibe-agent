@@ -15,7 +15,6 @@ import type { ILLMService } from './interfaces/ILLMService';
 import type { IStorageService } from './interfaces/IStorageService';
 import type { IDatabaseService } from './interfaces/IDatabaseService';
 import type { ICacheService } from './interfaces/ICacheService';
-import { GemmaProvider } from '../infrastructure/providers/llm/GemmaProvider';
 import { QwenProvider } from '../infrastructure/providers/llm/QwenProvider';
 import { MinioProvider } from '../infrastructure/providers/storage/MinioProvider';
 import { GCPStorageProvider } from '../infrastructure/providers/storage/GCPStorageProvider';
@@ -44,20 +43,17 @@ export const storageService: IStorageService = isLocal
         bucketName: process.env.GCP_BUCKET_NAME || config.s3.bucketName,
         projectId: process.env.GCP_PROJECT_ID,
     });
-// 3. Initialize LLM Provider
-// If local, we can use Gemma 4 via Ollama. Otherwise use Qwen 3.5.
-export const llmService: ILLMService = isLocal
-    ? new GemmaProvider(
-        process.env.GEMMA_BASE_URL || process.env.OLLAMA_BASE_URL || 'http://localhost:11434',
-        process.env.GEMMA_MODEL_KEY || process.env.OLLAMA_MODEL_KEY || 'gemma4',
-        dbService,
-        storageService
-    )
-    : new QwenProvider(
-        config.qwen.apiKey || '',
-        process.env.QWEN_MODEL_KEY || 'qwen3.5-flash',
-        dbService,
-        storageService
-    );
+// 3. Initialize LLM Provider — Qwen via DashScope (OpenAI-compatible) by default,
+// or via local Ollama (also OpenAI-compatible at /v1) when QWEN_MODE=ollama or
+// OLLAMA_BASE_URL is set.
+export const llmService: ILLMService = (() => {
+    if (config.qwen.mode === 'ollama' && config.qwen.ollamaBaseUrl) {
+        const baseURL = `${config.qwen.ollamaBaseUrl.replace(/\/$/, '')}/v1`;
+        console.log(`[llm] mode: ollama → ${baseURL} (model: ${config.qwen.ollamaModel})`);
+        return new QwenProvider('ollama', config.qwen.ollamaModel, baseURL);
+    }
+    console.log(`[llm] mode: api → dashscope (model: ${config.qwen.model})`);
+    return new QwenProvider(config.qwen.apiKey || '', config.qwen.model);
+})();
 // 4. Initialize Cache Provider
 export const cacheService: ICacheService = new RedisCacheProvider(config.redis.url);

@@ -1,1734 +1,768 @@
-/**
- * ---------------------------------------------------------------------------
- * (c) 2026 Freedom, LLC.
- * This file is part of the SlideDeckVibeAgent System.
- *
- * All Rights Reserved. This code is the confidential and proprietary
- * information of Freedom, LLC ("Confidential Information"). You shall not
- * disclose such Confidential Information and shall use it only in accordance
- * with the terms of the license agreement you entered into with Freedom, LLC.
- * ---------------------------------------------------------------------------
- */
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import {
+    ChevronLeft,
+    CreditCard,
+    FileText,
+    Home,
+    Loader2,
+    Pencil,
+    Plus,
+    Presentation,
+    Save,
+    Send,
+    Trash2,
+    X,
+} from "lucide-react";
+import Editor from "@monaco-editor/react";
 
-import React, {
-  useState,
-  useEffect,
-  useRef,
-  useCallback,
-  useMemo,
-  useSyncExternalStore,
-} from "react";
-import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import api, { getAccessToken } from "../api";
-import {
-  SlideRenderer,
-  type SlideData,
-  type SlideRendererHandle,
-} from "../components/SlideRenderer";
-import { extractLayoutFromIframe } from "../lib/layoutExtractor";
-import { ChatMessage, type ChatMessageData } from "../components/chat/ChatMessage";
+import { CrdtCanvas } from "../components/CrdtCanvas";
+import { ChatMessage } from "../components/chat/ChatMessage";
 import { TaskListBar, type AgentTask } from "../components/chat/TaskListBar";
-import {
-  Send,
-  Loader2,
-  Presentation,
-  Code2,
-  Trash2,
-  CreditCard,
-  X,
-  Home,
-  Pencil,
-  Plus,
-  ChevronLeft,
-  FileText,
-  Save,
-} from "lucide-react";
 import { usePersistentWidth } from "../hooks/usePersistentWidth";
 import {
-  getConversationActivitySnapshot,
-  subscribeConversationActivity,
-  trackConversationRequest,
-} from "../lib/conversationActivity";
-import Editor from "@monaco-editor/react";
-// ─────────────────────────────────────────────────────
-// Utilities
-// ─────────────────────────────────────────────────────
+    useChatStream,
+    type ChatMessage as ChatMessageData,
+    type ConversationMeta,
+} from "../hooks/useChatStream";
+
 function cn(...classes: (string | undefined | null | false)[]) {
-  return classes.filter(Boolean).join(" ");
+    return classes.filter(Boolean).join(" ");
 }
+
 function SparklesIcon(props: React.SVGProps<SVGSVGElement>) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      {...props}
-    >
-      <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
-      <path d="M5 3v4" />
-      <path d="M19 17v4" />
-      <path d="M3 5h4" />
-      <path d="M17 19h4" />
-    </svg>
-  );
-}
-function generateId() {
-  return Math.random().toString(36).slice(2, 10);
-}
-function getConversationRequestKey(conversationId?: string, projectId?: string | null) {
-  return conversationId ?? `draft:${projectId ?? "global"}`;
-}
-function parseStreamSnapshot(snapshot: string) {
-  const thinkStarts = snapshot.split("<think>").length - 1;
-  const thinkEnds = snapshot.split("</think>").length - 1;
-  let isThinking = thinkStarts > thinkEnds;
-  if (!isThinking && thinkStarts === thinkEnds) {
-    const stripped = snapshot.trim();
-    const prefixes = ["<think", "<thin", "<thi", "<th", "<t", "<"];
-    if (prefixes.includes(stripped) || !stripped) {
-      if (snapshot.length < 8) {
-        isThinking = true;
-      }
-    }
-  }
-  return { isThinking, thinkingContent: "", content: snapshot };
-}
-function parseJsonSafely(value: unknown) {
-  if (typeof value !== "string") {
-    return value;
-  }
-  try {
-    return JSON.parse(value);
-  } catch {
-    return value;
-  }
-}
-function normalizeTaskArray(rawTasks: unknown): AgentTask[] {
-  if (!Array.isArray(rawTasks)) {
-    return [];
-  }
-  const normalized: AgentTask[] = [];
-  const seen = new Set<string>();
-  for (const rawTask of rawTasks) {
-    if (!rawTask || typeof rawTask !== "object") {
-      continue;
-    }
-    const task = rawTask as Record<string, unknown>;
-    const id = String(task.id ?? "").trim();
-    const title = String(task.title ?? "").trim();
-    if (!id || !title || seen.has(id)) {
-      continue;
-    }
-    seen.add(id);
-    normalized.push({
-      id,
-      title,
-      done: Boolean(task.done),
-    });
-  }
-  return normalized;
-}
-function extractAgentTasks(messages: ChatMessageData[]): AgentTask[] {
-  let latestSnapshot: AgentTask[] = [];
-  let fallbackFromArguments: AgentTask[] = [];
-  for (const message of messages) {
-    if (message.role !== "assistant") {
-      continue;
-    }
-    for (const toolResult of message.toolResults ?? []) {
-      const parsedResultEnvelope = parseJsonSafely(toolResult?.result);
-      if (!parsedResultEnvelope || typeof parsedResultEnvelope !== "object") {
-        continue;
-      }
-      const parsedResult = parsedResultEnvelope as Record<string, unknown>;
-      const tasksFromResult = normalizeTaskArray(parsedResult.tasks);
-      if (tasksFromResult.length > 0) {
-        latestSnapshot = tasksFromResult;
-      }
-    }
-    for (const toolCall of message.toolCalls ?? []) {
-      const functionName = toolCall?.function?.name;
-      if (functionName !== "set_task_list") {
-        continue;
-      }
-      const parsedArgs = parseJsonSafely(toolCall?.function?.arguments);
-      if (!parsedArgs || typeof parsedArgs !== "object") {
-        continue;
-      }
-      const parsedObject = parsedArgs as Record<string, unknown>;
-      const tasksFromArguments = normalizeTaskArray(parsedObject.tasks);
-      if (tasksFromArguments.length > 0) {
-        fallbackFromArguments = tasksFromArguments;
-      }
-    }
-  }
-  return latestSnapshot.length > 0 ? latestSnapshot : fallbackFromArguments;
-}
-interface ConversationHistoryEntry {
-  id: string;
-  projectId: string | null;
-  title: string;
-  projectName?: string;
-  createdAt: string;
-  updatedAt: string;
-}
-const relativeTimeFormatter = new Intl.RelativeTimeFormat(undefined, {
-  numeric: "auto",
-});
-function sortConversationHistory(entries: ConversationHistoryEntry[]) {
-  return [...entries].sort(
-    (left, right) =>
-      new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime() ||
-      new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime(),
-  );
-}
-function upsertConversationHistory(
-  entries: ConversationHistoryEntry[],
-  nextEntry: ConversationHistoryEntry,
-) {
-  const normalizedEntry = {
-    ...nextEntry,
-    title: nextEntry.title.trim() || "Untitled",
-  };
-  return sortConversationHistory([
-    normalizedEntry,
-    ...entries.filter((entry) => entry.id !== normalizedEntry.id),
-  ]);
-}
-function formatLastEdited(dateString: string) {
-  const timestamp = new Date(dateString).getTime();
-  if (Number.isNaN(timestamp)) {
-    return "recently edited";
-  }
-  const diffMs = timestamp - Date.now();
-  const diffSeconds = Math.round(diffMs / 1000);
-  const absoluteSeconds = Math.abs(diffSeconds);
-  if (absoluteSeconds < 45) {
-    return "just now";
-  }
-  const units: Array<[Intl.RelativeTimeFormatUnit, number]> = [
-    ["year", 60 * 60 * 24 * 365],
-    ["month", 60 * 60 * 24 * 30],
-    ["week", 60 * 60 * 24 * 7],
-    ["day", 60 * 60 * 24],
-    ["hour", 60 * 60],
-    ["minute", 60],
-  ];
-  for (const [unit, secondsPerUnit] of units) {
-    if (absoluteSeconds >= secondsPerUnit) {
-      return relativeTimeFormatter
-        .format(Math.round(diffSeconds / secondsPerUnit), unit)
-        .toLowerCase();
-    }
-  }
-  return relativeTimeFormatter.format(diffSeconds, "second").toLowerCase();
-}
-// ─────────────────────────────────────────────────────
-// ChatPage
-// ─────────────────────────────────────────────────────
-const ChatPage: React.FC = () => {
-  const { conversationId } = useParams<{ conversationId?: string }>();
-  const [searchParams] = useSearchParams();
-  const projectId = searchParams.get("projectId");
-  const navigate = useNavigate();
-  const { user, logout } = useAuth();
-  const [messages, setMessages] = useState<ChatMessageData[]>([]);
-  const [input, setInput] = useState("");
-  const [historyLoading, setHistoryLoading] = useState(false);
-  const [slides, setSlides] = useState<SlideData[]>([]);
-  const [currentSlideIndex] = useState(0);
-  const [showSettings, setShowSettings] = useState(false);
-  const [isDeleting, setIsDeleting] = useState(false);
-  const [sidebarWidth, setSidebarWidth] = usePersistentWidth({
-    storageKey: "vibe-agent.chat-sidebar-width",
-    defaultWidth: 380,
-    minWidth: 350,
-    maxWidth: 550,
-  });
-  const [isResizingState, setIsResizingState] = useState(false);
-  const [deckTitle, setDeckTitle] = useState("New Chat");
-  const [conversationTitle, setConversationTitle] = useState("New Chat");
-  const [isTitleFocused, setIsTitleFocused] = useState(false);
-  const [conversationHistory, setConversationHistory] = useState<ConversationHistoryEntry[]>([]);
-  const [isConversationHistoryLoading, setIsConversationHistoryLoading] = useState(true);
-  const [isConversationHistoryOpen, setIsConversationHistoryOpen] = useState(false);
-  const [rightPanelTab, setRightPanelTab] = useState<"preview" | "html" | "design">("preview");
-  const [designContent, setDesignContent] = useState<string>("");
-  const [isSavingDesign, setIsSavingDesign] = useState<boolean>(false);
-  const [isCompressingMemory, setIsCompressingMemory] = useState<boolean>(false);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const messagesContainerRef = useRef<HTMLDivElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const isResizing = useRef(false);
-  const startX = useRef(0);
-  const startWidth = useRef(0);
-  const userScrolledUp = useRef(false);
-  const liveConversationMessagesRef = useRef<Record<string, ChatMessageData[]>>({});
-  const slideRendererRef = useRef<SlideRendererHandle>(null);
-  const conversationActivity = useSyncExternalStore(
-    subscribeConversationActivity,
-    getConversationActivitySnapshot,
-    getConversationActivitySnapshot,
-  );
-  const currentConversationKey = getConversationRequestKey(conversationId, projectId);
-  const currentConversationKeyRef = useRef(currentConversationKey);
-  const hasTriggeredExitPreviewRef = useRef(false);
-  useEffect(() => {
-    currentConversationKeyRef.current = currentConversationKey;
-  }, [currentConversationKey]);
-  const isCurrentConversationBusy = Boolean(conversationActivity[currentConversationKey]);
-  const agentTasks = useMemo(() => extractAgentTasks(messages), [messages]);
-  const adjustTextareaHeight = useCallback((element: HTMLTextAreaElement) => {
-    element.style.height = "auto";
-    const styles = window.getComputedStyle(element);
-    const lineHeight = Number.parseFloat(styles.lineHeight) || 20;
-    const paddingTop = Number.parseFloat(styles.paddingTop) || 0;
-    const paddingBottom = Number.parseFloat(styles.paddingBottom) || 0;
-    const maxHeight = lineHeight * 3 + paddingTop + paddingBottom;
-    const nextHeight = Math.min(element.scrollHeight, maxHeight);
-    element.style.height = `${nextHeight}px`;
-    element.style.overflowY = element.scrollHeight > maxHeight ? "auto" : "hidden";
-  }, []);
-  const loadConversationHistory = useCallback(async () => {
-    setIsConversationHistoryLoading(true);
-    try {
-      const response = await api.get("/conversations", {
-        params: projectId ? { projectId } : undefined,
-      });
-      const nextHistory: ConversationHistoryEntry[] = (response.data.conversations ?? []).map(
-        (entry: any) => ({
-          id: entry.id,
-          projectId: entry.projectId ?? null,
-          title: entry.title ?? "Untitled",
-          projectName: entry.projectName,
-          createdAt: entry.createdAt,
-          updatedAt: entry.updatedAt,
-        }),
-      );
-      setConversationHistory(sortConversationHistory(nextHistory));
-      if (projectId) {
-        const currentProjectName = nextHistory.find(
-          (entry) => entry.projectId === projectId,
-        )?.projectName;
-        if (currentProjectName?.trim()) {
-          setDeckTitle(currentProjectName);
-        }
-      }
-      if (conversationId) {
-        const currentConversation = nextHistory.find((entry) => entry.id === conversationId);
-        if (currentConversation?.title?.trim()) {
-          setConversationTitle(currentConversation.title);
-        }
-      }
-    } catch (error) {
-      console.error("Failed to load conversations:", error);
-    } finally {
-      setIsConversationHistoryLoading(false);
-    }
-  }, [conversationId, projectId]);
-  const visibleConversationHistory = useMemo(() => {
-    if (!projectId) {
-      return conversationHistory;
-    }
-    return conversationHistory.filter((entry) => entry.projectId === projectId);
-  }, [conversationHistory, projectId]);
-  useEffect(() => {
-    void loadConversationHistory();
-  }, [loadConversationHistory]);
-  useEffect(() => {
-    if (!conversationId) {
-      setConversationTitle("New Chat");
-    }
-  }, [conversationId]);
-  useEffect(() => {
-    hasTriggeredExitPreviewRef.current = false;
-    if (!projectId) {
-      return;
-    }
-    const triggerPreviewGeneration = () => {
-      if (hasTriggeredExitPreviewRef.current) {
-        return;
-      }
-      hasTriggeredExitPreviewRef.current = true;
-      const token = getAccessToken();
-      if (!token) {
-        return;
-      }
-      fetch(`${import.meta.env.VITE_API_URL}/projects/${projectId}/preview`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        credentials: "include",
-        keepalive: true,
-        body: JSON.stringify({ reason: "page-exit" }),
-      }).catch((error) => {
-        console.error("Failed to generate project preview on exit:", error);
-      });
-    };
-    const handleBeforeUnload = () => {
-      triggerPreviewGeneration();
-    };
-    window.addEventListener("beforeunload", handleBeforeUnload);
-    return () => {
-      triggerPreviewGeneration();
-      window.removeEventListener("beforeunload", handleBeforeUnload);
-    };
-  }, [projectId]);
-  const handleResizeMouseDown = (e: React.MouseEvent) => {
-    isResizing.current = true;
-    startX.current = e.clientX;
-    startWidth.current = sidebarWidth;
-    setIsResizingState(true);
-    document.body.style.cursor = "col-resize";
-    document.body.style.userSelect = "none";
-    const onMouseMove = (ev: MouseEvent) => {
-      if (!isResizing.current) return;
-      const delta = ev.clientX - startX.current;
-      const newWidth = Math.min(550, Math.max(350, startWidth.current + delta));
-      setSidebarWidth(newWidth);
-    };
-    const onMouseUp = () => {
-      isResizing.current = false;
-      setIsResizingState(false);
-      document.body.style.cursor = "";
-      document.body.style.userSelect = "";
-      document.removeEventListener("mousemove", onMouseMove);
-      document.removeEventListener("mouseup", onMouseUp);
-    };
-    document.addEventListener("mousemove", onMouseMove);
-    document.addEventListener("mouseup", onMouseUp);
-  };
-  const scrollToBottom = useCallback(() => {
-    if (userScrolledUp.current) return;
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, []);
-  // Detect manual upward scroll — stop auto-scrolling while user is reading
-  useEffect(() => {
-    const container = messagesContainerRef.current;
-    if (!container) return;
-    const onScroll = () => {
-      const distFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
-      userScrolledUp.current = distFromBottom > 80;
-    };
-    container.addEventListener("scroll", onScroll, { passive: true });
-    return () => container.removeEventListener("scroll", onScroll);
-  }, []);
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages, scrollToBottom]);
-  // ─────────────────────────────────────────────────────
-  // Load message history when conversation already exists
-  // ─────────────────────────────────────────────────────
-  useEffect(() => {
-    if (!conversationId) return;
-    const liveMessages = liveConversationMessagesRef.current[conversationId];
-    if (liveMessages && getConversationActivitySnapshot()[conversationId]) {
-      setMessages(liveMessages);
-      setHistoryLoading(false);
-      return;
-    }
-    setHistoryLoading(true);
-    Promise.all([
-      api.get(`/conversations/${conversationId}/messages`),
-      projectId ? fetchPresentation(projectId) : Promise.resolve(),
-    ])
-      .then(([msgRes]) => {
-        const hydratedMessages: ChatMessageData[] = (msgRes.data.messages ?? []).map(
-          (m: {
-            id: string;
-            role: "user" | "assistant";
-            content: string;
-            thinkTimers?: { startTime: number; endTime?: number }[];
-            toolCalls?: any[];
-            toolResults?: any[];
-          }) => ({
-            id: m.id,
-            role: m.role,
-            content: m.content,
-            thinkTimers: m.thinkTimers,
-            toolCalls: m.toolCalls,
-            toolResults: m.toolResults,
-          }),
-        );
-        setMessages(hydratedMessages);
-        liveConversationMessagesRef.current[conversationId] = hydratedMessages;
-        if (msgRes.data.title) {
-          setConversationTitle(msgRes.data.title);
-        }
-        if (msgRes.data.projectName) {
-          setDeckTitle(msgRes.data.projectName);
-        } else if (msgRes.data.title) {
-          setDeckTitle(msgRes.data.title);
-        }
-        // Always start at the bottom when opening a conversation
-        userScrolledUp.current = false;
-        setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: "instant" }), 50);
-      })
-      .catch((err) => {
-        console.error("Failed to load conversation history:", err);
-      })
-      .finally(() => {
-        setHistoryLoading(false);
-      });
-  }, [conversationId, projectId]);
-  // ─────────────────────────────────────────────────────
-  // Debounced title save
-  // ─────────────────────────────────────────────────────
-  useEffect(() => {
-    if (!deckTitle.trim()) return;
-    const timer = setTimeout(() => {
-      const request = projectId
-        ? api.patch(`/projects/${projectId}/name`, { name: deckTitle.trim() })
-        : conversationId
-          ? api.patch(`/conversations/${conversationId}/title`, { title: deckTitle.trim() })
-          : null;
-      if (!request) return;
-      request
-        .then(() => {
-          if (!projectId) {
-            setConversationHistory((prev) =>
-              upsertConversationHistory(prev, {
-                id: conversationId!,
-                projectId: projectId ?? null,
-                title: deckTitle.trim(),
-                projectName: prev.find((entry) => entry.id === conversationId)?.projectName,
-                createdAt:
-                  prev.find((entry) => entry.id === conversationId)?.createdAt ??
-                  new Date().toISOString(),
-                updatedAt: new Date().toISOString(),
-              }),
-            );
-          }
-        })
-        .catch((err) => console.error("Failed to save title:", err));
-    }, 600);
-    return () => clearTimeout(timer);
-  }, [conversationId, deckTitle, projectId]);
-  // ─────────────────────────────────────────────────────
-  // Slide fetching
-  // ─────────────────────────────────────────────────────
-  const fetchPresentation = async (id: string) => {
-    try {
-      const res = await api.get(`/presentation/${id}`);
-      if (res.data.slides && res.data.slides.length > 0) {
-        const formattedSlides: SlideData[] = res.data.slides.map((s: any, i: number) => ({
-          id: s.minio_object_key || `slide-${i}`,
-          title: `Slide ${i + 1}`,
-          content: "Loading slide content...",
-          layoutType: "title",
-          minio_object_key: s.minio_object_key,
-          theme_data: s.theme_data,
-        }));
-        const presentationHtml = typeof res.data.html === "string" ? res.data.html : "";
-        setSlides(formattedSlides.map((slide) => ({ ...slide, rawHtml: presentationHtml })));
-      }
-      try {
-        const designRes = await api.get(`/projects/${id}/design`);
-        setDesignContent(designRes.data.design || "");
-      } catch (err) {
-        console.error("Failed to fetch design:", err);
-      }
-    } catch (error) {
-      console.error("Failed to fetch presentation:", error);
-    }
-  };
-
-  const handleSaveDesign = async () => {
-    if (!projectId) return;
-    setIsSavingDesign(true);
-    try {
-      await api.put(`/projects/${projectId}/design`, { design: designContent });
-    } catch (error) {
-      console.error("Failed to save design:", error);
-    } finally {
-      setIsSavingDesign(false);
-    }
-  };
-  // ─────────────────────────────────────────────────────
-  // Auto-grow textarea height
-  // ─────────────────────────────────────────────────────
-  const handleTextareaChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    setInput(e.target.value);
-    adjustTextareaHeight(e.target);
-  };
-  // ─────────────────────────────────────────────────────
-  // Keyboard handler: Enter sends, Shift+Enter newline
-  // ─────────────────────────────────────────────────────
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      if (!isCurrentConversationBusy && input.trim()) {
-        submitMessage();
-      }
-    }
-  };
-  // ─────────────────────────────────────────────────────
-  // Send message
-  // ─────────────────────────────────────────────────────
-  const submitMessage = async () => {
-    const userText = input.trim();
-    if (!userText || isCurrentConversationBusy) return;
-    setInput("");
-    if (textareaRef.current) {
-      textareaRef.current.style.height = "auto";
-      textareaRef.current.style.overflowY = "hidden";
-    }
-    userScrolledUp.current = false; // snap back to bottom for new message
-    let requestConversationKey = currentConversationKey;
-    let stopTrackingConversation: (() => void) | null = null;
-    const setMessagesForConversationKey = (
-      key: string,
-      updater: ChatMessageData[] | ((previous: ChatMessageData[]) => ChatMessageData[]),
-    ) => {
-      const previous =
-        liveConversationMessagesRef.current[key] ??
-        (currentConversationKeyRef.current === key ? messages : []);
-      const next = typeof updater === "function" ? updater(previous) : updater;
-      liveConversationMessagesRef.current[key] = next;
-      if (currentConversationKeyRef.current === key) {
-        setMessages(next);
-      }
-      return next;
-    };
-    const switchConversationTracking = (nextKey: string) => {
-      if (requestConversationKey === nextKey && stopTrackingConversation) {
-        return;
-      }
-      stopTrackingConversation?.();
-      requestConversationKey = nextKey;
-      stopTrackingConversation = trackConversationRequest(nextKey);
-    };
-    switchConversationTracking(requestConversationKey);
-    // 1. Append user message immediately
-    const userMsg: ChatMessageData = {
-      id: generateId(),
-      role: "user",
-      content: userText,
-    };
-    setMessagesForConversationKey(requestConversationKey, (prev) => [...prev, userMsg]);
-    // 2. Insert thinking placeholder
-    const assistantId = generateId();
-    const thinkingStartedAt = Date.now();
-    setMessagesForConversationKey(requestConversationKey, (prev) => [
-      ...prev,
-      {
-        id: assistantId,
-        role: "assistant",
-        content: [], // Feed an empty array so ChatMessage natively hits the `blocks.length === 0` branch and renders an immediate thinking block.
-        isThinking: true,
-        thinkingStartedAt,
-        thinkingContent: "",
-      },
-    ]);
-    let doneConvId = conversationId ?? null;
-    let resolvedConversationId = conversationId ?? null;
-    const startConversationTracking = (
-      nextConversationId: string,
-      nextProjectId?: string | null,
-      nextTitle?: string,
-    ) => {
-      const shouldUpdateHistory = !nextConversationId.startsWith("draft:");
-      if (stopTrackingConversation && resolvedConversationId === nextConversationId) {
-        if (shouldUpdateHistory) {
-          setConversationHistory((prev) =>
-            upsertConversationHistory(prev, {
-              id: nextConversationId,
-              projectId: nextProjectId ?? projectId ?? null,
-              title:
-                nextTitle?.trim() ||
-                prev.find((entry) => entry.id === nextConversationId)?.title ||
-                "New Chat",
-              projectName: prev.find((entry) => entry.id === nextConversationId)?.projectName,
-              createdAt:
-                prev.find((entry) => entry.id === nextConversationId)?.createdAt ??
-                new Date().toISOString(),
-              updatedAt: new Date().toISOString(),
-            }),
-          );
-        }
-        return;
-      }
-      resolvedConversationId = nextConversationId;
-      const previousConversationKey = requestConversationKey;
-      switchConversationTracking(nextConversationId);
-      if (previousConversationKey !== nextConversationId) {
-        const pendingMessages = liveConversationMessagesRef.current[previousConversationKey];
-        if (pendingMessages) {
-          liveConversationMessagesRef.current[nextConversationId] = pendingMessages;
-          delete liveConversationMessagesRef.current[previousConversationKey];
-        }
-      }
-      if (shouldUpdateHistory) {
-        setConversationHistory((prev) =>
-          upsertConversationHistory(prev, {
-            id: nextConversationId,
-            projectId: nextProjectId ?? projectId ?? null,
-            title:
-              nextTitle?.trim() ||
-              prev.find((entry) => entry.id === nextConversationId)?.title ||
-              "New Chat",
-            projectName: prev.find((entry) => entry.id === nextConversationId)?.projectName,
-            createdAt:
-              prev.find((entry) => entry.id === nextConversationId)?.createdAt ??
-              new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          }),
-        );
-      }
-    };
-    try {
-      startConversationTracking(currentConversationKey, projectId, deckTitle);
-      const payload: Record<string, string> = { message: userText };
-      if (conversationId) payload.conversationId = conversationId;
-      if (projectId) payload.projectId = projectId;
-      const token = getAccessToken();
-      const response = await fetch(`${import.meta.env.VITE_API_URL}/chat/stream`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        credentials: "include",
-        body: JSON.stringify(payload),
-      });
-      if (!response.ok || !response.body) {
-        throw new Error(`Stream request failed: ${response.status}`);
-      }
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let contentBlocks: any[] = [];
-      let accumulatedText = "";
-      let pendingTokens = false;
-      const gemmaControlTokens = ["<channel|>", "<|channel|>", "<tool_call|>", "<|tool_call|>"];
-      const fifoSegments: string[] = [];
-      const fifoWordChunkSize = 20;
-      let fifoCarry = "";
-      let fifoPauseUntilRefill = false;
-
-      const trailingControlPrefixLength = (value: string) => {
-        let maxPrefixLength = 0;
-        for (const token of gemmaControlTokens) {
-          for (let length = 1; length < token.length; length++) {
-            if (value.endsWith(token.slice(0, length)) && length > maxPrefixLength) {
-              maxPrefixLength = length;
-            }
-          }
-        }
-        return maxPrefixLength;
-      };
-
-      const countWordsInSegments = (segments: string[]) =>
-        segments.reduce((count, segment) => count + (segment.trim() ? 1 : 0), 0);
-
-      const flushWordChunk = () => {
-        const output: string[] = [];
-        let words = 0;
-        while (fifoSegments.length > 0) {
-          const segment = fifoSegments.shift()!;
-          output.push(segment);
-          if (segment.trim()) {
-            words += 1;
-            if (words >= fifoWordChunkSize) {
-              break;
-            }
-          }
-        }
-        return output.join("");
-      };
-
-      const flushAllSegments = () => {
-        const output = fifoSegments.join("");
-        fifoSegments.length = 0;
-        return output;
-      };
-
-      const enqueueGemmaTokenText = (rawToken: string, flushAll = false) => {
-        const beforeSanitize = fifoCarry + rawToken;
-        const hadControlToken = gemmaControlTokens.some((token) => beforeSanitize.includes(token));
-        let sanitized = beforeSanitize;
-        for (const token of gemmaControlTokens) {
-          sanitized = sanitized.split(token).join("");
-        }
-
-        const trailingPrefixLen = flushAll ? 0 : trailingControlPrefixLength(sanitized);
-        const pushable =
-          trailingPrefixLen > 0
-            ? sanitized.slice(0, sanitized.length - trailingPrefixLen)
-            : sanitized;
-        fifoCarry =
-          trailingPrefixLen > 0 ? sanitized.slice(sanitized.length - trailingPrefixLen) : "";
-
-        if (pushable) {
-          const parts = pushable.split(/(\s+)/);
-          for (const part of parts) {
-            if (part.length > 0) {
-              fifoSegments.push(part);
-            }
-          }
-        }
-
-        if (hadControlToken) {
-          fifoPauseUntilRefill = true;
-        }
-
-        const wordCount = countWordsInSegments(fifoSegments);
-        if (fifoPauseUntilRefill && wordCount < fifoWordChunkSize && !flushAll) {
-          return "";
-        }
-        if (fifoPauseUntilRefill && wordCount >= fifoWordChunkSize) {
-          fifoPauseUntilRefill = false;
-        }
-
-        if (flushAll) {
-          const tail = fifoCarry;
-          fifoCarry = "";
-          return flushAllSegments() + tail;
-        }
-
-        if (wordCount >= fifoWordChunkSize) {
-          return flushWordChunk();
-        }
-
-        return "";
-      };
-      let thinkTimers: { startTime: number; endTime?: number }[] = [
-        { startTime: thinkingStartedAt },
-      ];
-      let thinkMode: "undecided" | "enabled" | "disabled" = "undecided";
-      let toolCallsCache: any[] = [];
-      let toolResultsCache: any[] = [];
-      const requestPresentationRefresh = () => {
-        if (projectId) {
-          fetchPresentation(projectId);
-        }
-      };
-      const attemptUpdateState = () => {
-        // Deep copy the blocks because they might still mutate
-        const snapshotBlocks = JSON.parse(JSON.stringify(contentBlocks));
-        const snapshotTimers = JSON.parse(JSON.stringify(thinkTimers));
-        const isThinkingActive =
-          contentBlocks.length > 0 &&
-          contentBlocks[contentBlocks.length - 1].type === "think" &&
-          !contentBlocks[contentBlocks.length - 1].endTime;
-        setMessagesForConversationKey(requestConversationKey, (prev) =>
-          prev.map((m) =>
-            m.id === assistantId
-              ? {
-                  ...m,
-                  content: snapshotBlocks.length > 0 ? snapshotBlocks : [],
-                  isThinking: isThinkingActive,
-                  thinkTimers: snapshotTimers,
-                  toolCalls: toolCallsCache.length > 0 ? [...toolCallsCache] : m.toolCalls,
-                  toolResults: toolResultsCache.length > 0 ? [...toolResultsCache] : m.toolResults,
-                }
-              : m,
-          ),
-        );
-      };
-      // Flush pending tokens to React state at most every 50ms
-      const flushInterval = setInterval(() => {
-        if (!pendingTokens) return;
-        pendingTokens = false;
-        attemptUpdateState();
-      }, 50);
-      try {
-        outer: while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const parts = buffer.split("\n\n");
-          buffer = parts.pop() ?? "";
-          for (const part of parts) {
-            const eventMatch = part.match(/^event: (\w+)/);
-            const dataMatch = part.match(/^data: (.+)$/m);
-            if (!dataMatch) continue;
-            const eventName = eventMatch?.[1] ?? "message";
-            const data = JSON.parse(dataMatch[1]);
-            if (eventName === "tool_calls") {
-              pendingTokens = true;
-              if (Array.isArray(data.tool_calls)) {
-                toolCallsCache.push(...data.tool_calls);
-                data.tool_calls.forEach((tc: any) =>
-                  contentBlocks.push({ type: "tool_call", tool_call: tc }),
-                );
-              }
-            } else if (eventName === "tool_result") {
-              pendingTokens = true;
-              if (data?.id) {
-                toolResultsCache.push({ id: data.id, result: data.result });
-                contentBlocks.push({
-                  type: "tool_result",
-                  id: data.id,
-                  result: data.result,
-                });
-              }
-            } else if (eventName === "presentation_updated") {
-              requestPresentationRefresh();
-            } else if (eventName === "token" || eventName === "token_text") {
-              const tokenStr = data.token;
-              pendingTokens = true;
-              if (tokenStr.startsWith("[TOOL_CALLS]") && tokenStr.endsWith("[/TOOL_CALLS]")) {
-                try {
-                  const jsonStr = tokenStr.substring(12, tokenStr.length - 13);
-                  const parsed = JSON.parse(jsonStr);
-                  if (parsed.tool_calls) {
-                    toolCallsCache.push(...parsed.tool_calls);
-                    parsed.tool_calls.forEach((tc: any) =>
-                      contentBlocks.push({ type: "tool_call", tool_call: tc }),
-                    );
-                  }
-                } catch (e) {}
-              } else if (
-                tokenStr.trim().startsWith("[TOOL_RESULT]") &&
-                tokenStr.trim().endsWith("[/TOOL_RESULT]")
-              ) {
-                try {
-                  const cleanToken = tokenStr.trim();
-                  const jsonStr = cleanToken.substring(13, cleanToken.length - 14);
-                  const parsed = JSON.parse(jsonStr);
-                  if (parsed.id) {
-                    toolResultsCache.push(parsed);
-                    contentBlocks.push({
-                      type: "tool_result",
-                      id: parsed.id,
-                      result: parsed.result,
-                    });
-                  }
-                } catch (e) {}
-              } else if (tokenStr === "[PRESENTATION_UPDATED]") {
-                requestPresentationRefresh();
-              } else if (tokenStr === "[COMPRESSING_MEMORY]") {
-                setIsCompressingMemory(true);
-                pendingTokens = true;
-              } else if (tokenStr === "[COMPRESSION_DONE]") {
-                setIsCompressingMemory(false);
-                pendingTokens = true;
-              } else {
-                const nextChunk = enqueueGemmaTokenText(tokenStr);
-                if (!nextChunk) {
-                  continue;
-                }
-
-                accumulatedText += nextChunk;
-                if (thinkMode === "undecided") {
-                  const trimmed = nextChunk.trim();
-                  if (trimmed.length > 0) {
-                    thinkMode = nextChunk.trimStart().startsWith("<think>")
-                      ? "enabled"
-                      : "disabled";
-                  }
-                }
-                if (thinkMode === "disabled") {
-                  const reconstructedBlocks: any[] = [];
-                  for (const block of contentBlocks) {
-                    if (block.type === "tool_call" || block.type === "tool_result") {
-                      reconstructedBlocks.push(block);
-                    }
-                  }
-                  if (accumulatedText.trim()) {
-                    reconstructedBlocks.push({ type: "text", text: accumulatedText });
-                  }
-                  contentBlocks = reconstructedBlocks;
-                  continue;
-                }
-                const numThinkTags = accumulatedText.split("<think>").length - 1;
-                while (thinkTimers.length < Math.max(1, numThinkTags)) {
-                  thinkTimers.push({ startTime: Date.now() });
-                }
-                const newTextThinkBlocks: any[] = [];
-                let remaining = accumulatedText;
-                let thinkIdx = 0;
-                while (remaining) {
-                  const startIdx = remaining.indexOf("<think>");
-                  if (startIdx === -1) {
-                    if (remaining.trim())
-                      newTextThinkBlocks.push({ type: "text", text: remaining });
-                    break;
-                  }
-                  if (startIdx > 0) {
-                    const textBefore = remaining.slice(0, startIdx);
-                    if (textBefore.trim())
-                      newTextThinkBlocks.push({ type: "text", text: textBefore });
-                  }
-                  const endIdx = remaining.indexOf("</think>", startIdx);
-                  if (endIdx === -1) {
-                    const timer = thinkTimers[thinkIdx];
-                    newTextThinkBlocks.push({
-                      type: "think",
-                      text: remaining.slice(startIdx + 7).trim(),
-                      startTime: timer?.startTime,
-                      endTime: timer?.endTime,
-                    });
-                    break;
-                  } else {
-                    const timer = thinkTimers[thinkIdx];
-                    if (timer && !timer.endTime) {
-                      timer.endTime = Date.now();
-                    }
-                    newTextThinkBlocks.push({
-                      type: "think",
-                      text: remaining.slice(startIdx + 7, endIdx).trim(),
-                      startTime: timer?.startTime,
-                      endTime: timer?.endTime,
-                    });
-                    remaining = remaining.slice(endIdx + 8);
-                    thinkIdx++;
-                  }
-                }
-                let textThinkCursor = 0;
-                const reconstructedBlocks: any[] = [];
-                for (let b of contentBlocks) {
-                  if (b.type === "tool_call" || b.type === "tool_result") {
-                    reconstructedBlocks.push(b);
-                  } else {
-                    if (textThinkCursor < newTextThinkBlocks.length) {
-                      reconstructedBlocks.push(newTextThinkBlocks[textThinkCursor]);
-                      textThinkCursor++;
-                    }
-                  }
-                }
-                while (textThinkCursor < newTextThinkBlocks.length) {
-                  reconstructedBlocks.push(newTextThinkBlocks[textThinkCursor]);
-                  textThinkCursor++;
-                }
-                contentBlocks = reconstructedBlocks;
-              }
-            } else if (eventName === "conversation") {
-              doneConvId = data.conversationId ?? doneConvId;
-              if (data.conversationId) {
-                startConversationTracking(
-                  data.conversationId,
-                  data.projectId ?? projectId ?? null,
-                  data.title ?? "New Chat",
-                );
-                if (data.title?.trim()) {
-                  setConversationTitle(data.title);
-                }
-                if (data.projectName?.trim()) {
-                  setDeckTitle(data.projectName);
-                }
-              }
-            } else if (eventName === "layout_request") {
-              // The backend is asking us to compute the layout of a slide
-              const { requestId: layoutRequestId, slideId: layoutSlideId } = data;
-              if (layoutRequestId && layoutSlideId) {
-                (async () => {
-                  try {
-                    const iframe = slideRendererRef.current?.getIframe?.();
-                    if (!iframe) {
-                      // No iframe available — send an error response
-                      await api.post("/layout-response", {
-                        requestId: layoutRequestId,
-                        layoutData: {
-                          slideId: layoutSlideId,
-                          viewportWidth: 1920,
-                          viewportHeight: 1080,
-                          tree: {
-                            tag: "body",
-                            x: 0,
-                            y: 0,
-                            width: 0,
-                            height: 0,
-                            children: [],
-                            text: "Slide iframe not available",
-                          },
-                        },
-                      });
-                      return;
-                    }
-                    const result = await extractLayoutFromIframe(iframe, layoutRequestId);
-                    await api.post("/layout-response", {
-                      requestId: layoutRequestId,
-                      layoutData: {
-                        slideId: layoutSlideId,
-                        viewportWidth: result.viewportWidth,
-                        viewportHeight: result.viewportHeight,
-                        tree: result.tree,
-                      },
-                    });
-                  } catch (layoutErr) {
-                    console.error("Layout extraction failed:", layoutErr);
-                    // Attempt to send a fallback so the backend doesn't hang
-                    try {
-                      await api.post("/layout-response", {
-                        requestId: layoutRequestId,
-                        layoutData: {
-                          slideId: layoutSlideId,
-                          viewportWidth: 1920,
-                          viewportHeight: 1080,
-                          tree: {
-                            tag: "body",
-                            x: 0,
-                            y: 0,
-                            width: 0,
-                            height: 0,
-                            children: [],
-                            text: "Extraction error",
-                          },
-                        },
-                      });
-                    } catch {
-                      /* best effort */
-                    }
-                  }
-                })();
-              }
-            } else if (eventName === "done") {
-              const bufferedChunk = enqueueGemmaTokenText("", true);
-              if (bufferedChunk) {
-                accumulatedText += bufferedChunk;
-                pendingTokens = true;
-                if (thinkMode === "undecided") {
-                  const trimmed = bufferedChunk.trim();
-                  if (trimmed.length > 0) {
-                    thinkMode = bufferedChunk.trimStart().startsWith("<think>")
-                      ? "enabled"
-                      : "disabled";
-                  }
-                }
-
-                if (thinkMode === "disabled") {
-                  const reconstructedBlocks: any[] = [];
-                  for (const block of contentBlocks) {
-                    if (block.type === "tool_call" || block.type === "tool_result") {
-                      reconstructedBlocks.push(block);
-                    }
-                  }
-                  if (accumulatedText.trim()) {
-                    reconstructedBlocks.push({ type: "text", text: accumulatedText });
-                  }
-                  contentBlocks = reconstructedBlocks;
-                } else {
-                  const numThinkTags = accumulatedText.split("<think>").length - 1;
-                  while (thinkTimers.length < Math.max(1, numThinkTags)) {
-                    thinkTimers.push({ startTime: Date.now() });
-                  }
-                  const newTextThinkBlocks: any[] = [];
-                  let remaining = accumulatedText;
-                  let thinkIdx = 0;
-                  while (remaining) {
-                    const startIdx = remaining.indexOf("<think>");
-                    if (startIdx === -1) {
-                      if (remaining.trim()) {
-                        newTextThinkBlocks.push({ type: "text", text: remaining });
-                      }
-                      break;
-                    }
-                    if (startIdx > 0) {
-                      const textBefore = remaining.slice(0, startIdx);
-                      if (textBefore.trim()) {
-                        newTextThinkBlocks.push({ type: "text", text: textBefore });
-                      }
-                    }
-                    const endIdx = remaining.indexOf("</think>", startIdx);
-                    if (endIdx === -1) {
-                      const timer = thinkTimers[thinkIdx];
-                      newTextThinkBlocks.push({
-                        type: "think",
-                        text: remaining.slice(startIdx + 7).trim(),
-                        startTime: timer?.startTime,
-                        endTime: timer?.endTime,
-                      });
-                      break;
-                    }
-
-                    const timer = thinkTimers[thinkIdx];
-                    if (timer && !timer.endTime) {
-                      timer.endTime = Date.now();
-                    }
-                    newTextThinkBlocks.push({
-                      type: "think",
-                      text: remaining.slice(startIdx + 7, endIdx).trim(),
-                      startTime: timer?.startTime,
-                      endTime: timer?.endTime,
-                    });
-                    remaining = remaining.slice(endIdx + 8);
-                    thinkIdx++;
-                  }
-
-                  let textThinkCursor = 0;
-                  const reconstructedBlocks: any[] = [];
-                  for (const block of contentBlocks) {
-                    if (block.type === "tool_call" || block.type === "tool_result") {
-                      reconstructedBlocks.push(block);
-                    } else if (textThinkCursor < newTextThinkBlocks.length) {
-                      reconstructedBlocks.push(newTextThinkBlocks[textThinkCursor]);
-                      textThinkCursor++;
-                    }
-                  }
-                  while (textThinkCursor < newTextThinkBlocks.length) {
-                    reconstructedBlocks.push(newTextThinkBlocks[textThinkCursor]);
-                    textThinkCursor++;
-                  }
-                  contentBlocks = reconstructedBlocks;
-                }
-              }
-              doneConvId = data.conversationId;
-              break outer;
-            } else if (eventName === "error") {
-              throw new Error(data.message ?? "Stream error");
-            }
-          }
-        }
-      } finally {
-        clearInterval(flushInterval);
-        attemptUpdateState();
-      }
-      // Navigate to conversation URL on first message
-      if (!conversationId && doneConvId) {
-        navigate(`/chat/${doneConvId}${projectId ? `?projectId=${projectId}` : ""}`, {
-          replace: true,
-        });
-      }
-      // Refetch slides
-      if (projectId) fetchPresentation(projectId);
-    } catch (error: any) {
-      console.error("Chat error:", error);
-      const thinkingElapsed = Math.floor((Date.now() - thinkingStartedAt) / 1000);
-      setMessagesForConversationKey(requestConversationKey, (prev) =>
-        prev.map((m) =>
-          m.id === assistantId
-            ? {
-                ...m,
-                content: "Sorry, I encountered an error processing your request. Please try again.",
-                isThinking: false,
-                thinkingTime: thinkingElapsed,
-              }
-            : m,
-        ),
-      );
-    } finally {
-      setIsCompressingMemory(false);
-      if (stopTrackingConversation) {
-        stopTrackingConversation();
-      }
-      await loadConversationHistory();
-    }
-  };
-  const handleFormSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    submitMessage();
-  };
-  const handleDeleteAccount = async () => {
-    if (
-      !window.confirm(
-        "Are you certain you want to delete your account? This action cannot be undone.",
-      )
-    )
-      return;
-    setIsDeleting(true);
-    try {
-      await api.delete("/user/me");
-      logout();
-    } catch (err) {
-      console.error("Failed to delete account", err);
-      alert("Failed to delete account");
-      setIsDeleting(false);
-    }
-  };
-  // ─────────────────────────────────────────────────────
-  // Render
-  // ─────────────────────────────────────────────────────
-  const isEmpty = messages.length === 0 && !isCurrentConversationBusy && !historyLoading;
-  const activeChatLabel = conversationTitle.trim() || "New Chat";
-  const activeSlideHtml = slides[currentSlideIndex]?.rawHtml ?? "";
-  return (
-    <div className="h-screen w-screen flex bg-background text-foreground overflow-hidden font-sans">
-      {/* Full-screen overlay during resize to capture events over iframes */}
-      {isResizingState && <div className="fixed inset-0 z-[9999] cursor-col-resize" />}
-      {/*
-        =========================================
-        LEFT PANEL: CHAT INTERFACE
-        =========================================
-      */}
-      <div
-        className="relative shrink-0 border-r border-border flex flex-col bg-card"
-        style={{ width: sidebarWidth }}
-      >
-        {/* Header */}
-        <div className="h-16 border-b border-border flex items-center gap-2 px-4 shrink-0 bg-muted/50">
-          {/* Logo icon — clickable, returns to dashboard */}
-          <button
-            onClick={() => navigate("/")}
-            className="flex-shrink-0 w-8 h-8 rounded-lg bg-primary/20 flex items-center justify-center border border-primary/30 hover:opacity-75 transition-opacity cursor-pointer"
-            title="Back to Dashboard"
-          >
-            <Home className="w-4 h-4 text-primary" />
-          </button>
-          {/* Editable deck title */}
-          <div className="relative flex-1 min-w-0 flex items-center group">
-            <input
-              type="text"
-              value={deckTitle}
-              onChange={(e) => setDeckTitle(e.target.value)}
-              onFocus={() => setIsTitleFocused(true)}
-              onBlur={() => setIsTitleFocused(false)}
-              onClick={(e) => e.stopPropagation()}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") e.currentTarget.blur();
-              }}
-              className={cn(
-                "w-full bg-transparent text-sm font-semibold text-foreground tracking-wide",
-                "px-1.5 py-0.5 rounded-md outline-none truncate transition-all",
-                isTitleFocused ? "ring-1 ring-primary/50 bg-muted/60" : "hover:bg-muted/40",
-              )}
-              title={deckTitle}
-              maxLength={120}
-            />
-            {!isTitleFocused && (
-              <Pencil className="w-3 h-3 text-muted-foreground opacity-0 group-hover:opacity-60 transition-opacity absolute right-1.5 pointer-events-none" />
-            )}
-          </div>
-          {/* New Chat button */}
-          <button
-            onClick={() => {
-              setMessages([]);
-              setConversationTitle("New Chat");
-              setIsConversationHistoryOpen(false);
-              navigate(projectId ? `/chat?projectId=${projectId}` : `/chat`, { replace: true });
-            }}
-            className="text-muted-foreground hover:text-foreground transition-colors p-2 rounded-lg hover:bg-muted cursor-pointer"
-            title="New Chat"
-          >
-            <Plus className="w-4 h-4" />
-          </button>
-        </div>
-        <div className="relative shrink-0">
-          <button
-            type="button"
-            onClick={() => setIsConversationHistoryOpen((prev) => !prev)}
-            aria-expanded={isConversationHistoryOpen}
-            className="w-full h-9 border-b border-border flex items-center gap-1.5 px-2 bg-card text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
-            title={isConversationHistoryOpen ? "Hide chats" : "Show chats"}
-          >
-            <span className="flex h-6 w-6 items-center justify-center rounded-sm">
-              <ChevronLeft
-                className={cn(
-                  "h-3.5 w-3.5 transition-transform duration-200",
-                  isConversationHistoryOpen && "-rotate-90",
-                )}
-              />
-            </span>
-            <span className="truncate text-xs font-semibold">{activeChatLabel}</span>
-          </button>
-          {isConversationHistoryOpen && (
-            <div className="absolute left-0 right-0 top-full z-30 border-b border-border bg-white shadow-sm">
-              <div className="max-h-56 overflow-y-auto custom-scrollbar">
-                {isConversationHistoryLoading ? (
-                  <div className="flex items-center gap-2 px-2 py-3 text-xs text-muted-foreground">
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    <span>Loading chats…</span>
-                  </div>
-                ) : visibleConversationHistory.length === 0 ? (
-                  <div className="px-2 py-3 text-xs text-muted-foreground">No saved chats yet.</div>
-                ) : (
-                  visibleConversationHistory.map((entry) => {
-                    const isActiveConversation = entry.id === conversationId;
-                    const status = conversationActivity[entry.id] ? "busy" : "idle";
-                    return (
-                      <button
-                        key={entry.id}
-                        onClick={() => {
-                          setIsConversationHistoryOpen(false);
-                          navigate(
-                            entry.projectId
-                              ? `/chat/${entry.id}?projectId=${entry.projectId}`
-                              : `/chat/${entry.id}`,
-                          );
-                        }}
-                        className={cn(
-                          "w-full border px-1.5 py-1 text-left transition-colors",
-                          isActiveConversation
-                            ? "border-primary/30 bg-primary/10"
-                            : "border-transparent bg-card hover:border-border hover:bg-card/80",
-                        )}
-                      >
-                        <div className="flex items-start justify-between gap-1.5">
-                          <span className="min-w-0 truncate text-[11px] font-medium text-foreground">
-                            {entry.title.trim() || "Untitled Project"}
-                          </span>
-                          <span
-                            className={cn(
-                              "shrink-0 rounded px-1 py-0 text-[8px] font-semibold",
-                              status === "busy"
-                                ? "bg-amber-500/15 text-amber-700"
-                                : "bg-emerald-500/12 text-emerald-700",
-                            )}
-                          >
-                            {status}
-                          </span>
-                        </div>
-                        <p className="mt-0.5 text-[9px] lowercase tracking-wide text-muted-foreground">
-                          {formatLastEdited(entry.updatedAt)}
-                        </p>
-                      </button>
-                    );
-                  })
-                )}
-              </div>
-            </div>
-          )}
-        </div>
-        {/* Message History */}
-        <div
-          ref={messagesContainerRef}
-          className="flex-1 min-h-0 overflow-y-auto p-3 space-y-1 scroll-smooth custom-scrollbar"
-        >
-          {historyLoading && (
-            <div className="h-full flex items-center justify-center text-muted-foreground">
-              <Loader2 className="w-5 h-5 animate-spin mr-2" />
-              <span className="text-sm">Loading conversation…</span>
-            </div>
-          )}
-          {isEmpty && (
-            <div className="h-full flex flex-col items-center justify-center text-center space-y-4 text-muted-foreground mt-12">
-              <div className="w-16 h-16 rounded-2xl bg-muted flex items-center justify-center border border-border">
-                <SparklesIcon className="w-8 h-8 text-muted-foreground" />
-              </div>
-              <p className="max-w-[250px] leading-relaxed text-xs">
-                Hi {user?.email}! I'm Vibe. <br /> Describe the presentation you want to build.
-              </p>
-            </div>
-          )}
-          {!historyLoading && messages.map((m) => <ChatMessage key={m.id} message={m} />)}
-          {isCompressingMemory && (
-            <div className="flex items-center gap-2 px-4 py-3 text-xs text-muted-foreground bg-muted/30 rounded-lg animate-pulse">
-              <Loader2 className="w-4 h-4 animate-spin" />
-              <span>Compressing memory...</span>
-            </div>
-          )}
-          <div ref={messagesEndRef} />
-          <div aria-hidden="true" className="h-[30%] min-h-20" />
-        </div>
-        {/* Input Area */}
-        <div className="relative p-2 bg-card border-t border-border shrink-0">
-          <div className="absolute left-0 right-0 bottom-full z-30">
-            <TaskListBar tasks={agentTasks} />
-          </div>
-          <form onSubmit={handleFormSubmit} className="relative flex items-end gap-2">
-            <textarea
-              ref={textareaRef}
-              rows={1}
-              value={input}
-              onChange={handleTextareaChange}
-              onKeyDown={handleKeyDown}
-              placeholder="Describe what to build…"
-              className={cn(
-                "flex-1 bg-background border border-border rounded-xl pl-3.5 pr-3.5 py-2 text-xs text-foreground resize-none overflow-y-auto",
-                "focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 transition-all placeholder:text-muted-foreground",
-                "leading-relaxed",
-              )}
-            />
-            <button
-              type="submit"
-              disabled={isCurrentConversationBusy || !input.trim()}
-              className="p-2.5 bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0 self-end"
-            >
-              {isCurrentConversationBusy ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <Send className="w-4 h-4" />
-              )}
-            </button>
-          </form>
-          <p className="text-[9px] text-center text-muted-foreground mt-2">
-            Vibe can make mistakes. Check your slides.
-          </p>
-        </div>
-      </div>
-      {/* ── Resize Handle ── */}
-      <div
-        onMouseDown={handleResizeMouseDown}
-        className="w-1.5 shrink-0 cursor-col-resize bg-transparent hover:bg-primary/40 active:bg-primary/60 transition-colors relative group"
-        title="Drag to resize"
-      >
-        <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-0.5 bg-border group-hover:bg-primary/50 transition-colors" />
-      </div>
-      {/*
-        =========================================
-        RIGHT PANEL: SLIDE RENDERER CANVAS
-        =========================================
-      */}
-      <div className="flex-1 relative bg-muted overflow-hidden flex flex-col">
-        {/* ── Canvas Top Bar: reserved space for profile ── */}
-        <div className="h-14 shrink-0 flex items-center justify-end px-4 z-30 relative bg-card/60 backdrop-blur-sm shadow-[0_1px_6px_rgba(0,0,0,0.12)]">
-          <div className="relative">
-            <button
-              onClick={() => setShowSettings(!showSettings)}
-              className="text-zinc-400 hover:text-white transition-colors p-1.5 rounded-full hover:bg-white/10 cursor-pointer"
-              title="Profile & Settings"
-            >
-              {user?.profile_picture ? (
-                <img
-                  src={user.profile_picture}
-                  alt="Profile"
-                  className="w-8 h-8 rounded-full ring-2 ring-border"
-                />
-              ) : (
-                <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-xs text-primary-foreground font-bold ring-2 ring-border">
-                  {user?.name?.charAt(0) || user?.email?.charAt(0) || "U"}
-                </div>
-              )}
-            </button>
-            {showSettings && renderSettingsModal()}
-          </div>
-        </div>
-        {/* ── Right-panel view tabs ── */}
-        <div className="h-10 shrink-0 border-b border-border bg-card/80 px-2 flex items-center gap-1">
-          <button
-            type="button"
-            onClick={() => setRightPanelTab("preview")}
-            className={cn(
-              "h-7 px-3 rounded-md text-xs font-medium transition-colors border",
-              rightPanelTab === "preview"
-                ? "bg-primary text-primary-foreground border-primary"
-                : "bg-background/70 text-muted-foreground border-border hover:text-foreground hover:bg-muted/40",
-            )}
-          >
-            <span className="inline-flex items-center gap-1.5">
-              <Presentation className="w-3.5 h-3.5" />
-              Preview
-            </span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setRightPanelTab("html")}
-            className={cn(
-              "h-7 px-3 rounded-md text-xs font-medium transition-colors border",
-              rightPanelTab === "html"
-                ? "bg-primary text-primary-foreground border-primary"
-                : "bg-background/70 text-muted-foreground border-border hover:text-foreground hover:bg-muted/40",
-            )}
-          >
-            <span className="inline-flex items-center gap-1.5">
-              <Code2 className="w-3.5 h-3.5" />
-              HTML
-            </span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setRightPanelTab("design")}
-            className={cn(
-              "h-7 px-3 rounded-md text-xs font-medium transition-colors border",
-              rightPanelTab === "design"
-                ? "bg-primary text-primary-foreground border-primary"
-                : "bg-background/70 text-muted-foreground border-border hover:text-foreground hover:bg-muted/40",
-            )}
-          >
-            <span className="inline-flex items-center gap-1.5">
-              <FileText className="w-3.5 h-3.5" />
-              Design
-            </span>
-          </button>
-        </div>
-        <div
-          className={cn(
-            "absolute inset-x-0 bottom-0 top-24",
-            rightPanelTab === "preview" ? "opacity-100" : "opacity-0 pointer-events-none",
-          )}
-        >
-          {/* ── Dot-grid background (below top bar + tabs) ── */}
-          <div
-            className="absolute inset-x-2 bottom-2 top-0 opacity-20 pointer-events-none"
-            style={{
-              backgroundImage: "radial-gradient(circle at center, #aaa 1px, transparent 1px)",
-              backgroundSize: "24px 24px",
-            }}
-          />
-          {slides.length === 0 ? (
-            <div className="absolute inset-x-2 bottom-2 top-0 flex flex-col items-center justify-center text-muted-foreground space-y-4">
-              <Presentation className="w-16 h-16 opacity-30" />
-              <p className="text-xl font-medium tracking-wide">Canvas is empty</p>
-            </div>
-          ) : (
-            <>
-              {/* Slides fill the canvas below the top bar */}
-              <div className="absolute inset-x-2 bottom-2 top-0">
-                {slides.map((slide, idx) => (
-                  <div
-                    key={slide.id || idx}
-                    className={cn(
-                      "absolute inset-0 transition-all duration-700 ease-[cubic-bezier(0.23,1,0.32,1)]",
-                      idx === currentSlideIndex
-                        ? "opacity-100 translate-x-0 z-10"
-                        : idx < currentSlideIndex
-                          ? "opacity-0 -translate-x-full z-0"
-                          : "opacity-0 translate-x-full z-0",
-                    )}
-                  >
-                    <SlideRenderer
-                      ref={idx === currentSlideIndex ? slideRendererRef : undefined}
-                      slide={slide}
-                      theme={slide.theme_data || slides[0]?.theme_data}
-                      isActive={idx === currentSlideIndex}
-                    />
-                  </div>
-                ))}
-              </div>
-            </>
-          )}
-        </div>
-        <div
-          className={cn(
-            "absolute inset-x-2 bottom-2 top-24 rounded-lg border border-border bg-[#1e1e1e] text-zinc-100 overflow-hidden flex flex-col",
-            rightPanelTab === "html" ? "opacity-100" : "opacity-0 pointer-events-none",
-          )}
-        >
-          <div className="h-9 shrink-0 border-b border-zinc-800/80 px-3 flex items-center justify-between bg-[#252526]">
-            <span className="text-[11px] uppercase tracking-[0.14em] text-zinc-400">
-              Slide HTML
-            </span>
-            <span className="text-[11px] text-zinc-500">{activeSlideHtml.length} chars</span>
-          </div>
-          {activeSlideHtml ? (
-            <div className="flex-1 min-h-0 overflow-auto custom-scrollbar">
-              <Editor
-                height="100%"
-                defaultLanguage="html"
-                value={activeSlideHtml}
-                theme="vs-dark"
-                options={{
-                  readOnly: true,
-                  minimap: { enabled: false },
-                  lineNumbers: "on",
-                  fontSize: 12,
-                  lineHeight: 20,
-                  wordWrap: "on",
-                  scrollBeyondLastLine: false,
-                  renderLineHighlight: "line",
-                  automaticLayout: true,
-                  tabSize: 2,
-                }}
-              />
-            </div>
-          ) : (
-            <div className="flex-1 min-h-0 flex flex-col items-center justify-center text-center px-6 text-zinc-400 space-y-2">
-              <Code2 className="h-7 w-7 opacity-70" />
-              <p className="text-sm">No generated HTML available yet.</p>
-              <p className="text-xs text-zinc-500">
-                Ask Vibe to generate or update slides to populate this editor.
-              </p>
-            </div>
-          )}
-        </div>
-        <div
-          className={cn(
-            "absolute inset-x-2 bottom-2 top-24 rounded-lg border border-border bg-[#1e1e1e] text-zinc-100 overflow-hidden flex flex-col",
-            rightPanelTab === "design" ? "opacity-100 z-10" : "opacity-0 pointer-events-none z-0",
-          )}
-        >
-          <div className="h-9 shrink-0 border-b border-zinc-800/80 px-3 flex items-center justify-between bg-[#252526]">
-            <span className="text-[11px] uppercase tracking-[0.14em] text-zinc-400">DESIGN.md</span>
-            <button
-              onClick={handleSaveDesign}
-              disabled={isSavingDesign}
-              className="flex items-center gap-1.5 px-2.5 py-1 text-xs bg-primary text-primary-foreground rounded hover:bg-primary/90 transition-colors disabled:opacity-50"
-            >
-              {isSavingDesign ? (
-                <Loader2 className="w-3 h-3 animate-spin" />
-              ) : (
-                <Save className="w-3 h-3" />
-              )}
-              Save
-            </button>
-          </div>
-          <div className="flex-1 min-h-0 overflow-auto custom-scrollbar">
-            <Editor
-              height="100%"
-              defaultLanguage="markdown"
-              value={designContent}
-              onChange={(value) => setDesignContent(value || "")}
-              theme="vs-dark"
-              options={{
-                minimap: { enabled: false },
-                lineNumbers: "on",
-                fontSize: 13,
-                lineHeight: 22,
-                wordWrap: "on",
-                scrollBeyondLastLine: false,
-                renderLineHighlight: "line",
-                automaticLayout: true,
-                tabSize: 2,
-              }}
-            />
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-  function renderSettingsModal() {
-    if (!user) return null;
     return (
-      <div className="absolute top-10 right-0 w-80 bg-card border border-border rounded-xl shadow-card p-6 z-50 animate-in fade-in slide-in-from-top-2">
-        <div className="flex justify-between items-start mb-4">
-          <h3 className="text-lg font-semibold text-foreground">Profile Settings</h3>
-          <button
-            onClick={() => setShowSettings(false)}
-            className="text-muted-foreground hover:text-foreground"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-        <div className="flex items-center gap-4 mb-6">
-          {user.profile_picture ? (
-            <img
-              src={user.profile_picture}
-              alt="Profile"
-              className="w-12 h-12 rounded-full border border-border"
-            />
-          ) : (
-            <div className="w-12 h-12 rounded-full bg-primary flex items-center justify-center text-lg text-primary-foreground font-bold shadow-sm">
-              {user.name?.charAt(0) || user.email?.charAt(0)}
-            </div>
-          )}
-          <div>
-            <div className="text-[15px] font-medium text-foreground">{user.name}</div>
-            <div className="text-[13px] text-muted-foreground">{user.email}</div>
-          </div>
-        </div>
-        <div className="space-y-3 mb-6 bg-muted/20 rounded-lg p-3 border border-border">
-          <div className="flex justify-between text-[13px]">
-            <span className="text-muted-foreground">Age:</span>
-            <span className="text-foreground">{user.age ? user.age : "Not specified"}</span>
-          </div>
-          <div className="flex justify-between text-[13px]">
-            <span className="text-muted-foreground">Joined:</span>
-            <span className="text-foreground">
-              {new Date(user.created_at).toLocaleDateString()}
-            </span>
-          </div>
-          <div className="flex justify-between text-[13px]">
-            <span className="text-muted-foreground">Current Theme:</span>
-            <span className="text-foreground capitalize">{user.settings?.theme || "Light"}</span>
-          </div>
-        </div>
-        <div className="space-y-2">
-          <button className="w-full flex items-center justify-center gap-2 bg-muted hover:bg-muted/80 text-foreground py-2.5 rounded-lg transition-colors text-sm font-medium border border-border">
-            <CreditCard className="w-4 h-4" />
-            Billing Information
-          </button>
-          <button
-            onClick={handleDeleteAccount}
-            disabled={isDeleting}
-            className="w-full flex items-center justify-center gap-2 bg-red-500/10 hover:bg-red-500/20 text-red-500 py-2.5 rounded-lg transition-colors text-sm font-medium border border-red-500/20 disabled:opacity-50"
-          >
-            {isDeleting ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <Trash2 className="w-4 h-4" />
-            )}
-            Delete Account
-          </button>
-        </div>
-      </div>
+        <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            {...props}
+        >
+            <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
+        </svg>
     );
-  }
+}
+
+interface ConversationHistoryEntry {
+    id: string;
+    projectId: string | null;
+    title: string;
+    projectName?: string;
+    createdAt: string;
+    updatedAt: string;
+}
+
+const relativeTimeFormatter = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
+
+function formatLastEdited(dateString: string): string {
+    const t = new Date(dateString).getTime();
+    if (Number.isNaN(t)) return "recently edited";
+    const diffSec = Math.round((t - Date.now()) / 1000);
+    const abs = Math.abs(diffSec);
+    if (abs < 45) return "just now";
+    const units: Array<[Intl.RelativeTimeFormatUnit, number]> = [
+        ["year", 31536000],
+        ["month", 2592000],
+        ["week", 604800],
+        ["day", 86400],
+        ["hour", 3600],
+        ["minute", 60],
+    ];
+    for (const [unit, seconds] of units) {
+        if (abs >= seconds) {
+            return relativeTimeFormatter.format(Math.round(diffSec / seconds), unit).toLowerCase();
+        }
+    }
+    return relativeTimeFormatter.format(diffSec, "second").toLowerCase();
+}
+
+function sortHistory(entries: ConversationHistoryEntry[]): ConversationHistoryEntry[] {
+    return [...entries].sort(
+        (a, b) =>
+            new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime() ||
+            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+}
+
+function extractTasks(messages: ChatMessageData[]): AgentTask[] {
+    let latest: AgentTask[] = [];
+    for (const m of messages) {
+        if (m.role !== "assistant" || !Array.isArray(m.content)) continue;
+        for (const block of m.content) {
+            if (block.type !== "tool_result") continue;
+            try {
+                const parsed = JSON.parse(block.result);
+                if (parsed && Array.isArray(parsed.tasks)) {
+                    const next: AgentTask[] = [];
+                    const seen = new Set<string>();
+                    for (const raw of parsed.tasks) {
+                        const id = String(raw?.id ?? "").trim();
+                        const title = String(raw?.title ?? "").trim();
+                        if (!id || !title || seen.has(id)) continue;
+                        seen.add(id);
+                        next.push({ id, title, done: Boolean(raw?.done) });
+                    }
+                    if (next.length > 0) latest = next;
+                }
+            } catch {
+                // ignore
+            }
+        }
+    }
+    return latest;
+}
+
+const ChatPage: React.FC = () => {
+    const { conversationId } = useParams<{ conversationId?: string }>();
+    const [searchParams] = useSearchParams();
+    const projectId = searchParams.get("projectId");
+    const navigate = useNavigate();
+    const { user, logout } = useAuth();
+
+    const [input, setInput] = useState("");
+    const [historyLoading, setHistoryLoading] = useState(false);
+    const [showSettings, setShowSettings] = useState(false);
+    const [isDeleting, setIsDeleting] = useState(false);
+    const [deckTitle, setDeckTitle] = useState("New Chat");
+    const [conversationTitle, setConversationTitle] = useState("New Chat");
+    const [isTitleFocused, setIsTitleFocused] = useState(false);
+    const [history, setHistory] = useState<ConversationHistoryEntry[]>([]);
+    const [historyLoadingList, setHistoryLoadingList] = useState(true);
+    const [historyOpen, setHistoryOpen] = useState(false);
+    const [rightPanelTab, setRightPanelTab] = useState<"preview" | "design">("preview");
+    const [designContent, setDesignContent] = useState<string>("");
+    const [isSavingDesign, setIsSavingDesign] = useState(false);
+
+    const [sidebarWidth, setSidebarWidth] = usePersistentWidth({
+        storageKey: "vibe-agent.chat-sidebar-width",
+        defaultWidth: 380,
+        minWidth: 350,
+        maxWidth: 550,
+    });
+    const [isResizing, setIsResizing] = useState(false);
+
+    const messagesEndRef = useRef<HTMLDivElement>(null);
+    const messagesContainerRef = useRef<HTMLDivElement>(null);
+    const textareaRef = useRef<HTMLTextAreaElement>(null);
+    const userScrolledUp = useRef(false);
+
+    const handleConversationMeta = useCallback(
+        (meta: ConversationMeta) => {
+            if (meta.title?.trim()) setConversationTitle(meta.title);
+            if (meta.projectName?.trim()) setDeckTitle(meta.projectName);
+        },
+        []
+    );
+
+    const { messages, send, isStreaming, isCompressing, reset } = useChatStream({
+        apiUrl: import.meta.env.VITE_API_URL,
+        onConversation: handleConversationMeta,
+    });
+
+    const agentTasks = useMemo(() => extractTasks(messages), [messages]);
+    const isEmpty = messages.length === 0 && !isStreaming && !historyLoading;
+    const activeChatLabel = conversationTitle.trim() || "New Chat";
+    const visibleHistory = useMemo(
+        () => (projectId ? history.filter((h) => h.projectId === projectId) : history),
+        [history, projectId]
+    );
+
+    // ── Conversation history list ───────────────────────────────────────────
+    const loadHistory = useCallback(async () => {
+        setHistoryLoadingList(true);
+        try {
+            const res = await api.get("/conversations", { params: projectId ? { projectId } : undefined });
+            const next: ConversationHistoryEntry[] = (res.data.conversations ?? []).map((e: any) => ({
+                id: e.id,
+                projectId: e.projectId ?? null,
+                title: e.title ?? "Untitled",
+                projectName: e.projectName,
+                createdAt: e.createdAt,
+                updatedAt: e.updatedAt,
+            }));
+            setHistory(sortHistory(next));
+            if (projectId) {
+                const projectName = next.find((e) => e.projectId === projectId)?.projectName;
+                if (projectName?.trim()) setDeckTitle(projectName);
+            }
+            if (conversationId) {
+                const current = next.find((e) => e.id === conversationId);
+                if (current?.title?.trim()) setConversationTitle(current.title);
+            }
+        } catch (err) {
+            console.error("Failed to load conversations:", err);
+        } finally {
+            setHistoryLoadingList(false);
+        }
+    }, [conversationId, projectId]);
+
+    useEffect(() => {
+        void loadHistory();
+    }, [loadHistory]);
+
+    useEffect(() => {
+        if (!conversationId) setConversationTitle("New Chat");
+    }, [conversationId]);
+
+    // ── Load message history when opening an existing conversation ──────────
+    useEffect(() => {
+        if (!conversationId) {
+            reset([]);
+            return;
+        }
+        setHistoryLoading(true);
+        if (projectId) void fetchDesign(projectId);
+        api.get(`/conversations/${conversationId}/messages`)
+            .then((res) => {
+                const hydrated: ChatMessageData[] = (res.data.messages ?? []).map((m: any) => ({
+                    id: m.id,
+                    role: m.role,
+                    content: hydrateStoredContent(m),
+                }));
+                reset(groupAssistantTurns(hydrated));
+                if (res.data.title) setConversationTitle(res.data.title);
+                if (res.data.projectName) setDeckTitle(res.data.projectName);
+                userScrolledUp.current = false;
+                setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: "instant" as ScrollBehavior }), 50);
+            })
+            .catch((err) => console.error("Failed to load conversation history:", err))
+            .finally(() => setHistoryLoading(false));
+    }, [conversationId, projectId, reset]);
+
+    // ── Auto scroll to bottom ───────────────────────────────────────────────
+    useEffect(() => {
+        const el = messagesContainerRef.current;
+        if (!el) return;
+        const onScroll = () => {
+            const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
+            userScrolledUp.current = dist > 80;
+        };
+        el.addEventListener("scroll", onScroll, { passive: true });
+        return () => el.removeEventListener("scroll", onScroll);
+    }, []);
+
+    useEffect(() => {
+        if (userScrolledUp.current) return;
+        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }, [messages]);
+
+    // ── Title save (debounced) ──────────────────────────────────────────────
+    useEffect(() => {
+        if (!deckTitle.trim()) return;
+        const timer = setTimeout(() => {
+            const request = projectId
+                ? api.patch(`/projects/${projectId}/name`, { name: deckTitle.trim() })
+                : conversationId
+                  ? api.patch(`/conversations/${conversationId}/title`, { title: deckTitle.trim() })
+                  : null;
+            if (!request) return;
+            request
+                .then(() => {
+                    if (!projectId && conversationId) {
+                        setHistory((prev) => {
+                            const existing = prev.find((e) => e.id === conversationId);
+                            const next: ConversationHistoryEntry = {
+                                id: conversationId,
+                                projectId: null,
+                                title: deckTitle.trim(),
+                                projectName: existing?.projectName,
+                                createdAt: existing?.createdAt ?? new Date().toISOString(),
+                                updatedAt: new Date().toISOString(),
+                            };
+                            return sortHistory([next, ...prev.filter((e) => e.id !== conversationId)]);
+                        });
+                    }
+                })
+                .catch((err) => console.error("Failed to save title:", err));
+        }, 600);
+        return () => clearTimeout(timer);
+    }, [conversationId, deckTitle, projectId]);
+
+    // ── Design doc ──────────────────────────────────────────────────────────
+    const fetchDesign = async (id: string) => {
+        try {
+            const res = await api.get(`/projects/${id}/design`);
+            setDesignContent(res.data.design || "");
+        } catch (err) {
+            console.error("Failed to fetch design:", err);
+        }
+    };
+
+    const handleSaveDesign = async () => {
+        if (!projectId) return;
+        setIsSavingDesign(true);
+        try {
+            await api.put(`/projects/${projectId}/design`, { design: designContent });
+        } catch (err) {
+            console.error("Failed to save design:", err);
+        } finally {
+            setIsSavingDesign(false);
+        }
+    };
+
+    // ── Resizable sidebar ───────────────────────────────────────────────────
+    const handleResizeMouseDown = (e: React.MouseEvent) => {
+        const startX = e.clientX;
+        const startWidth = sidebarWidth;
+        setIsResizing(true);
+        document.body.style.cursor = "col-resize";
+        document.body.style.userSelect = "none";
+        const onMouseMove = (ev: MouseEvent) => {
+            const delta = ev.clientX - startX;
+            setSidebarWidth(Math.min(550, Math.max(350, startWidth + delta)));
+        };
+        const onMouseUp = () => {
+            setIsResizing(false);
+            document.body.style.cursor = "";
+            document.body.style.userSelect = "";
+            document.removeEventListener("mousemove", onMouseMove);
+            document.removeEventListener("mouseup", onMouseUp);
+        };
+        document.addEventListener("mousemove", onMouseMove);
+        document.addEventListener("mouseup", onMouseUp);
+    };
+
+    // ── Send ─────────────────────────────────────────────────────────────────
+    const submit = async () => {
+        const text = input.trim();
+        if (!text || isStreaming) return;
+        setInput("");
+        if (textareaRef.current) {
+            textareaRef.current.style.height = "auto";
+            textareaRef.current.style.overflowY = "hidden";
+        }
+        userScrolledUp.current = false;
+        const result = await send(text, {
+            conversationId: conversationId ?? undefined,
+            projectId: projectId ?? undefined,
+        });
+        if (!conversationId && result.conversationId) {
+            navigate(`/chat/${result.conversationId}${projectId ? `?projectId=${projectId}` : ""}`, {
+                replace: true,
+            });
+        }
+        await loadHistory();
+    };
+
+    const handleFormSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        void submit();
+    };
+
+    const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+        if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            if (!isStreaming && input.trim()) void submit();
+        }
+    };
+
+    const handleTextareaChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+        setInput(e.target.value);
+        const el = e.target;
+        el.style.height = "auto";
+        const styles = window.getComputedStyle(el);
+        const lineHeight = Number.parseFloat(styles.lineHeight) || 20;
+        const padTop = Number.parseFloat(styles.paddingTop) || 0;
+        const padBottom = Number.parseFloat(styles.paddingBottom) || 0;
+        const max = lineHeight * 3 + padTop + padBottom;
+        el.style.height = `${Math.min(el.scrollHeight, max)}px`;
+        el.style.overflowY = el.scrollHeight > max ? "auto" : "hidden";
+    };
+
+    const handleDeleteAccount = async () => {
+        if (!window.confirm("Are you certain you want to delete your account? This action cannot be undone.")) return;
+        setIsDeleting(true);
+        try {
+            await api.delete("/user/me");
+            logout();
+        } catch (err) {
+            console.error("Failed to delete account", err);
+            alert("Failed to delete account");
+            setIsDeleting(false);
+        }
+    };
+
+    // ── Render ───────────────────────────────────────────────────────────────
+    return (
+        <div className="h-screen w-screen flex bg-background text-foreground overflow-hidden font-sans">
+            {isResizing && <div className="fixed inset-0 z-[9999] cursor-col-resize" />}
+
+            {/* LEFT — Chat */}
+            <div className="relative shrink-0 border-r border-border flex flex-col bg-card" style={{ width: sidebarWidth }}>
+                <div className="h-16 border-b border-border flex items-center gap-2 px-4 shrink-0 bg-muted/50">
+                    <button
+                        onClick={() => navigate("/")}
+                        className="flex-shrink-0 w-8 h-8 rounded-lg bg-primary/20 flex items-center justify-center border border-primary/30 hover:opacity-75 transition-opacity cursor-pointer"
+                        title="Back to Dashboard"
+                    >
+                        <Home className="w-4 h-4 text-primary" />
+                    </button>
+                    <div className="relative flex-1 min-w-0 flex items-center group">
+                        <input
+                            type="text"
+                            value={deckTitle}
+                            onChange={(e) => setDeckTitle(e.target.value)}
+                            onFocus={() => setIsTitleFocused(true)}
+                            onBlur={() => setIsTitleFocused(false)}
+                            onClick={(e) => e.stopPropagation()}
+                            onKeyDown={(e) => {
+                                if (e.key === "Enter") e.currentTarget.blur();
+                            }}
+                            className={cn(
+                                "w-full bg-transparent text-sm font-semibold text-foreground tracking-wide px-1.5 py-0.5 rounded-md outline-none truncate transition-all",
+                                isTitleFocused ? "ring-1 ring-primary/50 bg-muted/60" : "hover:bg-muted/40"
+                            )}
+                            title={deckTitle}
+                            maxLength={120}
+                        />
+                        {!isTitleFocused && (
+                            <Pencil className="w-3 h-3 text-muted-foreground opacity-0 group-hover:opacity-60 transition-opacity absolute right-1.5 pointer-events-none" />
+                        )}
+                    </div>
+                    <button
+                        onClick={() => {
+                            reset([]);
+                            setConversationTitle("New Chat");
+                            setHistoryOpen(false);
+                            navigate(projectId ? `/chat?projectId=${projectId}` : `/chat`, { replace: true });
+                        }}
+                        className="text-muted-foreground hover:text-foreground transition-colors p-2 rounded-lg hover:bg-muted cursor-pointer"
+                        title="New Chat"
+                    >
+                        <Plus className="w-4 h-4" />
+                    </button>
+                </div>
+
+                <div className="relative shrink-0">
+                    <button
+                        type="button"
+                        onClick={() => setHistoryOpen((v) => !v)}
+                        aria-expanded={historyOpen}
+                        className="w-full h-9 border-b border-border flex items-center gap-1.5 px-2 bg-card text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
+                    >
+                        <span className="flex h-6 w-6 items-center justify-center rounded-sm">
+                            <ChevronLeft className={cn("h-3.5 w-3.5 transition-transform duration-200", historyOpen && "-rotate-90")} />
+                        </span>
+                        <span className="truncate text-xs font-semibold">{activeChatLabel}</span>
+                    </button>
+                    {historyOpen && (
+                        <div className="absolute left-0 right-0 top-full z-30 border-b border-border bg-white shadow-sm">
+                            <div className="max-h-56 overflow-y-auto custom-scrollbar">
+                                {historyLoadingList ? (
+                                    <div className="flex items-center gap-2 px-2 py-3 text-xs text-muted-foreground">
+                                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                        <span>Loading chats…</span>
+                                    </div>
+                                ) : visibleHistory.length === 0 ? (
+                                    <div className="px-2 py-3 text-xs text-muted-foreground">No saved chats yet.</div>
+                                ) : (
+                                    visibleHistory.map((entry) => {
+                                        const active = entry.id === conversationId;
+                                        return (
+                                            <button
+                                                key={entry.id}
+                                                onClick={() => {
+                                                    setHistoryOpen(false);
+                                                    navigate(
+                                                        entry.projectId
+                                                            ? `/chat/${entry.id}?projectId=${entry.projectId}`
+                                                            : `/chat/${entry.id}`
+                                                    );
+                                                }}
+                                                className={cn(
+                                                    "w-full border px-1.5 py-1 text-left transition-colors",
+                                                    active
+                                                        ? "border-primary/30 bg-primary/10"
+                                                        : "border-transparent bg-card hover:border-border hover:bg-card/80"
+                                                )}
+                                            >
+                                                <div className="flex items-start justify-between gap-1.5">
+                                                    <span className="min-w-0 truncate text-[11px] font-medium text-foreground">
+                                                        {entry.title.trim() || "Untitled Project"}
+                                                    </span>
+                                                </div>
+                                                <p className="mt-0.5 text-[9px] lowercase tracking-wide text-muted-foreground">
+                                                    {formatLastEdited(entry.updatedAt)}
+                                                </p>
+                                            </button>
+                                        );
+                                    })
+                                )}
+                            </div>
+                        </div>
+                    )}
+                </div>
+
+                <div ref={messagesContainerRef} className="flex-1 min-h-0 overflow-y-auto p-3 space-y-1 scroll-smooth custom-scrollbar">
+                    {historyLoading && (
+                        <div className="h-full flex items-center justify-center text-muted-foreground">
+                            <Loader2 className="w-5 h-5 animate-spin mr-2" />
+                            <span className="text-sm">Loading conversation…</span>
+                        </div>
+                    )}
+                    {isEmpty && (
+                        <div className="h-full flex flex-col items-center justify-center text-center space-y-4 text-muted-foreground mt-12">
+                            <div className="w-16 h-16 rounded-2xl bg-muted flex items-center justify-center border border-border">
+                                <SparklesIcon className="w-8 h-8 text-muted-foreground" />
+                            </div>
+                            <p className="max-w-[250px] leading-relaxed text-xs">
+                                Hi {user?.email}! I'm Vibe. <br /> Describe the presentation you want to build.
+                            </p>
+                        </div>
+                    )}
+                    {!historyLoading && messages.map((m) => <ChatMessage key={m.id} message={m} />)}
+                    {isCompressing && (
+                        <div className="flex items-center gap-2 px-4 py-3 text-xs text-muted-foreground bg-muted/30 rounded-lg animate-pulse">
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                            <span>Compressing memory…</span>
+                        </div>
+                    )}
+                    <div ref={messagesEndRef} />
+                    <div aria-hidden="true" className="h-[30%] min-h-20" />
+                </div>
+
+                <div className="relative p-2 bg-card border-t border-border shrink-0">
+                    <div className="absolute left-0 right-0 bottom-full z-30">
+                        <TaskListBar tasks={agentTasks} />
+                    </div>
+                    <form onSubmit={handleFormSubmit} className="relative flex items-end gap-2">
+                        <textarea
+                            ref={textareaRef}
+                            rows={1}
+                            value={input}
+                            onChange={handleTextareaChange}
+                            onKeyDown={handleKeyDown}
+                            placeholder="Describe what to build…"
+                            className="flex-1 bg-background border border-border rounded-xl pl-3.5 pr-3.5 py-2 text-xs text-foreground resize-none overflow-y-auto focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 transition-all placeholder:text-muted-foreground leading-relaxed"
+                        />
+                        <button
+                            type="submit"
+                            disabled={isStreaming || !input.trim()}
+                            className="p-2.5 bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0 self-end"
+                        >
+                            {isStreaming ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                        </button>
+                    </form>
+                    <p className="text-[9px] text-center text-muted-foreground mt-2">
+                        Vibe can make mistakes. Check your slides.
+                    </p>
+                </div>
+            </div>
+
+            {/* Resize Handle */}
+            <div
+                onMouseDown={handleResizeMouseDown}
+                className="w-1.5 shrink-0 cursor-col-resize bg-transparent hover:bg-primary/40 active:bg-primary/60 transition-colors relative group"
+                title="Drag to resize"
+            >
+                <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-0.5 bg-border group-hover:bg-primary/50 transition-colors" />
+            </div>
+
+            {/* RIGHT — Canvas */}
+            <div className="flex-1 relative bg-muted overflow-hidden flex flex-col">
+                <div className="h-14 shrink-0 flex items-center justify-end px-4 z-30 relative bg-card/60 backdrop-blur-sm shadow-[0_1px_6px_rgba(0,0,0,0.12)]">
+                    <div className="relative">
+                        <button
+                            onClick={() => setShowSettings((v) => !v)}
+                            className="text-zinc-400 hover:text-white transition-colors p-1.5 rounded-full hover:bg-white/10 cursor-pointer"
+                            title="Profile & Settings"
+                        >
+                            {user?.profile_picture ? (
+                                <img src={user.profile_picture} alt="Profile" className="w-8 h-8 rounded-full ring-2 ring-border" />
+                            ) : (
+                                <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-xs text-primary-foreground font-bold ring-2 ring-border">
+                                    {user?.name?.charAt(0) || user?.email?.charAt(0) || "U"}
+                                </div>
+                            )}
+                        </button>
+                        {showSettings && user && (
+                            <div className="absolute top-10 right-0 w-80 bg-card border border-border rounded-xl shadow-card p-6 z-50 animate-in fade-in slide-in-from-top-2">
+                                <div className="flex justify-between items-start mb-4">
+                                    <h3 className="text-lg font-semibold text-foreground">Profile Settings</h3>
+                                    <button onClick={() => setShowSettings(false)} className="text-muted-foreground hover:text-foreground">
+                                        <X className="w-5 h-5" />
+                                    </button>
+                                </div>
+                                <div className="flex items-center gap-4 mb-6">
+                                    {user.profile_picture ? (
+                                        <img src={user.profile_picture} alt="Profile" className="w-12 h-12 rounded-full border border-border" />
+                                    ) : (
+                                        <div className="w-12 h-12 rounded-full bg-primary flex items-center justify-center text-lg text-primary-foreground font-bold shadow-sm">
+                                            {user.name?.charAt(0) || user.email?.charAt(0)}
+                                        </div>
+                                    )}
+                                    <div>
+                                        <div className="text-[15px] font-medium text-foreground">{user.name}</div>
+                                        <div className="text-[13px] text-muted-foreground">{user.email}</div>
+                                    </div>
+                                </div>
+                                <div className="space-y-2">
+                                    <button className="w-full flex items-center justify-center gap-2 bg-muted hover:bg-muted/80 text-foreground py-2.5 rounded-lg transition-colors text-sm font-medium border border-border">
+                                        <CreditCard className="w-4 h-4" />
+                                        Billing Information
+                                    </button>
+                                    <button
+                                        onClick={handleDeleteAccount}
+                                        disabled={isDeleting}
+                                        className="w-full flex items-center justify-center gap-2 bg-red-500/10 hover:bg-red-500/20 text-red-500 py-2.5 rounded-lg transition-colors text-sm font-medium border border-red-500/20 disabled:opacity-50"
+                                    >
+                                        {isDeleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                                        Delete Account
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+
+                <div className="h-10 shrink-0 border-b border-border bg-card/80 px-2 flex items-center gap-1">
+                    {(["preview", "design"] as const).map((tab) => {
+                        const Icon = tab === "preview" ? Presentation : FileText;
+                        const label = tab === "preview" ? "Preview" : "Design";
+                        return (
+                            <button
+                                key={tab}
+                                type="button"
+                                onClick={() => setRightPanelTab(tab)}
+                                className={cn(
+                                    "h-7 px-3 rounded-md text-xs font-medium transition-colors border",
+                                    rightPanelTab === tab
+                                        ? "bg-primary text-primary-foreground border-primary"
+                                        : "bg-background/70 text-muted-foreground border-border hover:text-foreground hover:bg-muted/40"
+                                )}
+                            >
+                                <span className="inline-flex items-center gap-1.5">
+                                    <Icon className="w-3.5 h-3.5" />
+                                    {label}
+                                </span>
+                            </button>
+                        );
+                    })}
+                </div>
+
+                <div className={cn("absolute inset-x-0 bottom-0 top-24", rightPanelTab === "preview" ? "opacity-100" : "opacity-0 pointer-events-none")}>
+                    <div
+                        className="absolute inset-x-2 bottom-2 top-0 opacity-20 pointer-events-none"
+                        style={{
+                            backgroundImage: "radial-gradient(circle at center, #aaa 1px, transparent 1px)",
+                            backgroundSize: "24px 24px",
+                        }}
+                    />
+                    <div className="absolute inset-x-2 bottom-2 top-0">
+                        {projectId ? (
+                            <CrdtCanvas projectId={projectId} />
+                        ) : (
+                            <div className="w-full h-full flex flex-col items-center justify-center text-muted-foreground space-y-4">
+                                <Presentation className="w-16 h-16 opacity-30" />
+                                <p className="text-xl font-medium tracking-wide">Canvas is empty</p>
+                            </div>
+                        )}
+                    </div>
+                </div>
+
+                <div className={cn("absolute inset-x-2 bottom-2 top-24 rounded-lg border border-border bg-[#1e1e1e] text-zinc-100 overflow-hidden flex flex-col", rightPanelTab === "design" ? "opacity-100 z-10" : "opacity-0 pointer-events-none z-0")}>
+                    <div className="h-9 shrink-0 border-b border-zinc-800/80 px-3 flex items-center justify-between bg-[#252526]">
+                        <span className="text-[11px] uppercase tracking-[0.14em] text-zinc-400">DESIGN.md</span>
+                        <button
+                            onClick={handleSaveDesign}
+                            disabled={isSavingDesign}
+                            className="flex items-center gap-1.5 px-2.5 py-1 text-xs bg-primary text-primary-foreground rounded hover:bg-primary/90 transition-colors disabled:opacity-50"
+                        >
+                            {isSavingDesign ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
+                            Save
+                        </button>
+                    </div>
+                    <div className="flex-1 min-h-0 overflow-auto custom-scrollbar">
+                        <Editor
+                            height="100%"
+                            defaultLanguage="markdown"
+                            value={designContent}
+                            onChange={(value) => setDesignContent(value || "")}
+                            theme="vs-dark"
+                            options={{
+                                minimap: { enabled: false },
+                                lineNumbers: "on",
+                                fontSize: 13,
+                                lineHeight: 22,
+                                wordWrap: "on",
+                                scrollBeyondLastLine: false,
+                                renderLineHighlight: "line",
+                                automaticLayout: true,
+                                tabSize: 2,
+                            }}
+                        />
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
 };
+
+/**
+ * Convert a stored DB message row into the assistant block array used by the UI.
+ *
+ * The backend now serves an ordered `blocks` array (text / thinking / tool_call /
+ * tool_result, in stream order). We just shape each entry into the discriminated
+ * union the chat components expect.
+ */
+function hydrateStoredContent(row: any): any {
+    const rawBlocks = Array.isArray(row.blocks) ? row.blocks : [];
+    if (row.role === "user") {
+        const text = rawBlocks
+            .filter((b: any) => b?.type === "text" && typeof b.text === "string")
+            .map((b: any) => b.text)
+            .join("\n");
+        return text;
+    }
+    const out: any[] = [];
+    for (const b of rawBlocks) {
+        if (!b || typeof b !== "object") continue;
+        if (b.type === "text" && typeof b.text === "string") {
+            out.push({ type: "text", text: b.text });
+        } else if (b.type === "thinking" && typeof b.text === "string") {
+            // startTime: 0 is the "restored from storage" sentinel — the view shows
+            // "Agent thought" (no elapsed timer) since we never persisted timestamps.
+            out.push({ type: "thinking", text: b.text, startTime: 0, endTime: 0 });
+        } else if (b.type === "tool_call" && typeof b.name === "string") {
+            const args = b.args && typeof b.args === "object" && !Array.isArray(b.args) ? b.args : {};
+            out.push({ type: "tool_call", call: { id: String(b.id ?? ""), name: b.name, args } });
+        } else if (b.type === "tool_result") {
+            out.push({
+                type: "tool_result",
+                id: String(b.id ?? ""),
+                result: typeof b.result === "string" ? b.result : JSON.stringify(b.result ?? ""),
+            });
+        }
+    }
+    return out;
+}
+
+/**
+ * Each assistant turn is its own DB row (so each row's `blocks` keeps strict
+ * stream order). For display, fold consecutive assistant rows back into a single
+ * bubble — that matches what the user sees during live streaming.
+ */
+function groupAssistantTurns(rows: ChatMessageData[]): ChatMessageData[] {
+    const out: ChatMessageData[] = [];
+    for (const row of rows) {
+        const last = out[out.length - 1];
+        if (
+            row.role === "assistant" &&
+            last?.role === "assistant" &&
+            Array.isArray(last.content) &&
+            Array.isArray(row.content)
+        ) {
+            out[out.length - 1] = { ...last, content: [...last.content, ...row.content] };
+        } else {
+            out.push(row);
+        }
+    }
+    return out;
+}
+
 export default ChatPage;
