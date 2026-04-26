@@ -705,52 +705,41 @@ const ChatPage: React.FC = () => {
 
 /**
  * Convert a stored DB message row into the assistant block array used by the UI.
- * The new backend stores a single `text` block plus separate `tool_calls`/`tool_results`
- * arrays; we recombine them into the typed AssistantBlock[] shape.
+ *
+ * The backend now serves an ordered `blocks` array (text / thinking / tool_call /
+ * tool_result, in stream order). We just shape each entry into the discriminated
+ * union the chat components expect.
  */
 function hydrateStoredContent(row: any): any {
+    const rawBlocks = Array.isArray(row.blocks) ? row.blocks : [];
     if (row.role === "user") {
-        return typeof row.content === "string" ? row.content : row.content?.text ?? "";
+        const text = rawBlocks
+            .filter((b: any) => b?.type === "text" && typeof b.text === "string")
+            .map((b: any) => b.text)
+            .join("\n");
+        return text;
     }
-    const blocks: any[] = [];
-    if (Array.isArray(row.content)) {
-        for (const b of row.content) {
-            if (b?.type === "text" && typeof b.text === "string") blocks.push({ type: "text", text: b.text });
-        }
-    } else if (typeof row.content === "string" && row.content) {
-        blocks.push({ type: "text", text: row.content });
-    }
-    if (Array.isArray(row.toolCalls)) {
-        for (const tc of row.toolCalls) {
-            const name = tc?.function?.name ?? tc?.name;
-            if (typeof name !== "string") continue;
-            const rawArgs = tc?.function?.arguments ?? tc?.args ?? {};
-            let args: Record<string, unknown> = {};
-            if (typeof rawArgs === "string") {
-                try {
-                    const parsed = JSON.parse(rawArgs);
-                    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-                        args = parsed as Record<string, unknown>;
-                    }
-                } catch {
-                    /* ignore */
-                }
-            } else if (rawArgs && typeof rawArgs === "object") {
-                args = rawArgs as Record<string, unknown>;
-            }
-            blocks.push({ type: "tool_call", call: { id: String(tc?.id ?? ""), name, args } });
-        }
-    }
-    if (Array.isArray(row.toolResults)) {
-        for (const r of row.toolResults) {
-            blocks.push({
+    const out: any[] = [];
+    for (const b of rawBlocks) {
+        if (!b || typeof b !== "object") continue;
+        if (b.type === "text" && typeof b.text === "string") {
+            out.push({ type: "text", text: b.text });
+        } else if (b.type === "thinking" && typeof b.text === "string") {
+            // Stored thinking has no live timer; show it as a completed block.
+            const ts = Date.now();
+            out.push({ type: "thinking", text: b.text, startTime: ts, endTime: ts });
+        } else if (b.type === "tool_call" && typeof b.name === "string") {
+            const args = b.args && typeof b.args === "object" && !Array.isArray(b.args) ? b.args : {};
+            out.push({ type: "tool_call", call: { id: String(b.id ?? ""), name: b.name, args } });
+        } else if (b.type === "tool_result") {
+            out.push({
                 type: "tool_result",
-                id: String(r?.id ?? ""),
-                result: typeof r?.result === "string" ? r.result : JSON.stringify(r?.result ?? ""),
+                id: String(b.id ?? ""),
+                result: typeof b.result === "string" ? b.result : JSON.stringify(b.result ?? ""),
             });
         }
     }
-    return blocks;
+    return out;
 }
 
 export default ChatPage;

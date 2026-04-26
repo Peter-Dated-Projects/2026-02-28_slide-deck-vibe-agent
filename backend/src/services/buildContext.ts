@@ -84,7 +84,7 @@ export async function runCompressionPass(conversationId: string): Promise<boolea
         const previousSummary: string = meta.rows[0].summary ?? '';
 
         const msgRes = await db.query(
-            'SELECT id, role, content FROM messages WHERE conversation_id = $1 AND is_compressed = FALSE ORDER BY created_at ASC',
+            'SELECT id, role, blocks, content FROM messages WHERE conversation_id = $1 AND is_compressed = FALSE ORDER BY created_at ASC',
             [conversationId]
         );
         const all = msgRes.rows;
@@ -93,7 +93,7 @@ export async function runCompressionPass(conversationId: string): Promise<boolea
         const idsToCompress: string[] = toCompress.map((m: any) => m.id);
 
         const segment = toCompress
-            .map((m: any) => `[${String(m.role).toUpperCase()}]: ${stringifyMessageContent(m.content)}`)
+            .map((m: any) => `[${String(m.role).toUpperCase()}]: ${stringifyMessageContent(m.blocks ?? m.content)}`)
             .join('\n\n');
 
         const instruction = `You compress conversation history for a slide-deck editing assistant.
@@ -159,7 +159,13 @@ function stringifyMessageContent(content: unknown): string {
         }
         if (Array.isArray(content)) {
             return content
-                .map((b: any) => (typeof b?.text === 'string' ? b.text : ''))
+                .map((b: any) => {
+                    if (b?.type === 'tool_call') return `[tool_call ${b.name ?? ''}]`;
+                    if (b?.type === 'tool_result') return `[tool_result ${typeof b.result === 'string' ? b.result : ''}]`;
+                    if (b?.type === 'thinking') return ''; // thinking is private to the user
+                    if (typeof b?.text === 'string') return b.text;
+                    return '';
+                })
                 .filter(Boolean)
                 .join('\n');
         }

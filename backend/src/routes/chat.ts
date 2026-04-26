@@ -4,7 +4,8 @@ import { dbService as db } from '../core/container';
 import { runAgent, type AgentEvent } from '../services/agent';
 import { isOverBudget, runCompressionPass } from '../services/buildContext';
 import { CRDT_SYSTEM_INSTRUCTION } from '../core/crdt/crdtTools';
-import type { ChatMessage, ToolCall } from '../core/agentTypes';
+import type { ChatMessage } from '../core/agentTypes';
+import { rowsToHistory } from '../core/conversationBlocks';
 
 export const chatRouter = express.Router();
 
@@ -37,8 +38,13 @@ chatRouter.post('/chat/stream', requireAuth, async (req: AuthRequest, res: expre
         });
 
         await db.query(
-            'INSERT INTO messages (conversation_id, role, content) VALUES ($1, $2, $3)',
-            [convId, 'user', JSON.stringify({ text: message })]
+            'INSERT INTO messages (conversation_id, role, content, blocks) VALUES ($1, $2, $3, $4)',
+            [
+                convId,
+                'user',
+                JSON.stringify({ text: message }),
+                JSON.stringify([{ type: 'text', text: message }]),
+            ]
         );
         await touchActivity(convId);
 
@@ -52,8 +58,6 @@ chatRouter.post('/chat/stream', requireAuth, async (req: AuthRequest, res: expre
 
         const history = await loadHistoryForModel(convId);
 
-        const finalToolCalls: ToolCall[] = [];
-        const finalToolResults: { id: string; result: string }[] = [];
         let mutatedAny = false;
 
         const onEvent = (event: AgentEvent) => {
@@ -65,11 +69,9 @@ chatRouter.post('/chat/stream', requireAuth, async (req: AuthRequest, res: expre
                     sendEvent('thinking_delta', { text: event.text });
                     break;
                 case 'tool_call':
-                    finalToolCalls.push(event.call);
                     sendEvent('tool_call', event.call);
                     break;
                 case 'tool_result':
-                    finalToolResults.push({ id: event.id, result: event.result });
                     if (event.mutated) mutatedAny = true;
                     sendEvent('tool_result', { id: event.id, result: event.result });
                     break;
@@ -85,29 +87,21 @@ chatRouter.post('/chat/stream', requireAuth, async (req: AuthRequest, res: expre
             onEvent,
         });
 
-        // Persist assistant turn
-        const assistantContent = result.finalText || '';
-        if (assistantContent || result.toolCalls.length > 0) {
+        // Persist one row per assistant turn — keeps the original interleaving of
+        // text / thinking / tool_call / tool_result inside each row's `blocks` array.
+        const turnsToPersist = result.turns.length > 0
+            ? result.turns
+            : (result.finalText
+                ? [[{ type: 'text' as const, text: result.finalText }]]
+                : []);
+        for (const turnBlocks of turnsToPersist) {
+            if (turnBlocks.length === 0) continue;
             await db.query(
-                'INSERT INTO messages (conversation_id, role, content, tool_calls, tool_results) VALUES ($1, $2, $3, $4, $5)',
-                [
-                    convId,
-                    'assistant',
-                    JSON.stringify(assistantContent ? [{ type: 'text', text: assistantContent }] : []),
-                    result.toolCalls.length > 0
-                        ? JSON.stringify(
-                              result.toolCalls.map((tc) => ({
-                                  id: tc.id,
-                                  type: 'function',
-                                  function: { name: tc.name, arguments: JSON.stringify(tc.args) },
-                              }))
-                          )
-                        : null,
-                    result.toolResults.length > 0 ? JSON.stringify(result.toolResults) : null,
-                ]
+                'INSERT INTO messages (conversation_id, role, blocks) VALUES ($1, $2, $3)',
+                [convId, 'assistant', JSON.stringify(turnBlocks)]
             );
-            await touchActivity(convId);
         }
+        if (turnsToPersist.length > 0) await touchActivity(convId);
 
         if (mutatedAny) sendEvent('presentation_updated', {});
         sendEvent('done', { conversationId: convId });
@@ -185,92 +179,16 @@ async function touchActivity(convId: string): Promise<void> {
 
 /**
  * Reads uncompressed messages out of the DB and reconstructs a clean
- * ChatMessage[] suitable for the LLM. Each assistant row that recorded
- * tool_calls is followed by synthetic tool-role messages carrying the
- * matching tool_results.
+ * ChatMessage[] suitable for the LLM. Thinking blocks are filtered out here —
+ * users see them, the model never does.
  */
 async function loadHistoryForModel(convId: string): Promise<ChatMessage[]> {
     const res = await db.query(
-        `SELECT role, content, tool_calls, tool_results
+        `SELECT role, blocks, content, tool_calls, tool_results
          FROM messages
          WHERE conversation_id = $1 AND is_compressed = FALSE
          ORDER BY created_at ASC`,
         [convId]
     );
-    const out: ChatMessage[] = [];
-    for (const row of res.rows) {
-        const role = row.role as 'user' | 'assistant';
-        if (role === 'user') {
-            out.push({ role: 'user', content: extractText(row.content) });
-            continue;
-        }
-        if (role === 'assistant') {
-            const toolCalls = parseToolCalls(row.tool_calls);
-            const text = extractText(row.content);
-            out.push({
-                role: 'assistant',
-                content: text,
-                tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
-            });
-            const toolResults = parseToolResults(row.tool_results);
-            for (const tc of toolCalls) {
-                const match = toolResults.find((r) => r.id === tc.id);
-                out.push({
-                    role: 'tool',
-                    tool_call_id: tc.id,
-                    content: match?.result ?? '',
-                });
-            }
-        }
-    }
-    return out;
-}
-
-function extractText(content: unknown): string {
-    if (typeof content === 'string') return content;
-    if (!content || typeof content !== 'object') return '';
-    if (Array.isArray(content)) {
-        return content
-            .map((b: any) => (typeof b?.text === 'string' ? b.text : ''))
-            .filter(Boolean)
-            .join('\n');
-    }
-    if (typeof (content as any).text === 'string') return (content as any).text;
-    return '';
-}
-
-function parseToolCalls(raw: unknown): ToolCall[] {
-    if (!Array.isArray(raw)) return [];
-    const out: ToolCall[] = [];
-    for (const tc of raw) {
-        const name = tc?.function?.name ?? tc?.name;
-        if (typeof name !== 'string' || !name.trim()) continue;
-        const id = typeof tc?.id === 'string' && tc.id ? tc.id : `tool_call_${out.length}`;
-        const rawArgs = tc?.function?.arguments ?? tc?.args ?? {};
-        let args: Record<string, unknown> = {};
-        if (typeof rawArgs === 'string') {
-            try {
-                const parsed = JSON.parse(rawArgs);
-                if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-                    args = parsed as Record<string, unknown>;
-                }
-            } catch {
-                /* ignore */
-            }
-        } else if (rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs)) {
-            args = rawArgs as Record<string, unknown>;
-        }
-        out.push({ id, name: name.trim(), args });
-    }
-    return out;
-}
-
-function parseToolResults(raw: unknown): { id: string; result: string }[] {
-    if (!Array.isArray(raw)) return [];
-    return raw
-        .map((r: any) => ({
-            id: typeof r?.id === 'string' ? r.id : '',
-            result: typeof r?.result === 'string' ? r.result : JSON.stringify(r?.result ?? ''),
-        }))
-        .filter((r) => r.id);
+    return rowsToHistory(res.rows);
 }

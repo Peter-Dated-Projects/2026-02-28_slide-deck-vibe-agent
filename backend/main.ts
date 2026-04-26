@@ -23,6 +23,7 @@ import { config } from './src/config';
 import { mountCrdtWebsocket } from './src/routes/crdtWebsocket';
 import { uploadsRouter } from './src/routes/uploads';
 import { chatRouter } from './src/routes/chat';
+import { rowToBlocks } from './src/core/conversationBlocks';
 import http from 'http';
 
 const app = express();
@@ -122,34 +123,19 @@ app.get('/api/conversations/:conversationId/messages', requireAuth, async (req: 
             return;
         }
         const messagesResult = await db.query(
-            'SELECT id, role, content, tool_calls, tool_results, created_at FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC',
+            'SELECT id, role, blocks, content, tool_calls, tool_results, created_at FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC',
             [conversationId]
         );
-        const messages = messagesResult.rows.map((row: any) => {
-            // content is stored as JSONB
-            const rawContent = row.content;
-            let displayContent: any;
-            if (typeof rawContent === 'string') {
-                displayContent = rawContent;
-            } else if (rawContent?.text) {
-                // user messages: { text: "..." }
-                displayContent = rawContent.text;
-            } else if (Array.isArray(rawContent)) {
-                // assistant messages: array of blocks natively injected to frontend
-                displayContent = rawContent; 
-            } else {
-                displayContent = "";
-            }
-            return {
-                id: row.id,
-                role: row.role,
-                content: displayContent,
-                toolCalls: row.tool_calls ?? undefined,
-                toolResults: row.tool_results ?? undefined,
-                thinkTimers: rawContent?.thinkTimers, // Backward compatibility
-                createdAt: row.created_at,
-            };
-        });
+        const messages = messagesResult.rows.map((row: any) => ({
+            id: row.id,
+            role: row.role,
+            // Always returned as an ordered MessageBlock[]. Legacy rows are
+            // synthesized from the old (content, tool_calls, tool_results) triplet
+            // — best-effort ordering only, since the original interleaving wasn't
+            // preserved before the blocks column existed.
+            blocks: rowToBlocks(row),
+            createdAt: row.created_at,
+        }));
         res.json({
             messages,
             title: convResult.rows[0].title ?? 'Untitled',

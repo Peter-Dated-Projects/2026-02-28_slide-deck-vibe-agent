@@ -39,3 +39,9 @@ export interface ToolSpec {
     description: string;
     parameters: Record<string, unknown>;
 }
+
+export type MessageBlock =
+    | { type: 'text'; text: string }
+    | { type: 'thinking'; text: string }
+    | { type: 'tool_call'; id: string; name: string; args: Record<string, unknown> }
+    | { type: 'tool_result'; id: string; result: string };

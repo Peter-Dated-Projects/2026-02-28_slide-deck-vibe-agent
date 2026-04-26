@@ -7,6 +7,7 @@ import type {
     AgentTaskItem,
     ChatMessage,
     LLMEvent,
+    MessageBlock,
     ToolCall,
 } from '../core/agentTypes';
 
@@ -29,6 +30,8 @@ export interface RunAgentResult {
     finalText: string;
     toolCalls: ToolCall[];
     toolResults: { id: string; result: string }[];
+    /** One ordered block array per assistant turn, in stream order. */
+    turns: MessageBlock[][];
 }
 
 export async function runAgent(args: RunAgentArgs): Promise<RunAgentResult> {
@@ -49,6 +52,7 @@ export async function runAgent(args: RunAgentArgs): Promise<RunAgentResult> {
     const messages: ChatMessage[] = [...history];
     const allToolCalls: ToolCall[] = [];
     const allToolResults: { id: string; result: string }[] = [];
+    const turns: MessageBlock[][] = [];
     let finalText = '';
 
     for (let turn = 0; turn < MAX_TURNS; turn++) {
@@ -56,7 +60,16 @@ export async function runAgent(args: RunAgentArgs): Promise<RunAgentResult> {
         const ctx = assembleContext(baseInstruction, editLog, summary, messages);
 
         let turnText = '';
-        const turnToolCalls: ToolCall[] = [];
+        const turnBlocks: MessageBlock[] = [];
+
+        const appendStreamDelta = (kind: 'text' | 'thinking', text: string) => {
+            const last = turnBlocks[turnBlocks.length - 1];
+            if (last && last.type === kind) {
+                last.text += text;
+            } else {
+                turnBlocks.push({ type: kind, text });
+            }
+        };
 
         const llmResult = await llmService.stream(
             ctx.systemInstruction,
@@ -65,11 +78,18 @@ export async function runAgent(args: RunAgentArgs): Promise<RunAgentResult> {
             (event: LLMEvent) => {
                 if (event.type === 'text_delta') {
                     turnText += event.text;
+                    appendStreamDelta('text', event.text);
                     onEvent({ type: 'text_delta', text: event.text });
                 } else if (event.type === 'thinking_delta') {
+                    appendStreamDelta('thinking', event.text);
                     onEvent({ type: 'thinking_delta', text: event.text });
                 } else if (event.type === 'tool_call') {
-                    turnToolCalls.push(event.call);
+                    turnBlocks.push({
+                        type: 'tool_call',
+                        id: event.call.id,
+                        name: event.call.name,
+                        args: event.call.args,
+                    });
                     onEvent({ type: 'tool_call', call: event.call });
                 }
             }
@@ -77,11 +97,16 @@ export async function runAgent(args: RunAgentArgs): Promise<RunAgentResult> {
 
         if (llmResult.stop_reason !== 'tool_calls' || llmResult.tool_calls.length === 0) {
             finalText = turnText || llmResult.text;
-            // Append final assistant message to history (caller persists)
+            // If the provider returned text without streaming deltas, capture it as a
+            // trailing block so persistence reflects what the model actually produced.
+            if (!turnText && llmResult.text) {
+                turnBlocks.push({ type: 'text', text: llmResult.text });
+            }
             if (finalText) {
                 messages.push({ role: 'assistant', content: finalText });
             }
-            return { finalText, toolCalls: allToolCalls, toolResults: allToolResults };
+            if (turnBlocks.length > 0) turns.push(turnBlocks);
+            return { finalText, toolCalls: allToolCalls, toolResults: allToolResults, turns };
         }
 
         // Tool call turn — append assistant message with tool_calls, then execute each.
@@ -101,6 +126,7 @@ export async function runAgent(args: RunAgentArgs): Promise<RunAgentResult> {
                 conversationId
             );
             allToolResults.push({ id: call.id, result: output });
+            turnBlocks.push({ type: 'tool_result', id: call.id, result: output });
             const mutated = parseMutated(output);
             onEvent({ type: 'tool_result', id: call.id, result: output, mutated });
 
@@ -113,10 +139,12 @@ export async function runAgent(args: RunAgentArgs): Promise<RunAgentResult> {
                 content: output,
             });
         }
+
+        if (turnBlocks.length > 0) turns.push(turnBlocks);
     }
 
     onEvent({ type: 'error', message: `Hit maximum tool turns (${MAX_TURNS}).` });
-    return { finalText, toolCalls: allToolCalls, toolResults: allToolResults };
+    return { finalText, toolCalls: allToolCalls, toolResults: allToolResults, turns };
 }
 
 function withTaskList(base: string, state: AgentRuntimeState): string {
