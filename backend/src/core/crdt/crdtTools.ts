@@ -10,7 +10,7 @@
  * ---------------------------------------------------------------------------
  */
 
-import OpenAI from 'openai';
+import type { ToolSpec } from '../agentTypes';
 
 export const CRDT_SYSTEM_INSTRUCTION = `\
 You are an AI presentation designer with real-time CRDT-based editing capabilities.
@@ -83,7 +83,24 @@ const layoutSpecSchema = {
     additionalProperties: false,
 };
 
-export function getCrdtTools(): OpenAI.Chat.ChatCompletionTool[] {
+type OpenAIToolShape = {
+    type: 'function';
+    function: { name: string; description: string; parameters: Record<string, unknown> };
+};
+
+function flatten(tools: OpenAIToolShape[]): ToolSpec[] {
+    return tools.map((t) => ({
+        name: t.function.name,
+        description: t.function.description,
+        parameters: t.function.parameters,
+    }));
+}
+
+export function getCrdtTools(): ToolSpec[] {
+    return flatten(getCrdtToolsRaw());
+}
+
+function getCrdtToolsRaw(): OpenAIToolShape[] {
     return [
         // ── task management ────────────────────────────────────────────────
         {

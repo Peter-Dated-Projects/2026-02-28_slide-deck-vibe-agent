@@ -70,5 +70,5 @@ export function computeLayout(spec: LayoutSpec, doc?: Y.Doc): LayoutResult {
         }
     }
 
-    return { ...NAMED_SLOTS.body };
+    return { ...NAMED_SLOTS.body! };
 }

@@ -1,314 +1,173 @@
-/**
- * ---------------------------------------------------------------------------
- * (c) 2026 Freedom, LLC.
- * This file is part of the SlideDeckVibeAgent System.
- *
- * All Rights Reserved. This code is the confidential and proprietary
- * information of Freedom, LLC ("Confidential Information"). You shall not
- * disclose such Confidential Information and shall use it only in accordance
- * with the terms of the license agreement you entered into with Freedom, LLC.
- * ---------------------------------------------------------------------------
- */
-
 import { llmService, dbService as db } from '../core/container';
 import { getCrdtTools, CRDT_SYSTEM_INSTRUCTION } from '../core/crdt/crdtTools';
 import { executeCrdtTool } from '../core/crdt/crdtExecutor';
-import { sanitizeMessagesForModel } from '../core/messageSanitizer';
-import { ContextManager } from './contextManager';
-import type { AgentRuntimeState, AgentTaskItem } from '../core/agentTypes';
+import { assembleContext } from './buildContext';
+import type {
+    AgentRuntimeState,
+    AgentTaskItem,
+    ChatMessage,
+    LLMEvent,
+    ToolCall,
+} from '../core/agentTypes';
 
-// ─── helpers ─────────────────────────────────────────────────────────────────
+const MAX_TURNS = 12;
 
-const buildSystemInstructionWithTaskList = (
-    baseInstruction: string,
-    runtimeState: AgentRuntimeState
-) => {
-    if (!runtimeState.tasks.length) {
-        return `${baseInstruction}\n\nCurrent task checklist: (none yet)`;
+export type AgentEvent =
+    | { type: 'text_delta'; text: string }
+    | { type: 'thinking_delta'; text: string }
+    | { type: 'tool_call'; call: ToolCall }
+    | { type: 'tool_result'; id: string; result: string; mutated: boolean }
+    | { type: 'error'; message: string };
+
+export interface RunAgentArgs {
+    conversationId: string;
+    history: ChatMessage[];
+    onEvent: (event: AgentEvent) => void;
+}
+
+export interface RunAgentResult {
+    finalText: string;
+    toolCalls: ToolCall[];
+    toolResults: { id: string; result: string }[];
+}
+
+export async function runAgent(args: RunAgentArgs): Promise<RunAgentResult> {
+    const { conversationId, history, onEvent } = args;
+    const projectId = await getProjectIdForConversation(conversationId);
+    const tools = getCrdtTools();
+    const runtimeState: AgentRuntimeState = {
+        tasks: await loadTasks(conversationId),
+    };
+
+    const meta = await db.query(
+        'SELECT edit_log, summary FROM conversations WHERE id = $1',
+        [conversationId]
+    );
+    const editLog: string = meta.rows[0]?.edit_log ?? '';
+    const summary: string = meta.rows[0]?.summary ?? '';
+
+    const messages: ChatMessage[] = [...history];
+    const allToolCalls: ToolCall[] = [];
+    const allToolResults: { id: string; result: string }[] = [];
+    let finalText = '';
+
+    for (let turn = 0; turn < MAX_TURNS; turn++) {
+        const baseInstruction = withTaskList(CRDT_SYSTEM_INSTRUCTION, runtimeState);
+        const ctx = assembleContext(baseInstruction, editLog, summary, messages);
+
+        let turnText = '';
+        const turnToolCalls: ToolCall[] = [];
+
+        const llmResult = await llmService.stream(
+            ctx.systemInstruction,
+            ctx.messages,
+            tools,
+            (event: LLMEvent) => {
+                if (event.type === 'text_delta') {
+                    turnText += event.text;
+                    onEvent({ type: 'text_delta', text: event.text });
+                } else if (event.type === 'thinking_delta') {
+                    onEvent({ type: 'thinking_delta', text: event.text });
+                } else if (event.type === 'tool_call') {
+                    turnToolCalls.push(event.call);
+                    onEvent({ type: 'tool_call', call: event.call });
+                }
+            }
+        );
+
+        if (llmResult.stop_reason !== 'tool_calls' || llmResult.tool_calls.length === 0) {
+            finalText = turnText || llmResult.text;
+            // Append final assistant message to history (caller persists)
+            if (finalText) {
+                messages.push({ role: 'assistant', content: finalText });
+            }
+            return { finalText, toolCalls: allToolCalls, toolResults: allToolResults };
+        }
+
+        // Tool call turn — append assistant message with tool_calls, then execute each.
+        messages.push({
+            role: 'assistant',
+            content: turnText,
+            tool_calls: llmResult.tool_calls,
+        });
+        allToolCalls.push(...llmResult.tool_calls);
+
+        for (const call of llmResult.tool_calls) {
+            const output = await executeCrdtTool(
+                projectId,
+                call.name,
+                call.args,
+                runtimeState,
+                conversationId
+            );
+            allToolResults.push({ id: call.id, result: output });
+            const mutated = parseMutated(output);
+            onEvent({ type: 'tool_result', id: call.id, result: output, mutated });
+
+            if (call.name === 'create_tasks' || call.name === 'update_task_status') {
+                await persistTasks(conversationId, runtimeState.tasks);
+            }
+            messages.push({
+                role: 'tool',
+                tool_call_id: call.id,
+                content: output,
+            });
+        }
     }
-    const checklist = runtimeState.tasks
+
+    onEvent({ type: 'error', message: `Hit maximum tool turns (${MAX_TURNS}).` });
+    return { finalText, toolCalls: allToolCalls, toolResults: allToolResults };
+}
+
+function withTaskList(base: string, state: AgentRuntimeState): string {
+    if (state.tasks.length === 0) return `${base}\n\nCurrent task checklist: (none yet)`;
+    const list = state.tasks
         .map((t) => `${t.done ? '[x]' : '[ ]'} ${t.id}: ${t.title}`)
         .join('\n');
-    return `${baseInstruction}\n\nCurrent task checklist:\n${checklist}`;
-};
+    return `${base}\n\nCurrent task checklist:\n${list}`;
+}
 
-const normalizeTaskList = (raw: unknown): AgentTaskItem[] => {
-    if (!Array.isArray(raw)) return [];
-    const seen = new Set<string>();
-    const result: AgentTaskItem[] = [];
-    for (const entry of raw) {
-        const item = entry as Partial<AgentTaskItem> | null | undefined;
-        const id = String(item?.id ?? '').trim();
-        const title = String(item?.title ?? '').trim();
-        if (!id || !title || seen.has(id)) continue;
-        seen.add(id);
-        result.push({ id, title, done: Boolean(item?.done) });
+function parseMutated(output: string): boolean {
+    try {
+        const parsed = JSON.parse(output);
+        return Boolean(parsed?.mutated);
+    } catch {
+        return false;
     }
-    return result;
-};
+}
 
-const parseToolArguments = (raw: unknown): Record<string, unknown> => {
-    if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
-        return raw as Record<string, unknown>;
-    }
-    if (typeof raw === 'string') {
-        try {
-            const parsed = JSON.parse(raw);
-            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-                return parsed as Record<string, unknown>;
-            }
-        } catch {
-            // fall through
-        }
-    }
-    return {};
-};
+async function getProjectIdForConversation(conversationId: string): Promise<string> {
+    const res = await db.query(
+        'SELECT project_id FROM conversations WHERE id = $1',
+        [conversationId]
+    );
+    const id = res.rows[0]?.project_id;
+    if (!id) throw new Error(`Project ID not found for conversation ${conversationId}`);
+    return id;
+}
 
-const sanitizeToolCalls = (toolCalls: any[]): any[] => {
-    if (!Array.isArray(toolCalls)) return [];
-    return toolCalls
-        .map((tc: any, index: number) => {
-            const name = tc?.function?.name;
-            if (typeof name !== 'string' || !name.trim()) return null;
-            return {
-                id: typeof tc?.id === 'string' && tc.id.trim() ? tc.id : `tool_call_${index}`,
-                type: tc?.type || 'function',
-                function: {
-                    name: name.trim(),
-                    index: tc?.function?.index,
-                    arguments: parseToolArguments(tc?.function?.arguments),
-                },
-            };
-        })
-        .filter(Boolean);
-};
-
-const sanitizeMessagesForLlm = (messages: any[]): any[] => {
-    const sanitized = sanitizeMessagesForModel(messages);
-    return sanitized.map((msg: any) => {
-        if (Array.isArray(msg?.tool_calls) && msg.tool_calls.length > 0) {
-            return { ...msg, tool_calls: sanitizeToolCalls(msg.tool_calls) };
-        }
-        return msg;
-    });
-};
-
-// ─── DB helpers ───────────────────────────────────────────────────────────────
-
-const getProjectIdForConversation = async (conversationId: string): Promise<string> => {
-    const res = await db.query('SELECT project_id FROM conversations WHERE id = $1', [conversationId]);
-    const projectId = res.rows[0]?.project_id;
-    if (!projectId) throw new Error(`Project ID not found for conversation ${conversationId}`);
-    return projectId;
-};
-
-const loadConversationTaskList = async (conversationId: string): Promise<AgentTaskItem[]> => {
-    const result = await db.query(
+async function loadTasks(conversationId: string): Promise<AgentTaskItem[]> {
+    const res = await db.query(
         'SELECT task_list FROM conversations WHERE id = $1',
         [conversationId]
     );
-    return normalizeTaskList(result.rows[0]?.task_list);
-};
+    const raw = res.rows[0]?.task_list;
+    if (!Array.isArray(raw)) return [];
+    const seen = new Set<string>();
+    const out: AgentTaskItem[] = [];
+    for (const entry of raw) {
+        const id = String(entry?.id ?? '').trim();
+        const title = String(entry?.title ?? '').trim();
+        if (!id || !title || seen.has(id)) continue;
+        seen.add(id);
+        out.push({ id, title, done: Boolean(entry?.done) });
+    }
+    return out;
+}
 
-const persistConversationTaskList = async (
-    conversationId: string,
-    tasks: AgentTaskItem[]
-): Promise<void> => {
+async function persistTasks(conversationId: string, tasks: AgentTaskItem[]): Promise<void> {
     await db.query(
         'UPDATE conversations SET task_list = $1::jsonb, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
         [JSON.stringify(tasks), conversationId]
     );
-};
-
-// ─── public API ───────────────────────────────────────────────────────────────
-
-export const chatWithAgent = async (conversationId: string, messages: any[]) => {
-    const projectId = await getProjectIdForConversation(conversationId);
-    const tools = getCrdtTools();
-    const runtimeState: AgentRuntimeState = {
-        tasks: await loadConversationTaskList(conversationId),
-    };
-    const memRes = await db.query(
-        'SELECT edit_log, summary FROM conversations WHERE id = $1',
-        [conversationId]
-    );
-    const { edit_log: editLog = '', summary: convSummary = '' } = memRes.rows[0] || {};
-
-    let currentMessages = [...messages];
-    let turnCount = 0;
-    const maxTurns = 100;
-
-    while (turnCount < maxTurns) {
-        turnCount++;
-        const dynamicInstruction = buildSystemInstructionWithTaskList(
-            CRDT_SYSTEM_INSTRUCTION,
-            runtimeState
-        );
-        const assembledContext = ContextManager.assembleContext(
-            dynamicInstruction,
-            editLog,
-            convSummary,
-            currentMessages
-        );
-        const result = await llmService.chatWithAgent(
-            conversationId,
-            sanitizeMessagesForLlm(assembledContext.messages),
-            tools,
-            assembledContext.systemInstruction
-        );
-
-        if (result.stop_reason === 'tool_calls' && result.tool_calls) {
-            const safeToolCalls = sanitizeToolCalls(result.tool_calls);
-            if (safeToolCalls.length === 0) {
-                return {
-                    content: [{ type: 'text', text: 'I received malformed tool calls from the model.' }],
-                    stop_reason: 'error' as any,
-                };
-            }
-            currentMessages.push({ role: 'assistant', content: '', tool_calls: safeToolCalls });
-            for (const tc of safeToolCalls) {
-                const name = tc.function.name;
-                const args = parseToolArguments(tc.function.arguments);
-                const output = await executeCrdtTool(
-                    projectId,
-                    name,
-                    args,
-                    runtimeState,
-                    conversationId
-                );
-                try {
-                    const parsed = JSON.parse(output);
-                    if (parsed?.success && (name === 'create_tasks' || name === 'update_task_status')) {
-                        await persistConversationTaskList(conversationId, runtimeState.tasks);
-                    }
-                } catch {
-                    // non-JSON output is fine
-                }
-                currentMessages.push({ role: 'tool', tool_call_id: tc.id, content: output });
-            }
-        } else {
-            return result;
-        }
-    }
-
-    return {
-        content: [{ type: 'text', text: "I've hit the maximum number of tool execution steps." }],
-        stop_reason: 'max_turns' as any,
-    };
-};
-
-export const chatWithAgentStream = async (
-    conversationId: string,
-    messages: any[],
-    onChunk: (token: string) => void
-): Promise<string> => {
-    const projectId = await getProjectIdForConversation(conversationId);
-    const tools = getCrdtTools();
-    const runtimeState: AgentRuntimeState = {
-        tasks: await loadConversationTaskList(conversationId),
-    };
-
-    if (!llmService.chatWithAgentStream) {
-        const result = await chatWithAgent(conversationId, messages);
-        const text = result.content
-            .filter((b: any) => b.type === 'text')
-            .map((b: any) => b.text)
-            .join('\n');
-        onChunk(text);
-        return text;
-    }
-
-    const memRes = await db.query(
-        'SELECT edit_log, summary FROM conversations WHERE id = $1',
-        [conversationId]
-    );
-    const { edit_log: editLog = '', summary: convSummary = '' } = memRes.rows[0] || {};
-
-    let currentMessages = [...messages];
-    let turnCount = 0;
-    const maxTurns = 100;
-
-    while (turnCount < maxTurns) {
-        turnCount++;
-        const dynamicInstruction = buildSystemInstructionWithTaskList(
-            CRDT_SYSTEM_INSTRUCTION,
-            runtimeState
-        );
-        const assembledContext = ContextManager.assembleContext(
-            dynamicInstruction,
-            editLog,
-            convSummary,
-            currentMessages
-        );
-
-        let localToolCalls: any[] = [];
-        let localText = '';
-
-        const wrappedCallback = (token: string) => {
-            if (token.startsWith('[TOOL_CALLS]') && token.endsWith('[/TOOL_CALLS]')) {
-                try {
-                    const jsonStr = token.substring(12, token.length - 13);
-                    const parsed = JSON.parse(jsonStr);
-                    if (parsed.tool_calls) localToolCalls = parsed.tool_calls;
-                } catch (e) {
-                    console.error('[agent] error parsing streaming tool calls', e);
-                }
-                onChunk(token);
-            } else {
-                onChunk(token);
-                localText += token;
-            }
-        };
-
-        await llmService.chatWithAgentStream(
-            conversationId,
-            sanitizeMessagesForLlm(assembledContext.messages),
-            wrappedCallback,
-            tools,
-            assembledContext.systemInstruction
-        );
-
-        if (localToolCalls.length > 0) {
-            const safeToolCalls = sanitizeToolCalls(localToolCalls);
-            if (safeToolCalls.length === 0) {
-                return 'I received malformed tool calls from the model.';
-            }
-            currentMessages.push({ role: 'assistant', content: '', tool_calls: safeToolCalls });
-
-            for (const tc of safeToolCalls) {
-                const name = tc.function.name;
-                const args = parseToolArguments(tc.function.arguments);
-                const output = await executeCrdtTool(
-                    projectId,
-                    name,
-                    args,
-                    runtimeState,
-                    conversationId
-                );
-
-                try {
-                    const parsed = JSON.parse(output);
-                    if (parsed?.success && (name === 'create_tasks' || name === 'update_task_status')) {
-                        await persistConversationTaskList(conversationId, runtimeState.tasks);
-                    }
-                    // CRDT mutations are persisted automatically via the doc update listener;
-                    // signal the frontend that the presentation changed for any mutation.
-                    if (parsed?.mutated) {
-                        onChunk('[PRESENTATION_UPDATED]');
-                    }
-                } catch {
-                    // non-JSON output is fine
-                }
-
-                currentMessages.push({ role: 'tool', tool_call_id: tc.id, content: output });
-                onChunk(
-                    `\n[TOOL_RESULT]${JSON.stringify({ id: tc.id, result: output })}[/TOOL_RESULT]\n`
-                );
-            }
-        } else {
-            return localText;
-        }
-    }
-
-    return "I've hit the maximum number of tool execution steps.";
-};
+}
