@@ -51,6 +51,11 @@ export const config = {
   },
   qwen: {
     apiKey: process.env.QWEN_API_KEY,
+    model: process.env.QWEN_MODEL_KEY || 'qwen3.5-flash',
+    mode: (process.env.QWEN_MODE
+      ?? (process.env.OLLAMA_BASE_URL ? 'ollama' : 'api')) as 'ollama' | 'api',
+    ollamaBaseUrl: process.env.OLLAMA_BASE_URL,
+    ollamaModel: process.env.OLLAMA_MODEL_KEY || 'qwen3.5:9b',
   },
   auth: {
     jwtSecret: process.env.JWT_SECRET || 'super-secret-jwt-key',

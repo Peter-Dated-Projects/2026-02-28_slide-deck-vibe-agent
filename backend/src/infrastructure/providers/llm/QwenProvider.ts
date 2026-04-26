@@ -13,10 +13,10 @@ export class QwenProvider implements ILLMService {
     private readonly openai: OpenAI;
     private readonly model: string;
 
-    constructor(apiKey: string, model: string) {
+    constructor(apiKey: string, model: string, baseURL?: string) {
         this.openai = new OpenAI({
             apiKey,
-            baseURL: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
+            baseURL: baseURL ?? 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
         });
         this.model = model;
     }

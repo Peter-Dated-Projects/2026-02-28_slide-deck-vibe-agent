@@ -43,12 +43,17 @@ export const storageService: IStorageService = isLocal
         bucketName: process.env.GCP_BUCKET_NAME || config.s3.bucketName,
         projectId: process.env.GCP_PROJECT_ID,
     });
-// 3. Initialize LLM Provider — Qwen via DashScope (OpenAI-compatible) for both
-// local and prod. Gemma was dropped because Ollama's tool-call output leaks raw
-// JSON into chat content; Qwen returns structured tool_calls reliably.
-export const llmService: ILLMService = new QwenProvider(
-    config.qwen.apiKey || '',
-    process.env.QWEN_MODEL_KEY || 'qwen3.5-flash'
-);
+// 3. Initialize LLM Provider — Qwen via DashScope (OpenAI-compatible) by default,
+// or via local Ollama (also OpenAI-compatible at /v1) when QWEN_MODE=ollama or
+// OLLAMA_BASE_URL is set.
+export const llmService: ILLMService = (() => {
+    if (config.qwen.mode === 'ollama' && config.qwen.ollamaBaseUrl) {
+        const baseURL = `${config.qwen.ollamaBaseUrl.replace(/\/$/, '')}/v1`;
+        console.log(`[llm] mode: ollama → ${baseURL} (model: ${config.qwen.ollamaModel})`);
+        return new QwenProvider('ollama', config.qwen.ollamaModel, baseURL);
+    }
+    console.log(`[llm] mode: api → dashscope (model: ${config.qwen.model})`);
+    return new QwenProvider(config.qwen.apiKey || '', config.qwen.model);
+})();
 // 4. Initialize Cache Provider
 export const cacheService: ICacheService = new RedisCacheProvider(config.redis.url);

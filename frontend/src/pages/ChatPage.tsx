@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
     ChevronLeft,
-    Code2,
     CreditCard,
     FileText,
     Home,
@@ -135,7 +134,7 @@ const ChatPage: React.FC = () => {
     const [history, setHistory] = useState<ConversationHistoryEntry[]>([]);
     const [historyLoadingList, setHistoryLoadingList] = useState(true);
     const [historyOpen, setHistoryOpen] = useState(false);
-    const [rightPanelTab, setRightPanelTab] = useState<"preview" | "html" | "design">("preview");
+    const [rightPanelTab, setRightPanelTab] = useState<"preview" | "design">("preview");
     const [designContent, setDesignContent] = useState<string>("");
     const [isSavingDesign, setIsSavingDesign] = useState(false);
 
@@ -622,9 +621,9 @@ const ChatPage: React.FC = () => {
                 </div>
 
                 <div className="h-10 shrink-0 border-b border-border bg-card/80 px-2 flex items-center gap-1">
-                    {(["preview", "html", "design"] as const).map((tab) => {
-                        const Icon = tab === "preview" ? Presentation : tab === "html" ? Code2 : FileText;
-                        const label = tab === "preview" ? "Preview" : tab === "html" ? "HTML" : "Design";
+                    {(["preview", "design"] as const).map((tab) => {
+                        const Icon = tab === "preview" ? Presentation : FileText;
+                        const label = tab === "preview" ? "Preview" : "Design";
                         return (
                             <button
                                 key={tab}
@@ -663,16 +662,6 @@ const ChatPage: React.FC = () => {
                                 <p className="text-xl font-medium tracking-wide">Canvas is empty</p>
                             </div>
                         )}
-                    </div>
-                </div>
-
-                <div className={cn("absolute inset-x-2 bottom-2 top-24 rounded-lg border border-border bg-[#1e1e1e] text-zinc-100 overflow-hidden flex flex-col", rightPanelTab === "html" ? "opacity-100" : "opacity-0 pointer-events-none")}>
-                    <div className="h-9 shrink-0 border-b border-zinc-800/80 px-3 flex items-center bg-[#252526]">
-                        <span className="text-[11px] uppercase tracking-[0.14em] text-zinc-400">Slide HTML</span>
-                    </div>
-                    <div className="flex-1 min-h-0 flex flex-col items-center justify-center text-center px-6 text-zinc-400 space-y-2">
-                        <Code2 className="h-7 w-7 opacity-70" />
-                        <p className="text-sm">HTML view is not available in CRDT mode.</p>
                     </div>
                 </div>
 
