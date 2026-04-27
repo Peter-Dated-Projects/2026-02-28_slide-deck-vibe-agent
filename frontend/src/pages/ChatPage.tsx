@@ -159,9 +159,16 @@ const ChatPage: React.FC = () => {
         []
     );
 
+    const fetchDesignRef = useRef<((id: string) => Promise<void>) | null>(null);
+
+    const handlePresentationUpdated = useCallback(() => {
+        if (projectId) void fetchDesignRef.current?.(projectId);
+    }, [projectId]);
+
     const { messages, send, isStreaming, isCompressing, reset } = useChatStream({
         apiUrl: import.meta.env.VITE_API_URL,
         onConversation: handleConversationMeta,
+        onPresentationUpdated: handlePresentationUpdated,
     });
 
     const agentTasks = useMemo(() => extractTasks(messages), [messages]);
@@ -284,14 +291,15 @@ const ChatPage: React.FC = () => {
     }, [conversationId, deckTitle, projectId]);
 
     // ── Design doc ──────────────────────────────────────────────────────────
-    const fetchDesign = async (id: string) => {
+    const fetchDesign = useCallback(async (id: string) => {
         try {
             const res = await api.get(`/projects/${id}/design`);
             setDesignContent(res.data.design || "");
         } catch (err) {
             console.error("Failed to fetch design:", err);
         }
-    };
+    }, []);
+    fetchDesignRef.current = fetchDesign;
 
     const handleSaveDesign = async () => {
         if (!projectId) return;

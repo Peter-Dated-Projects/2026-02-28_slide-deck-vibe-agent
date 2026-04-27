@@ -5,7 +5,9 @@
       "Bash(bun run *)",
       "Bash(xargs ls *)",
       "Bash(bun test *)",
-      "Bash(grep -E \"\\\\.\\(sql|ts\\)$\")"
+      "Bash(grep -E \"\\\\.\\(sql|ts\\)$\")",
+      "Bash(npx tsc *)",
+      "Bash(echo \"exit=$?\")"
     ]
   }
 }
