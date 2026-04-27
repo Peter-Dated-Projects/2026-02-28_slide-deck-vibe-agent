@@ -17,6 +17,10 @@ import { IndexeddbPersistence } from 'y-indexeddb';
 import api, { getAccessToken } from '../api';
 
 type ElementType = 'text' | 'image' | 'shape';
+type ResizeHandle = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
+
+const MIN_ELEMENT_SIZE = 20;
+const HANDLE_SIZE = 16;
 type TextLevel = 'h1' | 'h2' | 'h3' | 'body';
 type ShapeKind = 'rectangle' | 'circle';
 
@@ -132,6 +136,57 @@ function getShapeKind(content: Record<string, unknown>): ShapeKind {
   return v === 'circle' ? 'circle' : 'rectangle';
 }
 
+function InlineTextEditor({
+  initialHtml,
+  style,
+  className,
+  onCommit,
+  onCancel,
+}: {
+  initialHtml: string;
+  style: React.CSSProperties;
+  className?: string;
+  onCommit: (html: string) => void;
+  onCancel: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const node = ref.current;
+    if (!node) return;
+    node.innerHTML = initialHtml;
+    node.focus();
+    const range = document.createRange();
+    range.selectNodeContents(node);
+    range.collapse(false);
+    const sel = window.getSelection();
+    sel?.removeAllRanges();
+    sel?.addRange(range);
+    // Intentionally only on mount: contentEditable manages its own DOM
+    // afterwards; further React rerenders must not stomp the user's edits.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return (
+    <div
+      ref={ref}
+      className={className}
+      contentEditable
+      suppressContentEditableWarning
+      style={{ ...style, outline: 'none', cursor: 'text', userSelect: 'text' }}
+      onMouseDown={(e) => e.stopPropagation()}
+      onClick={(e) => e.stopPropagation()}
+      onDoubleClick={(e) => e.stopPropagation()}
+      onContextMenu={(e) => e.stopPropagation()}
+      onBlur={() => onCommit(ref.current?.innerHTML ?? '')}
+      onKeyDown={(e) => {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          onCancel();
+        }
+      }}
+    />
+  );
+}
+
 interface CrdtCanvasProps {
   projectId: string;
   className?: string;
@@ -147,9 +202,26 @@ export function CrdtCanvas({ projectId, className }: CrdtCanvasProps) {
   const [currentSlideIndex, setCurrentSlideIndex] = useState(0);
   const [wsStatus, setWsStatus] = useState<WsStatus>('connecting');
   const [selectedElementId, setSelectedElementId] = useState<string | null>(null);
+  const [editingElementId, setEditingElementId] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<{ id: string; x: number; y: number } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pendingUploadIdRef = useRef<string | null>(null);
+  const resizeRef = useRef<{
+    id: string;
+    handle: ResizeHandle;
+    startX: number;
+    startY: number;
+    scale: number;
+    origin: { x: number; y: number; w: number; h: number };
+  } | null>(null);
+  const moveRef = useRef<{
+    id: string;
+    startX: number;
+    startY: number;
+    scale: number;
+    origin: { x: number; y: number };
+    started: boolean;
+  } | null>(null);
 
   useEffect(() => {
     const doc = new Y.Doc({ gc: true });
@@ -259,6 +331,118 @@ export function CrdtCanvas({ projectId, className }: CrdtCanvasProps) {
       console.error('upload failed', err);
       window.alert('Image upload failed');
     }
+  };
+
+  const startMove = (e: React.MouseEvent, id: string) => {
+    if (e.button !== 0) return;
+    if (editingElementId === id) return;
+    const el = elements.get(id);
+    if (!el || scale <= 0) return;
+    // Suppress the native text-selection drag the browser would start on
+    // mousedown — we're translating the element, not selecting its content.
+    e.preventDefault();
+    e.stopPropagation();
+    setSelectedElementId(id);
+    moveRef.current = {
+      id,
+      startX: e.clientX,
+      startY: e.clientY,
+      scale,
+      origin: { x: el.x, y: el.y },
+      started: false,
+    };
+
+    const onMove = (ev: MouseEvent) => {
+      const m = moveRef.current;
+      if (!m) return;
+      const doc = docRef.current;
+      if (!doc) return;
+      const dx = (ev.clientX - m.startX) / m.scale;
+      const dy = (ev.clientY - m.startY) / m.scale;
+      // 4px screen-pixel threshold before we consider it a drag.
+      if (!m.started && Math.hypot(ev.clientX - m.startX, ev.clientY - m.startY) < 4) return;
+      m.started = true;
+      doc.transact(() => {
+        const yEl = doc.getMap<Y.Map<unknown>>('elements').get(m.id);
+        if (!yEl) return;
+        yEl.set('x', m.origin.x + dx);
+        yEl.set('y', m.origin.y + dy);
+      });
+    };
+
+    const onUp = () => {
+      moveRef.current = null;
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  };
+
+  const startResize = (
+    e: React.MouseEvent,
+    id: string,
+    handle: ResizeHandle,
+  ) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const el = elements.get(id);
+    if (!el || scale <= 0) return;
+    resizeRef.current = {
+      id,
+      handle,
+      startX: e.clientX,
+      startY: e.clientY,
+      scale,
+      origin: { x: el.x, y: el.y, w: el.w, h: el.h },
+    };
+
+    const onMove = (ev: MouseEvent) => {
+      const r = resizeRef.current;
+      if (!r) return;
+      const doc = docRef.current;
+      if (!doc) return;
+      const dx = (ev.clientX - r.startX) / r.scale;
+      const dy = (ev.clientY - r.startY) / r.scale;
+      let { x, y, w, h } = r.origin;
+      const h0 = r.handle;
+
+      if (h0.includes('e')) {
+        w = Math.max(MIN_ELEMENT_SIZE, r.origin.w + dx);
+      } else if (h0.includes('w')) {
+        const maxDx = r.origin.w - MIN_ELEMENT_SIZE;
+        const ddx = Math.min(dx, maxDx);
+        x = r.origin.x + ddx;
+        w = r.origin.w - ddx;
+      }
+      if (h0.includes('s')) {
+        h = Math.max(MIN_ELEMENT_SIZE, r.origin.h + dy);
+      } else if (h0.includes('n')) {
+        const maxDy = r.origin.h - MIN_ELEMENT_SIZE;
+        const ddy = Math.min(dy, maxDy);
+        y = r.origin.y + ddy;
+        h = r.origin.h - ddy;
+      }
+
+      doc.transact(() => {
+        const yEl = doc.getMap<Y.Map<unknown>>('elements').get(r.id);
+        if (!yEl) return;
+        yEl.set('x', x);
+        yEl.set('y', y);
+        yEl.set('w', w);
+        yEl.set('h', h);
+      });
+    };
+
+    const onUp = () => {
+      resizeRef.current = null;
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
   };
 
   const moveElementInStack = (id: string, dir: -1 | 1) => {
@@ -609,12 +793,29 @@ export function CrdtCanvas({ projectId, className }: CrdtCanvasProps) {
         )}
         {slideElements.map(([id, el]) => {
           const isSelected = id === selectedElementId;
+          const handles: { name: ResizeHandle; left: number; top: number; cursor: string }[] = isSelected ? [
+            { name: 'nw', left: -HANDLE_SIZE / 2, top: -HANDLE_SIZE / 2, cursor: 'nw-resize' },
+            { name: 'n', left: el.w / 2 - HANDLE_SIZE / 2, top: -HANDLE_SIZE / 2, cursor: 'n-resize' },
+            { name: 'ne', left: el.w - HANDLE_SIZE / 2, top: -HANDLE_SIZE / 2, cursor: 'ne-resize' },
+            { name: 'e', left: el.w - HANDLE_SIZE / 2, top: el.h / 2 - HANDLE_SIZE / 2, cursor: 'e-resize' },
+            { name: 'se', left: el.w - HANDLE_SIZE / 2, top: el.h - HANDLE_SIZE / 2, cursor: 'se-resize' },
+            { name: 's', left: el.w / 2 - HANDLE_SIZE / 2, top: el.h - HANDLE_SIZE / 2, cursor: 's-resize' },
+            { name: 'sw', left: -HANDLE_SIZE / 2, top: el.h - HANDLE_SIZE / 2, cursor: 'sw-resize' },
+            { name: 'w', left: -HANDLE_SIZE / 2, top: el.h / 2 - HANDLE_SIZE / 2, cursor: 'w-resize' },
+          ] : [];
           return (
+            <React.Fragment key={id}>
             <div
-              key={id}
               onClick={(e) => {
                 e.stopPropagation();
                 setSelectedElementId(id);
+              }}
+              onMouseDown={(e) => startMove(e, id)}
+              onDoubleClick={(e) => {
+                if (el.type !== 'text') return;
+                e.stopPropagation();
+                setSelectedElementId(id);
+                setEditingElementId(id);
               }}
               onContextMenu={(e) => {
                 e.preventDefault();
@@ -631,7 +832,7 @@ export function CrdtCanvas({ projectId, className }: CrdtCanvasProps) {
                 // Text is width-constrained only — let it bleed below the
                 // authored box. Images/shapes still clip to their bounds.
                 overflow: el.type === 'text' ? 'visible' : 'hidden',
-                cursor: 'pointer',
+                cursor: isSelected ? 'move' : 'pointer',
                 outline: isSelected ? '2px solid #3b82f6' : 'none',
                 outlineOffset: 2,
                 ...el.styleOverrides,
@@ -643,24 +844,38 @@ export function CrdtCanvas({ projectId, className }: CrdtCanvasProps) {
                 if (el.content.underline) decorations.push('underline');
                 if (el.content.strikethrough) decorations.push('line-through');
                 const family = el.content.fontFamily as string | undefined;
+                const html = (el.content.html as string) ?? (el.content.text as string) ?? '';
+                const textStyle: React.CSSProperties = {
+                  width: '100%',
+                  // Height is intentionally unset so wrapped lines extend
+                  // below the box rather than getting clipped.
+                  fontSize: LEVEL_FONT_SIZE[level],
+                  fontWeight: el.content.bold ? 700 : 400,
+                  fontStyle: el.content.italic ? 'italic' : 'normal',
+                  textDecoration: decorations.length ? decorations.join(' ') : 'none',
+                  fontFamily: family ? `"${family}", sans-serif` : undefined,
+                };
+                if (editingElementId === id) {
+                  return (
+                    <InlineTextEditor
+                      initialHtml={html}
+                      style={textStyle}
+                      className="crdt-text-el"
+                      onCommit={(next) => {
+                        if (next !== html) patchElementContent(id, { html: next });
+                        setEditingElementId(null);
+                      }}
+                      onCancel={() => setEditingElementId(null)}
+                    />
+                  );
+                }
                 return (
                   <div
                     className="crdt-text-el"
-                    style={{
-                      width: '100%',
-                      // Height is intentionally unset so wrapped lines extend
-                      // below the box rather than getting clipped.
-                      fontSize: LEVEL_FONT_SIZE[level],
-                      fontWeight: el.content.bold ? 700 : 400,
-                      fontStyle: el.content.italic ? 'italic' : 'normal',
-                      textDecoration: decorations.length ? decorations.join(' ') : 'none',
-                      fontFamily: family ? `"${family}", sans-serif` : undefined,
-                    }}
+                    style={textStyle}
                     // Content is authored by the AI system, not raw user input
                     // eslint-disable-next-line react/no-danger
-                    dangerouslySetInnerHTML={{
-                      __html: (el.content.html as string) ?? (el.content.text as string) ?? '',
-                    }}
+                    dangerouslySetInnerHTML={{ __html: html }}
                   />
                 );
               })()}
@@ -688,6 +903,39 @@ export function CrdtCanvas({ projectId, className }: CrdtCanvasProps) {
                 />
               )}
             </div>
+            {handles.length > 0 && (
+              <div
+                style={{
+                  position: 'absolute',
+                  left: el.x,
+                  top: el.y,
+                  width: el.w,
+                  height: el.h,
+                  pointerEvents: 'none',
+                  zIndex: 10,
+                }}
+              >
+                {handles.map((h) => (
+                  <div
+                    key={h.name}
+                    onMouseDown={(e) => startResize(e, id, h.name)}
+                    style={{
+                      position: 'absolute',
+                      left: h.left,
+                      top: h.top,
+                      width: HANDLE_SIZE,
+                      height: HANDLE_SIZE,
+                      backgroundColor: '#ffffff',
+                      border: '2px solid #3b82f6',
+                      borderRadius: 2,
+                      cursor: h.cursor,
+                      pointerEvents: 'auto',
+                    }}
+                  />
+                ))}
+              </div>
+            )}
+            </React.Fragment>
           );
         })}
       </div>
