@@ -317,17 +317,26 @@ export function CrdtCanvas({ projectId, className }: CrdtCanvasProps) {
     // text
     const level = getTextLevel(el.content);
     const flag = (key: string) => Boolean(el.content[key]);
-    const badge = (label: string, on: boolean) => (
-      <span
-        className={`inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-bold border ${
-          on
-            ? 'bg-primary text-primary-foreground border-primary'
-            : 'bg-transparent text-muted-foreground border-border'
-        }`}
-      >
-        {label}
-      </span>
-    );
+    const toggle = (key: string) =>
+      patchElementContent(selectedElementId, { [key]: !flag(key) });
+    const badge = (label: string, key: string, fontStyle?: React.CSSProperties) => {
+      const on = flag(key);
+      return (
+        <button
+          type="button"
+          onClick={() => toggle(key)}
+          title={`Toggle ${key}`}
+          style={fontStyle}
+          className={`inline-flex items-center justify-center w-6 h-6 rounded text-[11px] font-bold border transition-colors ${
+            on
+              ? 'bg-primary text-primary-foreground border-primary'
+              : 'bg-transparent text-muted-foreground border-border hover:bg-muted/50'
+          }`}
+        >
+          {label}
+        </button>
+      );
+    };
     return (
       <>
         <select
@@ -342,10 +351,10 @@ export function CrdtCanvas({ projectId, className }: CrdtCanvasProps) {
           <option value="h3">Heading 3</option>
         </select>
         <span className="ml-2 inline-flex items-center gap-1">
-          {badge('B', flag('bold'))}
-          {badge('I', flag('italic'))}
-          {badge('U', flag('underline'))}
-          {badge('S', flag('strikethrough'))}
+          {badge('B', 'bold', { fontWeight: 700 })}
+          {badge('I', 'italic', { fontStyle: 'italic' })}
+          {badge('U', 'underline', { textDecoration: 'underline' })}
+          {badge('S', 'strikethrough', { textDecoration: 'line-through' })}
         </span>
         {reorderControls}
       </>
