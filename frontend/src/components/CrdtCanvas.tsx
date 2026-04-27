@@ -14,7 +14,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import * as Y from 'yjs';
 import { WebsocketProvider } from 'y-websocket';
 import { IndexeddbPersistence } from 'y-indexeddb';
-import { getAccessToken } from '../api';
+import api, { getAccessToken } from '../api';
 
 type ElementType = 'text' | 'image' | 'shape';
 type TextLevel = 'h1' | 'h2' | 'h3' | 'body';
@@ -147,6 +147,9 @@ export function CrdtCanvas({ projectId, className }: CrdtCanvasProps) {
   const [currentSlideIndex, setCurrentSlideIndex] = useState(0);
   const [wsStatus, setWsStatus] = useState<WsStatus>('connecting');
   const [selectedElementId, setSelectedElementId] = useState<string | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ id: string; x: number; y: number } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const pendingUploadIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     const doc = new Y.Doc({ gc: true });
@@ -206,6 +209,58 @@ export function CrdtCanvas({ projectId, className }: CrdtCanvasProps) {
     });
   };
 
+  const deleteElement = (id: string) => {
+    const doc = docRef.current;
+    if (!doc) return;
+    doc.transact(() => {
+      doc.getMap<Y.Map<unknown>>('elements').delete(id);
+    });
+    setSelectedElementId((cur) => (cur === id ? null : cur));
+    setContextMenu((cur) => (cur?.id === id ? null : cur));
+  };
+
+  const editImageUrl = (id: string) => {
+    const doc = docRef.current;
+    if (!doc) return;
+    const yEl = doc.getMap<Y.Map<unknown>>('elements').get(id);
+    const cur = (yEl?.get('content') as Record<string, unknown> | undefined)?.url as string | undefined;
+    const next = window.prompt('Image URL', cur ?? '');
+    if (next === null) return;
+    patchElementContent(id, { url: next });
+  };
+
+  const editShapeFill = (id: string) => {
+    const doc = docRef.current;
+    if (!doc) return;
+    const yEl = doc.getMap<Y.Map<unknown>>('elements').get(id);
+    const cur = (yEl?.get('content') as Record<string, unknown> | undefined)?.fill as string | undefined;
+    const next = window.prompt('Shape fill color (hex, rgb, css color)', cur ?? '#e2e8f0');
+    if (next === null) return;
+    patchElementContent(id, { fill: next });
+  };
+
+  const triggerImageUpload = (id: string) => {
+    pendingUploadIdRef.current = id;
+    fileInputRef.current?.click();
+  };
+
+  const onUploadFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    const targetId = pendingUploadIdRef.current;
+    pendingUploadIdRef.current = null;
+    e.target.value = '';
+    if (!file || !targetId) return;
+    try {
+      const res = await api.post<{ url: string }>('/uploads', file, {
+        headers: { 'Content-Type': file.type },
+      });
+      patchElementContent(targetId, { url: res.data.url });
+    } catch (err) {
+      console.error('upload failed', err);
+      window.alert('Image upload failed');
+    }
+  };
+
   const moveElementInStack = (id: string, dir: -1 | 1) => {
     const doc = docRef.current;
     if (!doc) return;
@@ -246,6 +301,21 @@ export function CrdtCanvas({ projectId, className }: CrdtCanvasProps) {
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
+
+  // Dismiss the right-click menu on outside click or Escape.
+  useEffect(() => {
+    if (!contextMenu) return;
+    const onDocClick = () => setContextMenu(null);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setContextMenu(null);
+    };
+    document.addEventListener('mousedown', onDocClick);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDocClick);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [contextMenu]);
 
   // Horizontal-scroll slide navigation. Non-passive so we can preventDefault.
   useEffect(() => {
@@ -546,6 +616,12 @@ export function CrdtCanvas({ projectId, className }: CrdtCanvasProps) {
                 e.stopPropagation();
                 setSelectedElementId(id);
               }}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setSelectedElementId(id);
+                setContextMenu({ id, x: e.clientX, y: e.clientY });
+              }}
               style={{
                 position: 'absolute',
                 left: el.x,
@@ -612,6 +688,68 @@ export function CrdtCanvas({ projectId, className }: CrdtCanvasProps) {
           );
         })}
       </div>
+
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml"
+        className="hidden"
+        onChange={onUploadFileSelected}
+      />
+
+      {contextMenu && (() => {
+        const el = elements.get(contextMenu.id);
+        if (!el) return null;
+        const id = contextMenu.id;
+        const itemClass =
+          'w-full text-left px-3 py-1.5 text-[12px] text-foreground hover:bg-muted/60';
+        const dangerClass =
+          'w-full text-left px-3 py-1.5 text-[12px] text-red-600 hover:bg-red-500/10';
+        return (
+          <div
+            className="fixed z-50 min-w-[160px] rounded-md border border-border bg-card shadow-lg py-1"
+            style={{ left: contextMenu.x, top: contextMenu.y }}
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+            onContextMenu={(e) => e.preventDefault()}
+          >
+            {el.type === 'image' && (
+              <>
+                <button
+                  type="button"
+                  className={itemClass}
+                  onClick={() => { editImageUrl(id); setContextMenu(null); }}
+                >
+                  Edit URL
+                </button>
+                <button
+                  type="button"
+                  className={itemClass}
+                  onClick={() => { triggerImageUpload(id); setContextMenu(null); }}
+                >
+                  Upload image
+                </button>
+              </>
+            )}
+            {el.type === 'shape' && (
+              <button
+                type="button"
+                className={itemClass}
+                onClick={() => { editShapeFill(id); setContextMenu(null); }}
+              >
+                Edit shape
+              </button>
+            )}
+            <button
+              type="button"
+              className={dangerClass}
+              onClick={() => { deleteElement(id); setContextMenu(null); }}
+            >
+              Delete
+            </button>
+          </div>
+        );
+      })()}
     </div>
   );
 }
