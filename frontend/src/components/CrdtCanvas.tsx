@@ -628,7 +628,9 @@ export function CrdtCanvas({ projectId, className }: CrdtCanvasProps) {
                 top: el.y,
                 width: el.w,
                 height: el.h,
-                overflow: 'hidden',
+                // Text is width-constrained only — let it bleed below the
+                // authored box. Images/shapes still clip to their bounds.
+                overflow: el.type === 'text' ? 'visible' : 'hidden',
                 cursor: 'pointer',
                 outline: isSelected ? '2px solid #3b82f6' : 'none',
                 outlineOffset: 2,
@@ -646,7 +648,8 @@ export function CrdtCanvas({ projectId, className }: CrdtCanvasProps) {
                     className="crdt-text-el"
                     style={{
                       width: '100%',
-                      height: '100%',
+                      // Height is intentionally unset so wrapped lines extend
+                      // below the box rather than getting clipped.
                       fontSize: LEVEL_FONT_SIZE[level],
                       fontWeight: el.content.bold ? 700 : 400,
                       fontStyle: el.content.italic ? 'italic' : 'normal',
