@@ -72,7 +72,10 @@ chatRouter.post('/chat/stream', requireAuth, async (req: AuthRequest, res: expre
                     sendEvent('tool_call', event.call);
                     break;
                 case 'tool_result':
-                    if (event.mutated) mutatedAny = true;
+                    if (event.mutated) {
+                        mutatedAny = true;
+                        sendEvent('presentation_updated', {});
+                    }
                     sendEvent('tool_result', { id: event.id, result: event.result });
                     break;
                 case 'error':

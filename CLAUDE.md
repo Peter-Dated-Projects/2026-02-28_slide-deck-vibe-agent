@@ -1,4 +1,8 @@
-# SlideDeckVibeAgent
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## SlideDeckVibeAgent
 
 AI slide deck tool. User chats with LLM agent that edits slides in real time via Yjs CRDT.
 
@@ -6,112 +10,147 @@ AI slide deck tool. User chats with LLM agent that edits slides in real time via
 
 **Runtime:** Bun (`bun install`, `bun add`, `bun run`). Tests: `bun test` or `bun run test` (Jest).
 
----
+## Development Commands
 
-## Root
+**Root commands (run from project root):**
+- `bun run dev` - Start entire ecosystem (Docker containers, backend, frontend)
+- `bun run down` - Stop Docker containers
+- `bun run build` - Build frontend for production
+- `bun run typecheck` - Run TypeScript checks in backend
+- `bun run test` - Run backend tests
+- `bun run init:db` - Initialize database
+- `bun run migrate:db` - Run database migrations
 
-- `docker-compose.yml` — local Postgres + Redis + Minio
-- `db/init.sql` — schema (users, projects, `crdt_documents`, `crdt_updates`)
-- `.env.local` / `.env.production` / `.env.staging` / `.env.test` — env configs
-- `DESIGN.md`, `README.md` — docs
+**Backend-specific commands (run from backend/):**
+- `bun run dev` - Start backend in watch mode
+- `bun run test` - Run Jest tests
+- `bun run typecheck` - TypeScript type checking
 
----
+**Frontend-specific commands (run from frontend/):**
+- `bun run dev` - Start Vite dev server
+- `bun run build` - Build for production
+- `bun run preview` - Preview production build
 
-## Backend (`backend/`)
+## Architecture Overview
 
-- `main.ts` — Express + HTTP server bootstrap, mounts WS upgrade handler
+### CRDT-Based Real-Time Collaboration
 
-### `src/config/`
-- `index.ts` — env var loader
+The core innovation is real-time slide editing using Yjs CRDTs:
 
-### `src/middleware/`
-- `auth.ts` — JWT auth middleware
+- **Y.Doc Structure**: Three main maps - `theme` (Y.Map), `slides` (Y.Array), `elements` (Y.Map)
+- **AI Agent Integration**: Agent connects as WebSocket peer, all transactions tagged with `agent_id`
+- **Persistence**: PostgreSQL-backed CRDT persistence with auto-compaction at 128 updates
+- **Canvas Dimensions**: Fixed 1920x1080 pixel canvas with absolute positioning
 
-### `src/controllers/`
-- `auth.ts` — login / signup / Google OAuth
-- `user.ts` — user profile endpoints
-- `project.ts` — project CRUD
+### Backend Core Components
 
-### `src/routes/`
-- `crdtWebsocket.ts` — Yjs sync + awareness over `ws`, JWT auth, per-project doc cache
-- `uploads.ts` — `POST /api/uploads` raw binary → Minio → returns URL
+**DI Container (`src/core/container.ts`)**
+- Dependency injection for database, storage, LLM, and cache services
+- Environment-based provider selection (local vs production)
+- Local: MinIO, Ollama/DashScope; Production: GCP, DashScope
 
-### `src/services/`
-- `agent.ts` — LLM agent orchestration; runs tool-call loop, connects as WS peer
-- `contextManager.ts` — builds prompt context from CRDT doc state
-- `projectDeck.ts` — project/deck DB ops
-- `previewRenderer.worker.cjs` — slide thumbnail renderer worker
+**CRDT System (`src/core/crdt/`)**
+- `schema.ts` - Y.Doc shape definitions and type interfaces
+- `persistence.ts` - PostgreSQL CRDT storage with snapshot compaction
+- `crdtTools.ts` - Atomic AI tools for slide manipulation
+- `crdtExecutor.ts` - Applies tool calls as Y.Doc transactions
+- `layout.ts` - Logical slot to pixel layout conversion
 
-### `src/core/`
-- `container.ts` — DI container (wires providers to interfaces)
-- `messageSanitizer.ts` — strips/cleans LLM message content
-- `agentTypes.ts` — shared agent type defs
+**Agent Orchestration (`src/services/agent.ts`)**
+- LLM tool-call loop with CRDT context injection
+- 12-turn conversation limit for safety
+- Real-time event streaming to frontend
 
-### `src/core/crdt/`
-- `schema.ts` — Y.Doc shape helpers (theme, slides, elements)
-- `persistence.ts` — `PgCrdtPersistence`: load/append/snapshot (compacts at 128 updates)
-- `docManager.ts` — per-project Y.Doc cache and lifecycle
-- `crdtTools.ts` — atomic AI tools (`add_element`, `update_element`, `delete_element`, etc.)
-- `crdtExecutor.ts` — applies tool calls as Y.Doc transactions tagged with `agent_id`
-- `layout.ts` — logical-slot → pixel layout engine
+### Element Types and Canvas Layout
 
-### `src/core/interfaces/`
-- `ICacheService.ts`, `IDatabaseService.ts`, `ILLMService.ts`, `IStorageService.ts` — provider contracts
+**Element Types:**
+- `text` - HTML content with typography controls (levels h1-h3, body)
+- `image` - URL-based images (never base64)
+- `shape` - Geometric shapes with fill colors and border radius
 
-### `src/infrastructure/providers/`
-- `cache/RedisCacheProvider.ts`
-- `db/PgDatabaseProvider.ts`
-- `llm/GemmaProvider.ts`, `llm/QwenProvider.ts`, `llm/toolCallParser.ts`
-- `storage/MinioProvider.ts`, `storage/GCPStorageProvider.ts`
+**Layout Slots (1920x1080 canvas):**
+- `title` - Full-width top (h=220, y=120)
+- `heading` - Full-width header (h=180, y=120)
+- `subtitle` - Full-width subheader (h=120, y=380)
+- `body/content` - Main content area (h=680, y=300)
+- `left/right` - Two-column layout (w=864 each)
+- `image_left/image_right` - Large image placement (w=816, h=720)
 
-### `scripts/`
-- `init-db.ts`, `manage-db.ts`, `migrate-db.ts`, `migrate.js`, `check-db.ts` — DB lifecycle
-- `sync-s3-users.ts` — user storage sync
-- `crdt/two-clients.ts` — CRDT convergence test
-- `crdt/snapshot.ts` — snapshot round-trip test
+### Frontend Architecture
 
-### `src/tests/`
-- `db.test.ts`, `storage.test.ts` — infra integration
-- `ollama-*`, `qwen-*` — LLM provider tests
-- `core/messageSanitizer.test.ts`, `core/toolCallParser.test.ts`
+**CRDT Integration (`src/components/CrdtCanvas.tsx`)**
+- Connects to backend via `y-websocket`
+- Local persistence via `y-indexeddb`
+- Renders elements from flat CRDT map structure
 
----
+**Real-Time Features:**
+- WebSocket-based synchronization
+- Awareness protocol for cursor/selection sharing
+- Undo/Redo with "Undo AI" capability via `agent_id` tags
 
-## Frontend (`frontend/`)
+### Database Schema
 
-- `vite.config.ts`, `tailwind.config.cjs`, `tsconfig.json` — build config
-- `index.html`, `src/main.tsx`, `src/App.tsx` — entry
+Key tables:
+- `users` - User authentication and profiles
+- `projects` - Project metadata and ownership
+- `conversations` - Chat history and context
+- `crdt_documents` - Y.Doc snapshots
+- `crdt_updates` - Incremental CRDT updates
 
-### `src/api/`
-- `index.ts` — backend HTTP client
+### Storage Strategy
 
-### `src/contexts/`
-- `AuthContext.tsx` — auth state + JWT
+**Images**: URL strings only in CRDT, binary storage in MinIO/GCP
+**Uploads**: POST /api/uploads → raw binary → storage → returns URL
+**No Legacy**: Vibe V3 HTML deck engine fully removed
 
-### `src/hooks/`
-- `usePersistentWidth.ts` — localStorage-backed sidebar width
+### Testing Strategy
 
-### `src/lib/`
-- `conversationActivity.ts` — chat activity helpers
-- `gemmaOutputParser.ts` — parses streaming Gemma tool calls
+**Backend Tests:**
+- Infrastructure: `db.test.ts`, `storage.test.ts`
+- LLM providers: `ollama-*`, `qwen-*` test files
+- CRDT: `crdt/two-clients.ts`, `crdt/snapshot.ts` convergence tests
 
-### `src/components/`
-- `CrdtCanvas.tsx` — Yjs canvas: `y-indexeddb` + `y-websocket`, renders elements from flat map
-- `GoogleAuthWrapper.tsx` — Google OAuth provider
-- `chat/ChatMessage.tsx`, `chat/TaskListBar.tsx`
-- `dashboard/ProjectCard.tsx`, `dashboard/TemplateCard.tsx`
-- `layout/DashboardLayout.tsx`, `layout/Sidebar.tsx`
+**CRDT Validation:**
+- Two-client convergence testing
+- Snapshot round-trip validation
+- 128-update compaction boundary testing
 
-### `src/pages/`
-- `LoginPage.tsx`, `SetupProfilePage.tsx`, `ChatPage.tsx`
-- `dashboard/ProjectsPage.tsx`, `dashboard/ProfilePage.tsx`, `dashboard/SettingsPage.tsx`
+### Authentication & Security
 
----
+**JWT Strategy:** Hybrid access tokens + HttpOnly refresh rotation
+**WebSocket Auth:** JWT-based connection authorization per project
+**Content Isolation:** AI-generated content served from isolated origins
+**Agent Safety:** Recursive tool-call limits, "Denial of Wallet" protection
 
-## Architecture Notes
+### Environment Configuration
 
-- CRDT: flat `theme` Y.Map + `slides` Y.Array + `elements` Y.Map, all `Y.Doc({ gc: true })`
-- AI agent connects as a WS peer; every txn tagged with `agent_id` for "Undo AI"
-- Images: URL strings only in CRDT, never bytes/base64
-- Snapshot threshold: 128 updates → auto-compact
-- No legacy HTML deck engine (Vibe V3 fully removed)
+**Required .env files:**
+- `.env.local` - Local development
+- `.env.production` - Production deployment
+- `.env.staging` - Staging environment
+- `.env.test` - Test environment
+
+**Key Variables:**
+- Database: PostgreSQL connection details
+- Storage: MinIO (local) / GCP (production)
+- LLM: DashScope API key or Ollama endpoint
+- Redis: Cache connection string
+
+### Important Development Notes
+
+**CRDT Operations:**
+- Always call `read_presentation()` before structural changes
+- Create slides with `create_slide()` before adding elements
+- Use `add_element()`, `update_element()`, `delete_element()` for content
+- Keep task checklist current with `create_tasks()` and `update_task_status()`
+
+**Image Handling:**
+- Never store images as base64 in CRDT
+- Always use URLs pointing to MinIO/GCP storage
+- Upload via POST /api/uploads endpoint
+
+**Agent Development:**
+- 1920x1080 canvas with 96px margins
+- All positioning is absolute pixel coordinates
+- Font support includes system fonts + Google Fonts subset
+- Agent connects as WebSocket peer for real-time collaboration

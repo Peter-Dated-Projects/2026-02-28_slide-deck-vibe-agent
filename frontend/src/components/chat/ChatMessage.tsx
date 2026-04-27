@@ -127,6 +127,86 @@ const ToolBlockView: React.FC<ToolBlockViewProps> = ({ call, result }) => {
     );
 };
 
+interface ToolGroupProps {
+    toolName: string;
+    calls: { call: { id: string; name: string; args: Record<string, unknown> }; result?: string }[];
+}
+
+const ToolGroupView: React.FC<ToolGroupProps> = ({ toolName, calls }) => {
+    const [expanded, setExpanded] = useState(false);
+    const [showDetails, setShowDetails] = useState(false);
+    const friendly = TOOL_LABELS[toolName] ?? toolName;
+    const pendingCount = calls.filter(({ result }) => result === undefined).length;
+    const completedCount = calls.length - pendingCount;
+
+    const getStatusText = () => {
+        if (pendingCount > 0) {
+            return `${friendly} (${completedCount}/${calls.length} completed)`;
+        }
+        return calls.length === 1 ? friendly : `${friendly} (${calls.length} times)`;
+    };
+
+    return (
+        <div className="mb-1 w-full">
+            <button
+                onClick={() => setExpanded((v) => !v)}
+                className="flex items-center gap-2 text-[10px] font-medium px-2.5 py-1 rounded-lg transition-all duration-200 w-full border border-indigo-500/40 bg-violet-500/10 hover:bg-violet-500/15 text-muted-foreground hover:text-foreground"
+            >
+                <div
+                    className={cn(
+                        "w-3 h-3 flex-shrink-0 flex items-center justify-center rounded bg-indigo-500/20 text-indigo-400",
+                        pendingCount > 0 && "animate-pulse"
+                    )}
+                >
+                    <Wrench className="w-2 h-2" />
+                </div>
+                <span className="flex-1 text-left break-words [overflow-wrap:anywhere]">
+                    {getStatusText()}
+                </span>
+                {expanded ? <ChevronDown className="w-2.5 h-2.5" /> : <ChevronRight className="w-2.5 h-2.5" />}
+            </button>
+            {expanded && (
+                <div className="mt-1.5 ml-2 pl-3 border-l-2 border-indigo-500/40 text-[10px] leading-relaxed text-muted-foreground space-y-1">
+                    {calls.length > 1 && (
+                        <button
+                            onClick={() => setShowDetails((v) => !v)}
+                            className="text-[9px] text-indigo-400 hover:text-indigo-300 underline underline-offset-2"
+                        >
+                            {showDetails ? "Hide details" : "Show individual calls"}
+                        </button>
+                    )}
+                    {calls.length === 1 || showDetails ? (
+                        <div className="space-y-2">
+                            {calls.map(({ call, result }, index) => (
+                                <div key={call.id} className="space-y-1">
+                                    {calls.length > 1 && (
+                                        <div className="text-[8px] text-muted-foreground uppercase tracking-wider">
+                                            Call {index + 1}
+                                        </div>
+                                    )}
+                                    <pre className="bg-background/50 rounded p-2 font-mono text-[9px] overflow-x-auto whitespace-pre-wrap">
+{JSON.stringify(call.args, null, 2)}
+                                    </pre>
+                                    {result !== undefined && (
+                                        <div className="bg-background/50 rounded p-2 font-mono text-[9px] overflow-x-auto">
+                                            <span className="text-muted-foreground uppercase text-[8px] tracking-wider">Result</span>
+                                            <pre className="mt-1 text-foreground whitespace-pre-wrap">{prettyResult(result)}</pre>
+                                        </div>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                    ) : (
+                        <div className="text-[9px] text-muted-foreground">
+                            {calls.length} tool calls executed
+                        </div>
+                    )}
+                </div>
+            )}
+        </div>
+    );
+};
+
 function prettyResult(result: string): string {
     try {
         return JSON.stringify(JSON.parse(result), null, 2);
@@ -270,30 +350,93 @@ const AssistantBody: React.FC<{ message: ChatMessageData }> = ({ message }) => {
             </div>
         );
     }
+
+    // Group consecutive tool calls of the same type
+    const groupedBlocks = groupConsecutiveToolCalls(blocks, resultsById);
+
     return (
         <div className="space-y-3 w-full">
-            {blocks.map((block, i) => {
-                if (block.type === "text") return <Markdown key={`t-${i}`} content={block.text} />;
-                if (block.type === "thinking") {
+            {groupedBlocks.map((item, i) => {
+                if (item.type === "text") return <Markdown key={`t-${i}`} content={item.content} />;
+                if (item.type === "thinking") {
                     return (
                         <ThinkingBlockView
                             key={`th-${i}`}
-                            text={block.text}
-                            startTime={block.startTime}
-                            endTime={block.endTime}
+                            text={item.content.text}
+                            startTime={item.content.startTime}
+                            endTime={item.content.endTime}
                         />
                     );
                 }
-                if (block.type === "tool_call") {
-                    return (
-                        <ToolBlockView key={`tc-${i}-${block.call.id}`} call={block.call} result={resultsById.get(block.call.id)} />
-                    );
+                if (item.type === "tool_group") {
+                    if (item.calls.length === 1) {
+                        const { call, result } = item.calls[0];
+                        return <ToolBlockView key={`tc-${i}-${call.id}`} call={call} result={result} />;
+                    }
+                    return <ToolGroupView key={`tg-${i}-${item.toolName}`} toolName={item.toolName} calls={item.calls} />;
                 }
-                return null; // tool_result rendered alongside its tool_call
+                return null;
             })}
         </div>
     );
 };
+
+type GroupedBlock =
+    | { type: "text"; content: string }
+    | { type: "thinking"; content: { text: string; startTime: number; endTime?: number } }
+    | { type: "tool_group"; toolName: string; calls: { call: { id: string; name: string; args: Record<string, unknown> }; result?: string }[] };
+
+function groupConsecutiveToolCalls(blocks: AssistantBlock[], resultsById: Map<string, string>): GroupedBlock[] {
+    const grouped: GroupedBlock[] = [];
+    let i = 0;
+
+    while (i < blocks.length) {
+        const block = blocks[i];
+
+        if (block.type === "text") {
+            grouped.push({ type: "text", content: block.text });
+            i++;
+        } else if (block.type === "thinking") {
+            grouped.push({
+                type: "thinking",
+                content: { text: block.text, startTime: block.startTime, endTime: block.endTime }
+            });
+            i++;
+        } else if (block.type === "tool_call") {
+            // Start a new tool group
+            const toolName = block.call.name;
+            const calls: { call: { id: string; name: string; args: Record<string, unknown> }; result?: string }[] = [];
+
+            // Collect ALL consecutive tool calls of the same type, skipping tool_result blocks
+            let j = i;
+            while (j < blocks.length) {
+                const currentBlock = blocks[j];
+                if (currentBlock.type === "tool_result") {
+                    // Skip tool_result blocks as they're handled separately
+                    j++;
+                    continue;
+                } else if (currentBlock.type === "tool_call" && currentBlock.call.name === toolName) {
+                    calls.push({
+                        call: currentBlock.call,
+                        result: resultsById.get(currentBlock.call.id)
+                    });
+                    j++;
+                } else {
+                    // Stop when we hit a different tool call or text/thinking block
+                    break;
+                }
+            }
+
+            grouped.push({ type: "tool_group", toolName, calls });
+            i = j; // Move index to next unprocessed block
+        } else {
+            // Skip tool_result blocks as they're handled with their corresponding tool_calls
+            i++;
+        }
+    }
+
+    return grouped;
+}
 
 function normalizeAssistantBlocks(message: ChatMessageData): AssistantBlock[] {
     const c = message.content;
