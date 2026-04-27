@@ -18,6 +18,7 @@ import { getAccessToken } from '../api';
 
 type ElementType = 'text' | 'image' | 'shape';
 type TextLevel = 'h1' | 'h2' | 'h3' | 'body';
+type ShapeKind = 'rectangle' | 'circle';
 
 interface ElementShape {
   type: ElementType;
@@ -26,6 +27,7 @@ interface ElementShape {
   y: number;
   w: number;
   h: number;
+  z: number;
   content: Record<string, unknown>;
   styleOverrides?: Record<string, string>;
 }
@@ -47,13 +49,6 @@ const LEVEL_FONT_SIZE: Record<TextLevel, number> = {
   body: 24,
 };
 
-const LEVEL_LABEL: Record<TextLevel, string> = {
-  h1: 'Heading 1',
-  h2: 'Heading 2',
-  h3: 'Heading 3',
-  body: 'Body',
-};
-
 function readAllElements(doc: Y.Doc): Map<string, ElementShape> {
   const result = new Map<string, ElementShape>();
   const yElements = doc.getMap<Y.Map<unknown>>('elements');
@@ -65,6 +60,7 @@ function readAllElements(doc: Y.Doc): Map<string, ElementShape> {
       y: (yEl.get('y') as number) ?? 0,
       w: (yEl.get('w') as number) ?? 0,
       h: (yEl.get('h') as number) ?? 0,
+      z: (yEl.get('z') as number) ?? 0,
       content: (yEl.get('content') as Record<string, unknown>) ?? {},
       styleOverrides: yEl.get('styleOverrides') as Record<string, string> | undefined,
     });
@@ -86,6 +82,11 @@ function getTextLevel(content: Record<string, unknown>): TextLevel {
   return v === 'h1' || v === 'h2' || v === 'h3' || v === 'body' ? v : 'body';
 }
 
+function getShapeKind(content: Record<string, unknown>): ShapeKind {
+  const v = content.shape;
+  return v === 'circle' ? 'circle' : 'rectangle';
+}
+
 interface CrdtCanvasProps {
   projectId: string;
   className?: string;
@@ -93,6 +94,7 @@ interface CrdtCanvasProps {
 
 export function CrdtCanvas({ projectId, className }: CrdtCanvasProps) {
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const docRef = useRef<Y.Doc | null>(null);
   const [scale, setScale] = useState(0);
   const [elements, setElements] = useState<Map<string, ElementShape>>(new Map());
   const [slideOrder, setSlideOrder] = useState<string[]>([]);
@@ -103,6 +105,7 @@ export function CrdtCanvas({ projectId, className }: CrdtCanvasProps) {
 
   useEffect(() => {
     const doc = new Y.Doc({ gc: true });
+    docRef.current = doc;
 
     const persistence = new IndexeddbPersistence(`crdt-${projectId}`, doc);
 
@@ -143,8 +146,49 @@ export function CrdtCanvas({ projectId, className }: CrdtCanvasProps) {
       provider.destroy();
       persistence.destroy();
       doc.destroy();
+      docRef.current = null;
     };
   }, [projectId]);
+
+  const patchElementContent = (id: string, patch: Record<string, unknown>) => {
+    const doc = docRef.current;
+    if (!doc) return;
+    doc.transact(() => {
+      const yEl = doc.getMap<Y.Map<unknown>>('elements').get(id);
+      if (!yEl) return;
+      const cur = (yEl.get('content') as Record<string, unknown>) ?? {};
+      yEl.set('content', { ...cur, ...patch });
+    });
+  };
+
+  const moveElementInStack = (id: string, dir: -1 | 1) => {
+    const doc = docRef.current;
+    if (!doc) return;
+    doc.transact(() => {
+      const yElements = doc.getMap<Y.Map<unknown>>('elements');
+      const target = yElements.get(id);
+      if (!target) return;
+      const slideId = target.get('slide_id') as string;
+      const peers: { id: string; yEl: Y.Map<unknown>; z: number }[] = [];
+      for (const [pid, yEl] of yElements) {
+        if ((yEl.get('slide_id') as string) === slideId) {
+          peers.push({ id: pid, yEl, z: (yEl.get('z') as number) ?? 0 });
+        }
+      }
+      // Sort by current z (stable iteration order breaks ties for unset z).
+      peers.sort((a, b) => a.z - b.z);
+      // Normalize so every peer has a unique sequential z, preserving display order.
+      peers.forEach((p, i) => {
+        if (p.z !== i) p.yEl.set('z', i);
+        p.z = i;
+      });
+      const idx = peers.findIndex((p) => p.id === id);
+      const swap = idx + dir;
+      if (idx < 0 || swap < 0 || swap >= peers.length) return;
+      peers[idx].yEl.set('z', peers[swap].z);
+      peers[swap].yEl.set('z', peers[idx].z);
+    });
+  };
 
   // Scale factor: fit 1920×1080 into the container
   useEffect(() => {
@@ -186,8 +230,15 @@ export function CrdtCanvas({ projectId, className }: CrdtCanvasProps) {
 
   const currentSlideId = slideOrder[currentSlideIndex];
   const slideElements = currentSlideId
-    ? [...elements.entries()].filter(([, el]) => el.slide_id === currentSlideId)
+    ? [...elements.entries()]
+      .filter(([, el]) => el.slide_id === currentSlideId)
+      .sort(([, a], [, b]) => (a.z ?? 0) - (b.z ?? 0))
     : [];
+  const selectedStackIndex = selectedElementId
+    ? slideElements.findIndex(([id]) => id === selectedElementId)
+    : -1;
+  const canMoveDown = selectedStackIndex > 0;
+  const canMoveUp = selectedStackIndex >= 0 && selectedStackIndex < slideElements.length - 1;
 
   const bgColor = theme.variables['--vibe-bg'] ?? '#ffffff';
   const mh = (SLIDE_W * (scale - 1)) / 2;
@@ -202,19 +253,67 @@ export function CrdtCanvas({ projectId, className }: CrdtCanvasProps) {
 
   const renderInfoBar = () => {
     const el = selectedIsOnCurrentSlide;
-    if (!el) {
+    if (!el || !selectedElementId) {
       const total = slideOrder.length;
       const label = total === 0
         ? 'No slides'
         : `Slide ${currentSlideIndex + 1} of ${total} — click an element to inspect`;
       return <span className="text-muted-foreground">{label}</span>;
     }
+
+    const reorderControls = (
+      <span className="ml-auto inline-flex items-center gap-1">
+        <button
+          type="button"
+          disabled={!canMoveDown}
+          onClick={() => moveElementInStack(selectedElementId, -1)}
+          title="Send backward"
+          className="px-1.5 h-6 rounded border border-border text-foreground hover:bg-muted/50 disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          ↓
+        </button>
+        <button
+          type="button"
+          disabled={!canMoveUp}
+          onClick={() => moveElementInStack(selectedElementId, 1)}
+          title="Bring forward"
+          className="px-1.5 h-6 rounded border border-border text-foreground hover:bg-muted/50 disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          ↑
+        </button>
+      </span>
+    );
+
+    const selectClass =
+      'h-6 text-[11px] px-1.5 rounded border border-border bg-background text-foreground';
+
     if (el.type === 'image') {
-      return <span className="font-medium text-foreground">Image</span>;
+      return (
+        <>
+          <span className="font-medium text-foreground">Image</span>
+          {reorderControls}
+        </>
+      );
     }
+
     if (el.type === 'shape') {
-      return <span className="font-medium text-foreground">Shape</span>;
+      const kind = getShapeKind(el.content);
+      return (
+        <>
+          <span className="font-medium text-foreground">Shape</span>
+          <select
+            value={kind}
+            onChange={(e) => patchElementContent(selectedElementId, { shape: e.target.value })}
+            className={selectClass}
+          >
+            <option value="rectangle">Rectangle</option>
+            <option value="circle">Circle</option>
+          </select>
+          {reorderControls}
+        </>
+      );
     }
+
     // text
     const level = getTextLevel(el.content);
     const flag = (key: string) => Boolean(el.content[key]);
@@ -231,13 +330,24 @@ export function CrdtCanvas({ projectId, className }: CrdtCanvasProps) {
     );
     return (
       <>
-        <span className="font-medium text-foreground">{LEVEL_LABEL[level]}</span>
-        <span className="ml-3 inline-flex items-center gap-1">
+        <select
+          value={level}
+          onChange={(e) => patchElementContent(selectedElementId, { level: e.target.value })}
+          className={selectClass}
+          title="Text type"
+        >
+          <option value="body">Body</option>
+          <option value="h1">Heading 1</option>
+          <option value="h2">Heading 2</option>
+          <option value="h3">Heading 3</option>
+        </select>
+        <span className="ml-2 inline-flex items-center gap-1">
           {badge('B', flag('bold'))}
           {badge('I', flag('italic'))}
           {badge('U', flag('underline'))}
           {badge('S', flag('strikethrough'))}
         </span>
+        {reorderControls}
       </>
     );
   };
@@ -253,6 +363,21 @@ export function CrdtCanvas({ projectId, className }: CrdtCanvasProps) {
       }}
       className={`w-full h-full flex items-center justify-center overflow-hidden relative outline-none${className ? ` ${className}` : ''}`}
     >
+      {/* Force AI-authored HTML inside text elements to inherit our wrapper's
+          font-size / weight / style / decoration, so changing the level dropdown
+          actually re-styles browser-default tags like <h1>, <h2>, <p>. */}
+      <style>{`
+        .crdt-text-el, .crdt-text-el * {
+          font-size: inherit;
+          font-weight: inherit;
+          font-style: inherit;
+          text-decoration: inherit;
+          line-height: inherit;
+          margin: 0;
+          padding: 0;
+        }
+      `}</style>
+
       {/* Element info bar — top of canvas */}
       <div
         className="absolute top-0 left-0 right-0 z-20 h-8 px-3 flex items-center gap-2 text-[12px] bg-card/80 border-b border-border backdrop-blur-sm"
@@ -364,6 +489,7 @@ export function CrdtCanvas({ projectId, className }: CrdtCanvasProps) {
                 if (el.content.strikethrough) decorations.push('line-through');
                 return (
                   <div
+                    className="crdt-text-el"
                     style={{
                       width: '100%',
                       height: '100%',
@@ -396,7 +522,10 @@ export function CrdtCanvas({ projectId, className }: CrdtCanvasProps) {
                       (el.content.fill as string) ??
                       (el.styleOverrides?.background) ??
                       '#e2e8f0',
-                    borderRadius: (el.content.borderRadius as string | undefined),
+                    borderRadius:
+                      getShapeKind(el.content) === 'circle'
+                        ? '50%'
+                        : (el.content.borderRadius as string | undefined),
                   }}
                 />
               )}

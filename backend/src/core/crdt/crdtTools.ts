@@ -31,7 +31,8 @@ Always call design({action: "read"}) first. If DESIGN.md is empty, fill it in be
         level controls the standardized font size (h1=64, h2=48, h3=32, body=24).
         bold/italic/underline/strikethrough are booleans applied to the whole element.
 - image → content: { url: "https://...", alt?: "..." }  (URL only — never base64)
-- shape → content: { fill: "#3b82f6", borderRadius?: "8px" }
+- shape → content: { fill: "#3b82f6", shape?: 'rectangle'|'circle', borderRadius?: "8px" }
+        shape='circle' renders as a circle (forces border-radius 50%); default is rectangle.
 
 ## Layout slots (1920×1080 canvas, margin=96)
 title       full-width top, h=220, y=120
@@ -282,7 +283,7 @@ function getCrdtToolsRaw(): OpenAIToolShape[] {
                         content: {
                             type: 'object',
                             description:
-                                "Type-specific content. text: {html, level?: 'h1'|'h2'|'h3'|'body', bold?, italic?, underline?, strikethrough?}, image: {url, alt?}, shape: {fill, borderRadius?}.",
+                                "Type-specific content. text: {html, level?: 'h1'|'h2'|'h3'|'body', bold?, italic?, underline?, strikethrough?}, image: {url, alt?}, shape: {fill, shape?: 'rectangle'|'circle', borderRadius?}.",
                             additionalProperties: true,
                         },
                         layout_spec: {
@@ -314,7 +315,7 @@ function getCrdtToolsRaw(): OpenAIToolShape[] {
                             type: 'object',
                             additionalProperties: true,
                             description:
-                                "Replacement content object. text: {html, level?: 'h1'|'h2'|'h3'|'body', bold?, italic?, underline?, strikethrough?}, image: {url, alt?}, shape: {fill, borderRadius?}.",
+                                "Replacement content object. text: {html, level?: 'h1'|'h2'|'h3'|'body', bold?, italic?, underline?, strikethrough?}, image: {url, alt?}, shape: {fill, shape?: 'rectangle'|'circle', borderRadius?}.",
                         },
                         layout_spec: {
                             ...layoutSpecSchema,
