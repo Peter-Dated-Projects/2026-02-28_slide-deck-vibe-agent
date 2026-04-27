@@ -49,6 +49,51 @@ const LEVEL_FONT_SIZE: Record<TextLevel, number> = {
   body: 24,
 };
 
+const SYSTEM_FONTS = [
+  'Arial',
+  'Arial Black',
+  'Comic Sans MS',
+  'Courier New',
+  'Georgia',
+  'Impact',
+  'Tahoma',
+  'Times New Roman',
+  'Trebuchet MS',
+  'Verdana',
+];
+
+const GOOGLE_FONTS = [
+  'Inter',
+  'Lato',
+  'Lora',
+  'Merriweather',
+  'Montserrat',
+  'Noto Sans',
+  'Open Sans',
+  'Oswald',
+  'Pacifico',
+  'Playfair Display',
+  'Raleway',
+  'Roboto',
+  'Roboto Mono',
+  'Roboto Slab',
+  'Source Sans 3',
+];
+
+// Build one Google Fonts CSS2 URL loading 400/700 + italic variants for each family.
+const GOOGLE_FONTS_URL = `https://fonts.googleapis.com/css2?${GOOGLE_FONTS
+  .map((f) => `family=${f.replace(/ /g, '+')}:ital,wght@0,400;0,700;1,400;1,700`)
+  .join('&')}&display=swap`;
+
+// Inject the <link> once per app load.
+if (typeof document !== 'undefined' && !document.getElementById('crdt-google-fonts')) {
+  const link = document.createElement('link');
+  link.id = 'crdt-google-fonts';
+  link.rel = 'stylesheet';
+  link.href = GOOGLE_FONTS_URL;
+  document.head.appendChild(link);
+}
+
 function readAllElements(doc: Y.Doc): Map<string, ElementShape> {
   const result = new Map<string, ElementShape>();
   const yElements = doc.getMap<Y.Map<unknown>>('elements');
@@ -350,6 +395,28 @@ export function CrdtCanvas({ projectId, className }: CrdtCanvasProps) {
           <option value="h2">Heading 2</option>
           <option value="h3">Heading 3</option>
         </select>
+        <select
+          value={(el.content.fontFamily as string) ?? ''}
+          onChange={(e) =>
+            patchElementContent(selectedElementId, {
+              fontFamily: e.target.value || undefined,
+            })
+          }
+          className={selectClass}
+          title="Font"
+        >
+          <option value="">Default</option>
+          <optgroup label="System">
+            {SYSTEM_FONTS.map((f) => (
+              <option key={f} value={f}>{f}</option>
+            ))}
+          </optgroup>
+          <optgroup label="Google Fonts">
+            {GOOGLE_FONTS.map((f) => (
+              <option key={f} value={f}>{f}</option>
+            ))}
+          </optgroup>
+        </select>
         <span className="ml-2 inline-flex items-center gap-1">
           {badge('B', 'bold', { fontWeight: 700 })}
           {badge('I', 'italic', { fontStyle: 'italic' })}
@@ -382,6 +449,7 @@ export function CrdtCanvas({ projectId, className }: CrdtCanvasProps) {
           font-style: inherit;
           text-decoration: inherit;
           line-height: inherit;
+          font-family: inherit;
           margin: 0;
           padding: 0;
         }
@@ -496,6 +564,7 @@ export function CrdtCanvas({ projectId, className }: CrdtCanvasProps) {
                 const decorations: string[] = [];
                 if (el.content.underline) decorations.push('underline');
                 if (el.content.strikethrough) decorations.push('line-through');
+                const family = el.content.fontFamily as string | undefined;
                 return (
                   <div
                     className="crdt-text-el"
@@ -506,6 +575,7 @@ export function CrdtCanvas({ projectId, className }: CrdtCanvasProps) {
                       fontWeight: el.content.bold ? 700 : 400,
                       fontStyle: el.content.italic ? 'italic' : 'normal',
                       textDecoration: decorations.length ? decorations.join(' ') : 'none',
+                      fontFamily: family ? `"${family}", sans-serif` : undefined,
                     }}
                     // Content is authored by the AI system, not raw user input
                     // eslint-disable-next-line react/no-danger
